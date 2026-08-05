@@ -1,0 +1,47 @@
+{
+  "tenants": [
+    {
+      "id": 1,
+      "name": "Demo Company (Global)"
+    }
+  ],
+  "tenant_credentials": [
+    {
+      "tenant_id": 1,
+      "provider": "xero",
+      "client_id": "F375EA8FFBBE4BB68651733467A5DDA8",
+      "client_secret": "pdOMfeJDxZtmr7UvcdINDX5ZibJGueJVM_PxN2dfivg_01KJ",
+      "tenant_identifier": "4cf588ba-14d2-4374-aeba-f11b8153f7c4",
+      "access_token": "eyJhbGciOiJSUzI1NiIsImtpZCI6IjFDQUY4RTY2NzcyRDZEQzAyOEQ2NzI2RkQwMjYxNTgxNTcwRUZDMTkiLCJ4NXQiOiJISy1PWm5jdGJjQW8xbkp2MENZVmdWY09fQmsiLCJ0eXAiOiJKV1QifQ.eyJpc3MiOiJodHRwczovL2lkZW50aXR5Lnhlcm8uY29tIiwibmJmIjoxNzg1OTE2MTM2LCJpYXQiOjE3ODU5MTYxMzYsImV4cCI6MTc4NTkxNzkzNiwiYXVkIjoiaHR0cHM6Ly9pZGVudGl0eS54ZXJvLmNvbS9yZXNvdXJjZXMiLCJzY29wZSI6WyJvcGVuaWQiLCJwcm9maWxlIiwiZW1haWwiLCJhY2NvdW50aW5nLmNvbnRhY3RzLnJlYWQiLCJhY2NvdW50aW5nLmludm9pY2VzLnJlYWQiLCJhY2NvdW50aW5nLnBheW1lbnRzLnJlYWQiLCJhY2NvdW50aW5nLnNldHRpbmdzLnJlYWQiLCJhY2NvdW50aW5nLnJlcG9ydHMucHJvZml0YW5kbG9zcy5yZWFkIiwiYWNjb3VudGluZy5iYW5rdHJhbnNhY3Rpb25zLnJlYWQiLCJhY2NvdW50aW5nLmF0dGFjaG1lbnRzIiwiYWNjb3VudGluZy5idWRnZXRzLnJlYWQiLCJhY2NvdW50aW5nLm1hbnVhbGpvdXJuYWxzLnJlYWQiLCJhY2NvdW50aW5nLnJlcG9ydHMuYmFsYW5jZXNoZWV0LnJlYWQiLCJhY2NvdW50aW5nLnJlcG9ydHMudHJpYWxiYWxhbmNlLnJlYWQiLCJhY2NvdW50aW5nLnJlcG9ydHMuYWdlZC5yZWFkIiwiYWNjb3VudGluZy5hdHRhY2htZW50cy5yZWFkIiwiYWNjb3VudGluZy5yZXBvcnRzLmJhbmtzdW1tYXJ5LnJlYWQiLCJhY2NvdW50aW5nLnJlcG9ydHMuYnVkZ2V0c3VtbWFyeS5yZWFkIiwiYWNjb3VudGluZy5yZXBvcnRzLmV4ZWN1dGl2ZXN1bW1hcnkucmVhZCIsImFjY291bnRpbmcucmVwb3J0cy50ZW5uaW5ldHluaW5lLnJlYWQiLCJvZmZsaW5lX2FjY2VzcyJdLCJhbXIiOlsicHdkIl0sImNsaWVudF9pZCI6IkYzNzVFQThGRkJCRTRCQjY4NjUxNzMzNDY3QTVEREE4Iiwic3ViIjoiMDY4YjQwNjFkMzRmNTdkYWExMjIxYjExNjQ5ZmU1NjciLCJhdXRoX3RpbWUiOjE3ODU5MTQ4MzQsInhlcm9fdXNlcmlkIjoiYjAwYWI0YzUtZDllZS00ZWRmLThiNTktMDU5NjQ4MWMwZmU2IiwiZ2xvYmFsX3Nlc3Npb25faWQiOiJkMDQxODMxZjY1NzA0NWJlYmFjOWFkMmMwOWI5NmFjZiIsInNpZCI6ImQwNDE4MzFmNjU3MDQ1YmViYWM5YWQyYzA5Yjk2YWNmIiwiYXV0aGVudGljYXRpb25fZXZlbnRfaWQiOiIwYjI0OTc0Yy1jMDY1LTRhYTEtYTdiYi1lNzVhNzZiMmU0ZTYiLCJqdGkiOiI2Q0UxOEQxREEyODk4OEQxMzRDREM4QkZFQTJEQkIzMiJ9.fqpGsV-WWTvyC7bLnlxNHdIcGIQI188bxRbSNHBjJyzfKHe2POaFezXHp6EfNIfH-OF1cd7NLJt12l8XXW3Tojqgj2By6L68RbU2yXmdh3Z9ljvXjWj_BB7y2j3ISvT8c3LEJfuxfSUWDtcnPTTrKPfmFOQZlIUcPJGCN4MPHlJuAnX819n0UZVyDDsq178GNuWCWyhYqy4vde7L8aP9K9EJxvSdi5eOzmnwTmQE9faI_bvLugGzXablcoh5nr5ebu2FUEr0T0SAs8gKr4c9pau689W1RXtaxJU0agZXO-G9t75CPGfJclUJ7FWqsjRpwJroPvw2Dx7bhV1E7AMEXw",
+      "refresh_token": "UtoG_fIhcByUPFMslDLKmPc3gpJfsRJFtjSdyjcVL_E",
+      "expires_at": "2026-08-05T08:18:55.856Z",
+      "scopes": [
+        "openid",
+        "profile",
+        "email",
+        "offline_access",
+        "accounting.contacts.read",
+        "accounting.invoices.read",
+        "accounting.payments.read",
+        "accounting.settings.read",
+        "accounting.reports.profitandloss.read",
+        "accounting.banktransactions.read",
+        "accounting.attachments",
+        "accounting.budgets.read",
+        "accounting.manualjournals.read",
+        "accounting.reports.balancesheet.read",
+        "accounting.reports.trialbalance.read",
+        "accounting.reports.aged.read",
+        "accounting.attachments.read",
+        "accounting.reports.banksummary.read",
+        "accounting.reports.budgetsummary.read",
+        "accounting.reports.executivesummary.read",
+        "accounting.reports.tenninetynine.read"
+      ]
+    }
+  ],
+  "contacts": [],
+  "invoices": [],
+  "payments": [],
+  "accounts": []
+}

@@ -4,7 +4,7 @@ import React from 'react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import * as Avatar from '@radix-ui/react-avatar';
 import { useAuth } from '@/providers/auth-provider';
-import { LogOut, User, Settings, CreditCard } from 'lucide-react';
+import { LogOut, User, Settings, CreditCard, ChevronDown } from 'lucide-react';
 import Link from 'next/link';
 
 export function UserMenu() {
@@ -21,8 +21,8 @@ export function UserMenu() {
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
-        <button className="flex items-center gap-3 rounded-full p-1 text-left outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary cursor-pointer">
-          <Avatar.Root className="inline-flex h-9 w-9 select-none items-center justify-center rounded-full bg-primary/10 text-primary font-semibold text-sm">
+        <button className="flex items-center gap-2.5 text-left outline-none hover:opacity-90 cursor-pointer select-none">
+          <Avatar.Root className="inline-flex h-9 w-9 select-none items-center justify-center rounded-full bg-slate-100 text-slate-700 font-semibold text-sm shadow-2xs border border-slate-100">
             {user.avatarUrl ? (
               <Avatar.Image
                 className="h-full w-full rounded-full object-cover"
@@ -30,13 +30,16 @@ export function UserMenu() {
                 alt={user.name}
               />
             ) : null}
-            <Avatar.Fallback className="h-full w-full flex items-center justify-center rounded-full bg-primary/15 text-primary text-xs font-bold">
+            <Avatar.Fallback className="h-full w-full flex items-center justify-center rounded-full bg-primary/10 text-primary text-xs font-bold">
               {initials}
             </Avatar.Fallback>
           </Avatar.Root>
-          <div className="hidden md:block">
-            <p className="text-xs font-semibold leading-none">{user.name}</p>
-            <p className="text-[10px] text-muted-foreground mt-0.5 capitalize">{user.role}</p>
+          <div className="hidden md:flex items-center gap-2">
+            <div className="flex flex-col">
+              <p className="text-xs font-bold text-slate-800 leading-none">{user.name}</p>
+              <p className="text-[10px] text-slate-400 font-medium mt-0.5 capitalize leading-none">{user.role}</p>
+            </div>
+            <ChevronDown className="h-3 w-3 text-slate-400 shrink-0" />
           </div>
         </button>
       </DropdownMenu.Trigger>

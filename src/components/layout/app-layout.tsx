@@ -20,8 +20,8 @@ export function AppLayout({ children }: AppLayoutProps) {
         <Header />
 
         {/* Dynamic page content scrollable area */}
-        <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6 bg-background/50">
-          <div className="mx-auto max-w-7xl space-y-6">
+        <main className="flex-1 overflow-y-auto overflow-x-hidden p-6 md:p-8 bg-background">
+          <div className="mx-auto max-w-[1600px] space-y-8">
             {children}
           </div>
         </main>

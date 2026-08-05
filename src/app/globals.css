@@ -71,7 +71,7 @@
 }
 
 :root {
-  --background: 210 20% 98%;
+  --background: 210 20% 96.5%; /* Soft light-blue/grey dashboard bg */
   --foreground: 224 71.4% 4.1%;
   
   --card: 0 0% 100%;
@@ -80,7 +80,7 @@
   --popover: 0 0% 100%;
   --popover-foreground: 224 71.4% 4.1%;
   
-  --primary: 221.2 83.2% 53.3%;
+  --primary: 213 90% 46%; /* Xero Blue */
   --primary-foreground: 210 20% 98%;
   
   --secondary: 220 14.3% 95.9%;
@@ -97,7 +97,7 @@
   
   --border: 220 13% 91%;
   --input: 220 13% 91%;
-  --ring: 221.2 83.2% 53.3%;
+  --ring: 213 90% 46%;
   
   --radius: 0.625rem;
 
@@ -111,15 +111,15 @@
   --info: 199 89% 48%;
   --info-foreground: 200 90% 96%;
 
-  /* Sidebar styling */
-  --sidebar-background: 220 15% 97%;
-  --sidebar-foreground: 224 71.4% 4.1%;
-  --sidebar-primary: 221.2 83.2% 53.3%;
-  --sidebar-primary-foreground: 210 20% 98%;
-  --sidebar-accent: 220 14.3% 91%;
-  --sidebar-accent-foreground: 220.9 39.3% 11%;
-  --sidebar-border: 220 13% 89%;
-  --sidebar-ring: 221.2 83.2% 53.3%;
+  /* Sidebar styling (Xero Dark Theme) */
+  --sidebar-background: 216 65% 10%; /* Dark Navy #0A192F */
+  --sidebar-foreground: 215 20% 85%; /* Muted text */
+  --sidebar-primary: 213 90% 46%; /* Active Xero Blue */
+  --sidebar-primary-foreground: 0 0% 100%; /* Active text white */
+  --sidebar-accent: 216 40% 18%; /* Hover background */
+  --sidebar-accent-foreground: 0 0% 100%;
+  --sidebar-border: 216 45% 14%; /* Subtle divider border */
+  --sidebar-ring: 213 90% 46%;
 }
 
 .dark {
@@ -181,6 +181,7 @@
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
+    font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
     font-feature-settings: "rlig" 1, "calt" 1;
   }
 }
@@ -217,4 +218,13 @@
   --ag-odd-row-background-color: var(--color-background);
   --ag-row-hover-color: var(--color-accent);
   --ag-selected-row-background-color: var(--color-primary) / 10%;
+}
+
+/* Custom scrollbar hiding utilities */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
