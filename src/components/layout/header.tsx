@@ -1,17 +1,104 @@
 "use client";
 
-import React, { useState } from 'react';
-import { usePathname } from 'next/navigation';
+import React, { useState, useEffect, useRef } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { UserMenu } from './user-menu';
 import { useSidebarStore } from '@/store/sidebar-store';
 import { Bell, Calendar, RefreshCw, Menu, Star, Filter, ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
+import { DateRangePicker } from '../ui/date-range-picker';
+
+function formatTimeAgo(dateStr: string | null | undefined): string {
+  if (!dateStr) return "Never synced";
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  
+  if (diffMins < 1) return "Just now";
+  if (diffMins === 1) return "1 min ago";
+  if (diffMins < 60) return `${diffMins} min ago`;
+  
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours === 1) return "1 hour ago";
+  if (diffHours < 24) return `${diffHours} hours ago`;
+  
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays === 1) return "yesterday";
+  return `${diffDays} days ago`;
+}
 
 export function Header() {
   const pathname = usePathname();
   const { setOpenMobile } = useSidebarStore();
   const [isSyncing, setIsSyncing] = useState(false);
-  const [syncTime, setSyncTime] = useState("2 min ago");
+  const [syncTime, setSyncTime] = useState("Never synced");
+  const lastSyncedRef = useRef<string | null>(null);
+  
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [showDatePicker, setShowDatePicker] = useState(false);
+ 
+  const fromDate = searchParams.get('from_date');
+  const toDate = searchParams.get('to_date');
+ 
+  const formatDateLabel = (dStr: string) => {
+    const d = new Date(dStr);
+    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  };
+ 
+  const dateRangeLabel = (fromDate && toDate)
+    ? `${formatDateLabel(fromDate)} - ${formatDateLabel(toDate)}`
+    : "Last 6 Months";
+ 
+  const updateUrl = (from: Date, to: Date) => {
+    const fromStr = from.toISOString().slice(0, 10);
+    const toStr = to.toISOString().slice(0, 10);
+    const params = new URLSearchParams(window.location.search);
+    params.set('from_date', fromStr);
+    params.set('to_date', toStr);
+    router.push(`${window.location.pathname}?${params.toString()}`);
+  };
+
+  const updateSyncLabel = () => {
+    if (lastSyncedRef.current) {
+      setSyncTime(formatTimeAgo(lastSyncedRef.current));
+    } else {
+      setSyncTime("Never synced");
+    }
+  };
+
+  const fetchSyncStatus = async () => {
+    try {
+      const res = await fetch('/api/xero');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.connected && data.lastSyncedAt) {
+          lastSyncedRef.current = data.lastSyncedAt;
+          setSyncTime(formatTimeAgo(data.lastSyncedAt));
+        } else {
+          lastSyncedRef.current = null;
+          setSyncTime("Never synced");
+        }
+      }
+    } catch (err) {}
+  };
+
+  useEffect(() => {
+    fetchSyncStatus();
+
+    const handleSyncComplete = () => {
+      fetchSyncStatus();
+    };
+
+    window.addEventListener('xero-sync-complete', handleSyncComplete);
+    const interval = setInterval(updateSyncLabel, 15000);
+
+    return () => {
+      window.removeEventListener('xero-sync-complete', handleSyncComplete);
+      clearInterval(interval);
+    };
+  }, []);
   
   // Custom headers based on route path
   const getHeaderInfo = () => {
@@ -97,15 +184,24 @@ export function Header() {
 
   const { title, subtitle } = getHeaderInfo();
 
-  const handleSync = () => {
+  const handleSync = async () => {
     setIsSyncing(true);
     toast.loading("Syncing latest transactions from Xero...", { id: "sync-toast" });
     
-    setTimeout(() => {
+    try {
+      const res = await fetch('/api/xero', { method: 'POST' });
+      if (res.ok) {
+        toast.success("Xero sync completed successfully!", { id: "sync-toast" });
+        setSyncTime("Just now");
+        window.dispatchEvent(new CustomEvent('xero-sync-complete'));
+      } else {
+        toast.error("Xero sync failed. Please check credentials.", { id: "sync-toast" });
+      }
+    } catch (err) {
+      toast.error("Error triggering Xero sync.", { id: "sync-toast" });
+    } finally {
       setIsSyncing(false);
-      setSyncTime("2 min ago");
-      toast.success("Xero sync completed! Loaded 25,430 records.", { id: "sync-toast" });
-    }, 1200);
+    }
   };
 
   const isSales = pathname === '/sales';
@@ -142,10 +238,26 @@ export function Header() {
 
       <div className="flex items-center gap-4">
         {/* Date Range Picker */}
-        <button className="flex items-center gap-2.5 px-4 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700 shadow-2xs transition cursor-pointer outline-none h-9.5">
-          <span>01 Apr 2024 - 30 Apr 2024</span>
-          <Calendar className="h-4 w-4 text-slate-450" />
-        </button>
+        <div className="relative">
+          <button 
+            onClick={() => setShowDatePicker(!showDatePicker)}
+            className="flex items-center gap-2.5 px-4 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700 shadow-2xs transition cursor-pointer outline-none h-9.5"
+          >
+            <span>{dateRangeLabel}</span>
+            <Calendar className="h-4 w-4 text-slate-450" />
+          </button>
+ 
+          <DateRangePicker 
+            isOpen={showDatePicker} 
+            onClose={() => setShowDatePicker(false)} 
+            onApply={(start, end) => {
+              updateUrl(start, end);
+              setShowDatePicker(false);
+            }}
+            initialStart={fromDate || undefined}
+            initialEnd={toDate || undefined}
+          />
+        </div>
 
         {/* 1. Comparison dropdown for Sales dashboard */}
         {isSales && (

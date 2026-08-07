@@ -69,7 +69,7 @@ export default function DataSourcesPage() {
   useEffect(() => {
     const checkConnection = async () => {
       try {
-        const res = await fetch(`/api/xero?tenant_id=1`);
+        const res = await fetch('/api/xero');
         if (res.ok) {
           const data = await res.json();
           if (data.connected) {
@@ -253,7 +253,7 @@ export default function DataSourcesPage() {
     if (id === 'xero') {
       // Load saved credentials from database when opening modal
       try {
-        const res = await fetch(`/api/xero/credentials?tenant_id=1`);
+        const res = await fetch('/api/xero/credentials');
         if (res.ok) {
           const data = await res.json();
           if (data.clientId) {
@@ -287,7 +287,7 @@ export default function DataSourcesPage() {
     
     try {
       // Save client credentials to database first
-      const saveRes = await fetch(`/api/xero?tenant_id=1`, {
+      const saveRes = await fetch('/api/xero', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -307,7 +307,7 @@ export default function DataSourcesPage() {
       hasShownConnectionToast.current = false;
  
       // Open new tab to local Next.js redirect handler
-      window.open(`/api/xero/redirect?tenant_id=1`, '_blank');
+      window.open('/api/xero/redirect', '_blank');
       
       toast.info('Xero Login screen opened in a new tab. Please complete authentication and select your organization.');
     } catch (err) {
@@ -317,7 +317,7 @@ export default function DataSourcesPage() {
  
   const disconnectXero = async () => {
     try {
-      const res = await fetch(`/api/xero?tenant_id=1`, {
+      const res = await fetch('/api/xero', {
         method: 'DELETE'
       });
       if (res.ok) {
@@ -359,7 +359,7 @@ export default function DataSourcesPage() {
     setIsSyncingAll(true);
     toast.promise(
       (async () => {
-        const res = await fetch(`/api/xero?tenant_id=1`, {
+        const res = await fetch('/api/xero', {
           method: 'POST'
         });
         setIsSyncingAll(false);

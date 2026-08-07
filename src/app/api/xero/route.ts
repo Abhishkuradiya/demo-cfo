@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { fetchXeroResource, fetchXeroReport, refreshXeroToken } from '@/lib/xero';
+import { getTenantIdFromSession } from '@/lib/auth';
  
 // GET retrieves Xero connection status and dynamic record counts for a tenant
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const tenantIdStr = searchParams.get('tenant_id') || '1';
-  const tenantId = parseInt(tenantIdStr);
+  const tenantId = await getTenantIdFromSession();
+  if (tenantId === null) {
+    return NextResponse.json({ connected: false, error: 'Unauthorized' }, { status: 401 });
+  }
  
   try {
     const credentials = await db.getCredentials(tenantId, 'xero');
@@ -24,6 +27,7 @@ export async function GET(req: NextRequest) {
         connected: true,
         organisation: orgName,
         records: totalRecords,
+        lastSyncedAt: credentials.last_synced_at || null,
         ...counts
       });
     }
@@ -36,12 +40,17 @@ export async function GET(req: NextRequest) {
  
 // POST saves credentials config OR executes dynamic Xero API synchronization
 export async function POST(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const tenantIdStr = searchParams.get('tenant_id') || '1';
-  const tenantId = parseInt(tenantIdStr);
+  const tenantId = await getTenantIdFromSession();
+  if (tenantId === null) {
+    return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
+  }
  
   try {
-    const body = await req.json().catch(() => null);
+    let body = null;
+    const contentType = req.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      body = await req.json().catch(() => null);
+    }
  
     // CASE A: SAVE CONFIG
     if (body && body.clientId && body.clientSecret) {
@@ -76,12 +85,14 @@ export async function POST(req: NextRequest) {
     }
  
     const xeroTenantId = credentials.tenant_identifier;
-    const counts = { contacts: 0, invoices: 0, payments: 0, accounts: 0 };
+    const counts: Record<string, number> = { contacts: 0, invoices: 0, payments: 0, accounts: 0, bankTransactions: 0, prepayments: 0, overpayments: 0, items: 0 };
  
     // Execute live fetches from Xero APIs in parallel and write cache
     try {
       const contacts = await fetchXeroResource(accessToken, xeroTenantId, 'Contacts');
       await db.saveCachedRecords(tenantId, 'contacts', contacts || []);
+      // Cache raw contacts payload as report for dashboard metrics (Balances, IsCustomer, IsSupplier)
+      await db.saveReport(tenantId, 'Contacts', contacts || []);
       counts.contacts = contacts?.length || 0;
     } catch(e){}
  
@@ -102,6 +113,105 @@ export async function POST(req: NextRequest) {
       await db.saveCachedRecords(tenantId, 'accounts', accounts || []);
       counts.accounts = accounts?.length || 0;
     } catch(e){}
+
+    // Sync Items for Inventory Dashboard
+    try {
+      const items = await fetchXeroResource(accessToken, xeroTenantId, 'Items');
+      await db.saveInventoryItems(tenantId, items || []);
+      counts.items = items?.length || 0;
+    } catch(e) {
+      console.error('Failed to sync Xero Items:', e);
+    }
+
+    // Sync detailed Invoice Line Items for inventory sales history (page=1,2 contains line items)
+    try {
+      const invoicesWithLinesPage1 = await fetchXeroResource(accessToken, xeroTenantId, 'Invoices', 'page=1');
+      const invoicesWithLinesPage2 = await fetchXeroResource(accessToken, xeroTenantId, 'Invoices', 'page=2').catch(() => []);
+      const allInvoicesWithLines = [...(invoicesWithLinesPage1 || []), ...(invoicesWithLinesPage2 || [])];
+
+      const sales: any[] = [];
+      const parseXeroDate = (dateStr: string) => {
+        const match = dateStr.match(/\/Date\((\d+)/);
+        return match ? new Date(parseInt(match[1])) : new Date(dateStr);
+      };
+
+      for (const inv of allInvoicesWithLines) {
+        if (inv.Status === 'PAID' || inv.Status === 'AUTHORISED') {
+          const soldAt = inv.Date ? parseXeroDate(inv.Date) : null;
+          if (Array.isArray(inv.LineItems)) {
+            for (const line of inv.LineItems) {
+              const itemId = line.Item?.ItemID || line.ItemID;
+              if (itemId) {
+                sales.push({
+                  item_id: itemId,
+                  invoice_id: inv.InvoiceID,
+                  quantity_sold: parseFloat(line.Quantity) || 0,
+                  sold_at: soldAt ? soldAt.toISOString() : null
+                });
+              }
+            }
+          }
+        }
+      }
+      await db.saveSalesHistory(tenantId, sales);
+    } catch(e) {
+      console.error('Failed to sync Invoice Line Items for inventory:', e);
+    }
+
+    // ── Cash Flow Sources ─────────────────────────────────────────
+    // BankTransactions: Contains RECEIVE/SPEND money transactions.
+    // Used by the Cash In engine to capture non-invoice cash receipts.
+    try {
+      const bankTxns = await fetchXeroResource(accessToken, xeroTenantId, 'BankTransactions');
+      // Store as report (JSON blob) — avoids creating a new DB table
+      await db.saveReport(tenantId, 'BankTransactions', bankTxns || []);
+      counts.bankTransactions = bankTxns?.length || 0;
+    } catch(e) {
+      console.error('Failed to sync BankTransactions:', e);
+    }
+
+    // Prepayments: Customer advance payments before invoice issuance.
+    // Only RECEIVE-PREPAYMENT type contributes to Cash In.
+    try {
+      const prepayments = await fetchXeroResource(accessToken, xeroTenantId, 'Prepayments');
+      await db.saveReport(tenantId, 'Prepayments', prepayments || []);
+      counts.prepayments = prepayments?.length || 0;
+    } catch(e) {
+      console.error('Failed to sync Prepayments:', e);
+    }
+
+    // Overpayments: Customer payments exceeding invoice amount.
+    // Only RECEIVE-OVERPAYMENT type contributes to Cash In.
+    try {
+      const overpayments = await fetchXeroResource(accessToken, xeroTenantId, 'Overpayments');
+      await db.saveReport(tenantId, 'Overpayments', overpayments || []);
+      counts.overpayments = overpayments?.length || 0;
+    } catch(e) {
+      console.error('Failed to sync Overpayments:', e);
+    }
+
+    try {
+      const organisations = await fetchXeroResource(accessToken, xeroTenantId, 'Organisations');
+      if (organisations && organisations.length > 0) {
+        await db.saveReport(tenantId, 'Organisation', organisations[0]);
+      }
+    } catch(e) {
+      console.error('Failed to sync Organisation details:', e);
+    }
+ 
+    try {
+      const plReport = await fetchXeroReport(accessToken, xeroTenantId, 'ProfitAndLoss');
+      if (plReport) {
+        await db.saveReport(tenantId, 'ProfitAndLoss', plReport);
+      }
+    } catch(e){
+      console.error('Failed to sync ProfitAndLoss report:', e);
+    }
+ 
+    // Save last sync time in credentials database
+    await db.saveCredentials(tenantId, 'xero', {
+      last_synced_at: new Date().toISOString()
+    });
  
     return NextResponse.json({
       success: true,
@@ -115,9 +225,10 @@ export async function POST(req: NextRequest) {
  
 // DELETE wipes credentials and drops caches
 export async function DELETE(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const tenantIdStr = searchParams.get('tenant_id') || '1';
-  const tenantId = parseInt(tenantIdStr);
+  const tenantId = await getTenantIdFromSession();
+  if (tenantId === null) {
+    return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
+  }
  
   try {
     await db.deleteCredentials(tenantId, 'xero');
@@ -126,57 +237,4 @@ export async function DELETE(req: NextRequest) {
   } catch (err: any) {
     return NextResponse.json({ success: false, message: err.message || 'Disconnect failed' }, { status: 500 });
   }
-}
- 
-// Helper: Refresh Xero OAuth Token
-async function refreshXeroToken(tenantId: number, credentials: any): Promise<string> {
-  const tokenUrl = 'https://identity.xero.com/connect/token';
-  const basicAuth = Buffer.from(`${credentials.client_id}:${credentials.client_secret}`).toString('base64');
- 
-  const response = await fetch(tokenUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'Authorization': `Basic ${basicAuth}`
-    },
-    body: new URLSearchParams({
-      grant_type: 'refresh_token',
-      refresh_token: credentials.refresh_token
-    })
-  });
- 
-  if (!response.ok) {
-    throw new Error('Failed to refresh credentials with Xero Token Server.');
-  }
- 
-  const data = await response.json();
-  const expiresAt = new Date(Date.now() + data.expires_in * 1000).toISOString();
- 
-  await db.saveCredentials(tenantId, 'xero', {
-    access_token: data.access_token,
-    refresh_token: data.refresh_token,
-    expires_at: expiresAt,
-    scopes: data.scope.split(' ')
-  });
- 
-  return data.access_token;
-}
- 
-// Helper: Fetch individual resource collections from Xero accounting endpoints
-async function fetchXeroResource(accessToken: string, xeroTenantId: string, resource: string): Promise<any[]> {
-  const url = `https://api.xero.com/api.xro/2.0/${resource}`;
-  const res = await fetch(url, {
-    headers: {
-      'Authorization': `Bearer ${accessToken}`,
-      'Xero-Tenant-Id': xeroTenantId,
-      'Accept': 'application/json'
-    }
-  });
- 
-  if (!res.ok) {
-    throw new Error(`Failed to fetch Xero resource [${resource}]`);
-  }
- 
-  const data = await res.json();
-  return data[resource] || [];
 }

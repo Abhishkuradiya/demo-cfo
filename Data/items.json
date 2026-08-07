@@ -1,0 +1,323 @@
+{
+    "Id": "36fa3d25-42c1-4bc5-b038-3e8bf977ef54",
+    "Status": "OK",
+    "ProviderName": "API Explorer",
+    "DateTimeUTC": "\/Date(1786090468457)\/",
+    "Items": [
+        {
+            "ItemID": "8bbaf73c-5a32-4458-addf-bd30a36c8551",
+            "Code": "BOOK",
+            "Description": "'Fish out of Water: Finding Your Brand",
+            "PurchaseDescription": "'Fish out of Water: Finding Your Brand",
+            "UpdatedDateUTC": "\/Date(1785911469097+0000)\/",
+            "PurchaseDetails": {},
+            "SalesDetails": {
+                "UnitPrice": 19.9500,
+                "AccountCode": "200",
+                "TaxType": "TAX001"
+            },
+            "Name": "Fish out of Water: Finding Your Brand",
+            "IsTrackedAsInventory": false,
+            "IsSold": true,
+            "IsPurchased": true
+        },
+        {
+            "ItemID": "6cba12ac-e300-4745-838a-f57dfdb88e11",
+            "Code": "DevD",
+            "Description": "Development work - develper onsite per day",
+            "PurchaseDescription": "Development work - develper onsite per day",
+            "UpdatedDateUTC": "\/Date(1785911469097+0000)\/",
+            "PurchaseDetails": {},
+            "SalesDetails": {
+                "UnitPrice": 650.0000,
+                "AccountCode": "200",
+                "TaxType": "OUTPUT"
+            },
+            "Name": "Development work - developer onsite per day",
+            "IsTrackedAsInventory": false,
+            "IsSold": true,
+            "IsPurchased": true
+        },
+        {
+            "ItemID": "b36131d5-f37e-4cb1-bb9c-320446c7b004",
+            "Code": "DevH",
+            "Description": "Development work - per hour rate",
+            "PurchaseDescription": "Development work - per hour rate",
+            "UpdatedDateUTC": "\/Date(1785911469097+0000)\/",
+            "PurchaseDetails": {},
+            "SalesDetails": {
+                "UnitPrice": 90.0000,
+                "AccountCode": "200",
+                "TaxType": "OUTPUT"
+            },
+            "Name": "Development work - per hour rate",
+            "IsTrackedAsInventory": false,
+            "IsSold": true,
+            "IsPurchased": true
+        },
+        {
+            "ItemID": "3644c19f-7c46-4e18-93fa-5550c307bcdd",
+            "Code": "GB1-White",
+            "Description": "Golf balls - white single. Please reorder with code GB1-White",
+            "PurchaseDescription": "Golf balls - white single. Wholesale catalog item #020812-1",
+            "UpdatedDateUTC": "\/Date(1785911469097+0000)\/",
+            "PurchaseDetails": {
+                "UnitPrice": 4.2000,
+                "AccountCode": "300",
+                "TaxType": "INPUT"
+            },
+            "SalesDetails": {
+                "UnitPrice": 5.6000,
+                "AccountCode": "200",
+                "TaxType": "TAX001"
+            },
+            "Name": "Golf balls - white single",
+            "IsTrackedAsInventory": false,
+            "IsSold": true,
+            "IsPurchased": true
+        },
+        {
+            "ItemID": "53c1d46d-cf8e-45d2-8dc1-9bd73b0ca9e2",
+            "Code": "GB3-White",
+            "Description": "Golf balls - white 3 pack. Please reorder with code GB3-White",
+            "PurchaseDescription": "Golf balls - white 3 pack. Wholesale catalog item #020812-3",
+            "UpdatedDateUTC": "\/Date(1785911469097+0000)\/",
+            "PurchaseDetails": {
+                "UnitPrice": 12.0000,
+                "AccountCode": "300",
+                "TaxType": "INPUT"
+            },
+            "SalesDetails": {
+                "UnitPrice": 15.0000,
+                "AccountCode": "200",
+                "TaxType": "TAX001"
+            },
+            "Name": "Golf balls - white 3-pack",
+            "IsTrackedAsInventory": false,
+            "IsSold": true,
+            "IsPurchased": true
+        },
+        {
+            "ItemID": "9ce48e6a-118b-40a5-ae43-2e7dea8b18ad",
+            "Code": "GB6-White",
+            "Description": "Golf balls - white 6 pack. Please reorder with code GB6-White",
+            "PurchaseDescription": "Golf balls - white 6 pack. Wholesale catalog item #020812-6",
+            "UpdatedDateUTC": "\/Date(1785911469097+0000)\/",
+            "PurchaseDetails": {
+                "UnitPrice": 20.0000,
+                "AccountCode": "300",
+                "TaxType": "INPUT"
+            },
+            "SalesDetails": {
+                "UnitPrice": 24.9900,
+                "AccountCode": "200",
+                "TaxType": "TAX001"
+            },
+            "Name": "Golf balls - white 6-pack",
+            "IsTrackedAsInventory": false,
+            "IsSold": true,
+            "IsPurchased": true
+        },
+        {
+            "ItemID": "baaba2cb-9abf-4bd4-af24-9429a7e79cec",
+            "Code": "GB9-White",
+            "Description": "Golf balls - white - 9 pack. Please reorder with code GB9-White",
+            "PurchaseDescription": "Golf balls - white 9 pack. Wholesale catalog item #020812-9",
+            "UpdatedDateUTC": "\/Date(1785911469097+0000)\/",
+            "PurchaseDetails": {
+                "UnitPrice": 25.0000,
+                "AccountCode": "300",
+                "TaxType": "INPUT"
+            },
+            "SalesDetails": {
+                "UnitPrice": 32.0000,
+                "AccountCode": "200",
+                "TaxType": "TAX001"
+            },
+            "Name": "Golf balls - white 9 pack",
+            "IsTrackedAsInventory": false,
+            "IsSold": true,
+            "IsPurchased": true
+        },
+        {
+            "ItemID": "ec4362af-a038-4984-ab93-1bba3b6bd402",
+            "Code": "PMBr",
+            "Description": "Project management & implementation - branding workshop with your team",
+            "PurchaseDescription": "Project management & implementation - branding workshop with your team",
+            "UpdatedDateUTC": "\/Date(1785911469097+0000)\/",
+            "PurchaseDetails": {},
+            "SalesDetails": {
+                "UnitPrice": 250.0000,
+                "AccountCode": "200",
+                "TaxType": "OUTPUT"
+            },
+            "Name": "Project management & implementation - branding",
+            "IsTrackedAsInventory": false,
+            "IsSold": true,
+            "IsPurchased": true
+        },
+        {
+            "ItemID": "ffb8b59d-17d8-4245-af16-cdf7a689dcb9",
+            "Code": "PMD",
+            "Description": "Project Management - onsite daily rate",
+            "PurchaseDescription": "Project Management - onsite daily rate",
+            "UpdatedDateUTC": "\/Date(1785911469097+0000)\/",
+            "PurchaseDetails": {},
+            "SalesDetails": {
+                "UnitPrice": 700.0000,
+                "AccountCode": "200",
+                "TaxType": "OUTPUT"
+            },
+            "Name": "Project Management - onsite daily rate",
+            "IsTrackedAsInventory": false,
+            "IsSold": true,
+            "IsPurchased": true
+        },
+        {
+            "ItemID": "c8151f6e-09bd-43a4-8726-d9c9122d8200",
+            "Code": "PMDD",
+            "Description": "Project management & implementation - 'due diligence' stocktake of your project scope/schedule/implementation plan/outcome measures (hourly rate as agreed)",
+            "PurchaseDescription": "Project management & implementation - 'due diligence' stocktake of your project scope/schedule/implementation plan/outcome measures (hourly rate as agreed)",
+            "UpdatedDateUTC": "\/Date(1785911469097+0000)\/",
+            "PurchaseDetails": {},
+            "SalesDetails": {
+                "UnitPrice": 105.0000,
+                "AccountCode": "200",
+                "TaxType": "OUTPUT"
+            },
+            "Name": "Project management & implementation due diligence",
+            "IsTrackedAsInventory": false,
+            "IsSold": true,
+            "IsPurchased": true
+        },
+        {
+            "ItemID": "3add2df0-f436-431e-a59b-0e76fb4d6720",
+            "Code": "PMWe",
+            "Description": "Project management & implementation - website revamp workshop with your team",
+            "PurchaseDescription": "Project management & implementation - website revamp workshop with your team",
+            "UpdatedDateUTC": "\/Date(1785911469097+0000)\/",
+            "PurchaseDetails": {},
+            "SalesDetails": {
+                "UnitPrice": 300.0000,
+                "AccountCode": "200",
+                "TaxType": "OUTPUT"
+            },
+            "Name": "Project management & implementation - website",
+            "IsTrackedAsInventory": false,
+            "IsSold": true,
+            "IsPurchased": true
+        },
+        {
+            "ItemID": "e82eaa5c-3c5f-47ed-b2a9-7de266ab1eaf",
+            "Code": "Support-M",
+            "Description": "Desktop/network support via email & phone.\r\nPer month fixed fee for minimum 20 hours/month.",
+            "PurchaseDescription": "Desktop/network support via email & phone.\r\nPer month fixed fee for minimum 20 hours/month.",
+            "UpdatedDateUTC": "\/Date(1785911469097+0000)\/",
+            "PurchaseDetails": {},
+            "SalesDetails": {
+                "UnitPrice": 500.0000,
+                "AccountCode": "200",
+                "TaxType": "OUTPUT"
+            },
+            "Name": "Desktop/network support via email & phone",
+            "IsTrackedAsInventory": false,
+            "IsSold": true,
+            "IsPurchased": true
+        },
+        {
+            "ItemID": "e5cc8904-5865-4846-ad0c-5d9b695b8af9",
+            "Code": "Train-MS",
+            "Description": "Half day training - Microsoft Office",
+            "PurchaseDescription": "Half day training - Microsoft Office",
+            "UpdatedDateUTC": "\/Date(1785911469097+0000)\/",
+            "PurchaseDetails": {},
+            "SalesDetails": {
+                "UnitPrice": 500.0000,
+                "AccountCode": "200",
+                "TaxType": "OUTPUT"
+            },
+            "Name": "Half day training - Microsoft Office",
+            "IsTrackedAsInventory": false,
+            "IsSold": true,
+            "IsPurchased": true
+        },
+        {
+            "ItemID": "dc63985f-7e32-4669-b60b-8b550417ddbb",
+            "Code": "TSL - Black",
+            "Description": "Company Branded T-Shirt Large Black.  Check out our website for other offers!",
+            "PurchaseDescription": "Company Branded T-Shirt Large Black.  Order Code #2412",
+            "UpdatedDateUTC": "\/Date(1785911469097+0000)\/",
+            "PurchaseDetails": {
+                "UnitPrice": 20.0000,
+                "COGSAccountCode": "310",
+                "TaxType": "NONE"
+            },
+            "SalesDetails": {
+                "UnitPrice": 40.0000,
+                "AccountCode": "200",
+                "TaxType": "OUTPUT"
+            },
+            "Name": "T-Shirt Large Black",
+            "IsTrackedAsInventory": true,
+            "InventoryAssetAccountCode": "630",
+            "TotalCostPool": 100.00,
+            "QuantityOnHand": 5.0000,
+            "QuantityAvailable": 5.0000,
+            "QuantityOnBackOrder": 0.0000,
+            "IsSold": true,
+            "IsPurchased": true
+        },
+        {
+            "ItemID": "56268ecd-d722-4f39-ac6b-1f34b639393a",
+            "Code": "TSM - Black",
+            "Description": "Company Branded T-Shirt Medium Black.  Check out our website for other offers!",
+            "PurchaseDescription": "Company Branded T-Shirt Medium Black.  Order code #2382",
+            "UpdatedDateUTC": "\/Date(1785911469097+0000)\/",
+            "PurchaseDetails": {
+                "UnitPrice": 20.0000,
+                "COGSAccountCode": "310",
+                "TaxType": "NONE"
+            },
+            "SalesDetails": {
+                "UnitPrice": 40.0000,
+                "AccountCode": "200",
+                "TaxType": "OUTPUT"
+            },
+            "Name": "T-Shirt Medium Black",
+            "IsTrackedAsInventory": true,
+            "InventoryAssetAccountCode": "630",
+            "TotalCostPool": 80.00,
+            "QuantityOnHand": 4.0000,
+            "QuantityAvailable": 4.0000,
+            "QuantityOnBackOrder": 0.0000,
+            "IsSold": true,
+            "IsPurchased": true
+        },
+        {
+            "ItemID": "d3687dce-a3c2-4d07-9364-0c540f73c4f8",
+            "Code": "TSS - Black",
+            "Description": "Company Branded T-Shirt Small Black.  Check out our website for other offers!",
+            "PurchaseDescription": "Company Branded T-Shirt Small Black.  Order code #2308",
+            "UpdatedDateUTC": "\/Date(1785911469097+0000)\/",
+            "PurchaseDetails": {
+                "UnitPrice": 20.0000,
+                "COGSAccountCode": "310",
+                "TaxType": "NONE"
+            },
+            "SalesDetails": {
+                "UnitPrice": 40.0000,
+                "AccountCode": "200",
+                "TaxType": "OUTPUT"
+            },
+            "Name": "T-Shirt Small Black",
+            "IsTrackedAsInventory": true,
+            "InventoryAssetAccountCode": "630",
+            "TotalCostPool": 140.00,
+            "QuantityOnHand": 7.0000,
+            "QuantityAvailable": 7.0000,
+            "QuantityOnBackOrder": 0.0000,
+            "IsSold": true,
+            "IsPurchased": true
+        }
+    ]
+}

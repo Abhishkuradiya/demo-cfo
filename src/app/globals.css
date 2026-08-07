@@ -228,3 +228,22 @@
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* Ultra-thin dark scrollbar for dashboard card lists */
+.thin-scrollbar::-webkit-scrollbar {
+  width: 3px;
+}
+.thin-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.thin-scrollbar::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border-radius: 3px;
+}
+.thin-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+.thin-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #94a3b8 transparent;
+}

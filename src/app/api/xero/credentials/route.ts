@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { getTenantIdFromSession } from '@/lib/auth';
  
 // GET returns saved client credentials (masked) for display in the Settings modal
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const tenantIdStr = searchParams.get('tenant_id') || '1';
-  const tenantId = parseInt(tenantIdStr);
+  const tenantId = await getTenantIdFromSession();
+  if (tenantId === null) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
  
   try {
     const credentials = await db.getCredentials(tenantId, 'xero');

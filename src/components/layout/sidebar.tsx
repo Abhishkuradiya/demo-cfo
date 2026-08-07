@@ -197,9 +197,20 @@ export function Sidebar() {
               {/* Dropdown Menu Sub-items mock rendering for realism */}
               {item.hasDropdown && expandedMenus[item.name] && (
                 <div className="pl-11 pr-2 py-1 space-y-1 animate-in slide-in-from-top-1 duration-200">
-                  <Link href={item.href} className="block py-1.5 text-[12px] text-sidebar-foreground/60 hover:text-white transition">Dashboard</Link>
-                  <Link href={item.href} className="block py-1.5 text-[12px] text-sidebar-foreground/60 hover:text-white transition">Detailed Transactions</Link>
-                  <Link href={item.href} className="block py-1.5 text-[12px] text-sidebar-foreground/60 hover:text-white transition">Analytics & Logs</Link>
+                  {item.name === 'Settings' ? (
+                    <>
+                      <Link href="/settings" className="block py-1.5 text-[12px] text-sidebar-foreground/60 hover:text-white transition">Dashboard</Link>
+                      <Link href="/settings/business-health-score" className="block py-1.5 text-[12px] text-[#00b7e2] hover:text-[#00c5f2] font-semibold transition">Business Health Score</Link>
+                      <Link href="/settings" className="block py-1.5 text-[12px] text-sidebar-foreground/60 hover:text-white transition">Detailed Transactions</Link>
+                      <Link href="/settings" className="block py-1.5 text-[12px] text-sidebar-foreground/60 hover:text-white transition">Analytics & Logs</Link>
+                    </>
+                  ) : (
+                    <>
+                      <Link href={item.href} className="block py-1.5 text-[12px] text-sidebar-foreground/60 hover:text-white transition">Dashboard</Link>
+                      <Link href={item.href} className="block py-1.5 text-[12px] text-sidebar-foreground/60 hover:text-white transition">Detailed Transactions</Link>
+                      <Link href={item.href} className="block py-1.5 text-[12px] text-sidebar-foreground/60 hover:text-white transition">Analytics & Logs</Link>
+                    </>
+                  )}
                 </div>
               )}
             </div>

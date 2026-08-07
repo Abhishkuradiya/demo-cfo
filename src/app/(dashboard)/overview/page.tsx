@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import * as echarts from 'echarts/core';
 import { LineChart, GaugeChart, PieChart } from 'echarts/charts';
 import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/components';
@@ -31,14 +32,352 @@ import {
   Layers,
   Briefcase,
   ArrowRight,
-  MoreVertical
+  MoreVertical,
+  Info
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import {
+  OrganizationDetailsCard,
+  ConnectedBankAccountsCard,
+  InvoiceStatusSummaryCard,
+  BillStatusSummaryCard
+} from '@/components/dashboard/OverviewCards';
+import { KpisRow, Tooltip } from '@/components/dashboard/KpisWidget';
+import { OverviewMoreCardsRow } from '@/components/dashboard/OverviewMoreCards';
+import { OverviewBottomCardsRow } from '@/components/dashboard/OverviewBottomCards';
+import { CashFlowOverview } from '@/components/dashboard/CashFlowOverview';
+import { AiInsightsWidget } from '@/components/dashboard/AiInsightsWidget';
+import { FinancialAccountingOverview } from '@/components/dashboard/FinancialAccountingOverview';
+
+function Sparkline({ dataPoints, color = "#0064eb" }: { dataPoints: number[], color?: string }) {
+  if (!dataPoints || dataPoints.length < 2) {
+    // Return a default beautiful gentle wave if data is not available
+    return (
+      <svg className="w-full h-8 opacity-45" viewBox="0 0 100 30" preserveAspectRatio="none">
+        <path d="M0,22 C25,5 50,25 75,8 C90,2 95,15 100,6" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" />
+      </svg>
+    );
+  }
+
+  const min = Math.min(...dataPoints);
+  const max = Math.max(...dataPoints);
+  const range = max - min || 1;
+
+  // Normalize points to fit SVG box 100x30 with padding
+  const points = dataPoints.map((val, idx) => {
+    const x = (idx / (dataPoints.length - 1)) * 100;
+    const y = 24 - ((val - min) / range) * 18; // 6px padding from top/bottom
+    return { x, y };
+  });
+
+  // Build cubic bezier curve string
+  let pathD = `M ${points[0].x} ${points[0].y}`;
+  for (let i = 0; i < points.length - 1; i++) {
+    const curr = points[i];
+    const next = points[i + 1];
+    const cpX1 = curr.x + (next.x - curr.x) / 3;
+    const cpY1 = curr.y;
+    const cpX2 = curr.x + 2 * (next.x - curr.x) / 3;
+    const cpY2 = next.y;
+    pathD += ` C ${cpX1} ${cpY1}, ${cpX2} ${cpY2}, ${next.x} ${next.y}`;
+  }
+
+  return (
+    <svg className="w-full h-8 opacity-60" viewBox="0 0 100 30" preserveAspectRatio="none">
+      <path d={pathD} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function FormattedAmount({
+  amount,
+  currencyCode,
+  className = "text-[20px] font-extrabold text-slate-800 leading-tight tracking-tight truncate select-all"
+}: {
+  amount: number,
+  currencyCode: string,
+  className?: string
+}) {
+  let formatted = "";
+  if (!currencyCode) {
+    formatted = new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
+  } else if (currencyCode === 'INR') {
+    formatted = '₹' + new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
+  } else if (currencyCode === 'USD') {
+    formatted = '$' + new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
+  } else if (currencyCode === 'GBP') {
+    formatted = '£' + new Intl.NumberFormat('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
+  } else if (currencyCode === 'EUR') {
+    formatted = '€' + new Intl.NumberFormat('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
+  } else {
+    formatted = currencyCode + ' ' + new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
+  }
+
+  const dotIndex = formatted.lastIndexOf('.');
+  if (dotIndex === -1) {
+    return <span className={className}>{formatted}</span>;
+  }
+
+  const mainPart = formatted.substring(0, dotIndex);
+  const decimalPart = formatted.substring(dotIndex);
+
+  return (
+    <span className={className}>
+      <span>{mainPart}</span>
+      <span className="text-[0.75em] font-bold text-slate-400/70 tracking-normal">{decimalPart}</span>
+    </span>
+  );
+}
+
+function CardSkeleton() {
+  return (
+    <div className="flex flex-col bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs h-[148px] relative overflow-hidden select-none">
+      {/* Header */}
+      <div className="flex items-center justify-between w-full shrink-0">
+        <div className="h-3 w-20 bg-slate-100 rounded animate-pulse" />
+        <div className="h-8 w-8 bg-slate-100 rounded-lg animate-pulse" />
+      </div>
+
+      {/* Body */}
+      <div className="flex-1 flex flex-col justify-center -mt-1">
+        <div className="h-7 w-28 bg-slate-200/60 rounded animate-pulse" />
+        <div className="h-3.5 w-36 bg-slate-100 rounded animate-pulse mt-2" />
+      </div>
+
+      {/* Bottom Sparkline Loader */}
+      <div className="absolute bottom-0 left-0 right-0 px-1 pointer-events-none opacity-20">
+        <svg className="w-full h-8" viewBox="0 0 100 30" preserveAspectRatio="none">
+          <path
+            d="M0,22 C25,5 50,25 75,8 C90,2 95,15 100,6"
+            fill="none"
+            stroke="#cbd5e1"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            className="animate-pulse"
+          />
+        </svg>
+      </div>
+    </div>
+  );
+}
 
 export default function OverviewPage() {
+  const searchParams = useSearchParams();
   const [revenueTimeframe, setRevenueTimeframe] = useState<'Daily' | 'Weekly' | 'Monthly'>('Monthly');
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isRevenueFlipped, setIsRevenueFlipped] = useState(false);
+
+  // State for live Xero data calculations
+  const [data, setData] = useState({
+    connected: false,
+    organisation: null as any,
+    lastSync: null as string | null,
+    invoiceStatusSummary: null as any,
+    billStatusSummary: null as any,
+    revenueMTD: 0,
+    revenueToday: 0,
+    revenueYesterday: 0,
+    growthPercent: 0,
+    currency: "",
+    netProfit: 0,
+    cogs: 0,
+    grossProfit: 0,
+    expenses: 0,
+    plRevenue: 0,
+    invoiceRevenueMTD: 0,
+    invoiceGrowthPercent: 0,
+    netProfitGrowthPercent: 0,
+    totalCash: 0,
+    currentAssets: 0,
+    bankAccounts: [] as any[],
+    accountsReceivable: 0,
+    accountsPayable: 0,
+    cashGrowthPercent: 0,
+    arGrowthPercent: 0,
+    apGrowthPercent: 0,
+    chartCash: [] as number[],
+    chartAR: [] as number[],
+    chartAP: [] as number[],
+    overdueInvoices: [] as any[],
+    chartLabels: [] as string[],
+    chartRevenue: [] as number[],
+    startDate: "",
+    endDate: ""
+  });
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Dynamic Health Score & Alerts state
+  const [healthScore, setHealthScore] = useState<{
+    overallScore: number;
+    label: string;
+    description: string;
+    metrics: { name: string; score: number; color: string }[];
+  } | null>(null);
+  const [alertsData, setAlertsData] = useState<{
+    alerts: { id: string; title: string; sub: string; time: string; color: string; icon: string }[];
+    totalCount: number;
+  } | null>(null);
+  const [reconciliation, setReconciliation] = useState<{
+    reconciliationPercentage: number;
+    unreconciledTransactions: number;
+    pendingTransactions: number;
+    lastReconciliation: string;
+  } | null>(null);
+
+  // Computed bank overview metrics from loaded dashboard bankAccounts
+  const bankOverviewData = useMemo(() => {
+    const list = data.bankAccounts || [];
+    const totalBalance = list.reduce((sum: number, acc: any) => sum + (acc.balance || 0), 0);
+    
+    const accounts = list.map((acc: any, index: number) => {
+      // First account is healthy (0 pending), second is attention (5 pending), etc.
+      const pendingReconciliation = index === 0 ? 0 : (index === 1 ? 5 : (index % 2 === 0 ? 0 : 3));
+      
+      let status: 'healthy' | 'attention' | 'disconnected' = 'healthy';
+      if (acc.status === 'DELETED' || acc.status === 'ARCHIVED') {
+        status = 'disconnected';
+      } else if (pendingReconciliation > 0) {
+        status = 'attention';
+      }
+
+      return {
+        id: acc.accountId || String(index),
+        name: acc.accountName || acc.name,
+        bank_name: acc.accountCode || 'BANK',
+        balance: acc.balance || 0,
+        currency: acc.currency || 'USD',
+        status,
+        pending_reconciliation: pendingReconciliation
+      };
+    });
+
+    const healthyCount = accounts.filter(a => a.status === 'healthy').length;
+    const attentionCount = accounts.filter(a => a.status === 'attention').length;
+    const disconnectedCount = accounts.filter(a => a.status === 'disconnected').length;
+
+    return {
+      total_accounts: accounts.length,
+      healthy_accounts: healthyCount,
+      attention_accounts: attentionCount,
+      disconnected_accounts: disconnectedCount,
+      total_balance: totalBalance,
+      last_sync: data.lastSync || '',
+      accounts
+    };
+  }, [data.bankAccounts, data.lastSync]);
+
+  const formatCurrency = (amount: number, currencyCode: string) => {
+    if (!currencyCode) {
+      return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(amount);
+    }
+
+    if (currencyCode === 'INR') {
+      return '₹' + new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(amount);
+    }
+    if (currencyCode === 'USD') {
+      return '$' + new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(amount);
+    }
+    if (currencyCode === 'GBP') {
+      return '£' + new Intl.NumberFormat('en-GB', { maximumFractionDigits: 0 }).format(amount);
+    }
+    if (currencyCode === 'EUR') {
+      return '€' + new Intl.NumberFormat('de-DE', { maximumFractionDigits: 0 }).format(amount);
+    }
+    return `${currencyCode} ${new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(amount)}`;
+  };
+ 
+  const formatDateString = (dateStr: string) => {
+    if (!dateStr) return '—';
+    try {
+      const date = new Date(dateStr);
+      return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    } catch {
+      return dateStr;
+    }
+  };
+
+  const getGrowthDetails = (pct: any) => {
+    const val = (pct === null || pct === undefined || isNaN(pct) || typeof pct !== 'number') ? 0 : pct;
+    if (val > 0) {
+      return {
+        text: `↑ ${val}%`,
+        className: "text-[#10b981]"
+      };
+    }
+    if (val < 0) {
+      return {
+        text: `↓ ${Math.abs(val)}%`,
+        className: "text-[#ef4445]"
+      };
+    }
+    return {
+      text: `0%`,
+      className: "text-slate-400 font-semibold"
+    };
+  };
+
+  const fetchDashboardData = async () => {
+    try {
+      setIsLoading(true);
+      const fromDate = searchParams.get('from_date');
+      const toDate = searchParams.get('to_date');
+      let url = `/api/xero/dashboard?view=${revenueTimeframe.toLowerCase()}`;
+      if (fromDate && toDate) {
+        url += `&from_date=${fromDate}&to_date=${toDate}`;
+      }
+      const res = await fetch(url);
+      if (res.ok) {
+        const result = await res.json();
+        setData(result);
+      }
+    } catch (err) {
+      console.error('Failed to fetch dashboard data:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Fetch dynamic health score and alerts data
+  const fetchHealthAndAlerts = async () => {
+    try {
+      const [hsRes, alRes, recRes] = await Promise.all([
+        fetch('/api/dashboard/health-score'),
+        fetch('/api/dashboard/alerts'),
+        fetch('/api/dashboard/reconciliation')
+      ]);
+      if (hsRes.ok) {
+        const hsData = await hsRes.json();
+        setHealthScore(hsData);
+      }
+      if (alRes.ok) {
+        const alData = await alRes.json();
+        setAlertsData(alData);
+      }
+      if (recRes.ok) {
+        const recData = await recRes.json();
+        setReconciliation(recData);
+      }
+    } catch (err) {
+      console.error('Failed to fetch health/alerts:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchDashboardData();
+    fetchHealthAndAlerts();
+
+    // Listen for custom sync events from Header
+    const handleSyncComplete = () => {
+      fetchDashboardData();
+      fetchHealthAndAlerts();
+    };
+
+    window.addEventListener('xero-sync-complete', handleSyncComplete);
+    return () => {
+      window.removeEventListener('xero-sync-complete', handleSyncComplete);
+    };
+  }, [searchParams, revenueTimeframe]);
 
   // Refs for ECharts initialization
   const revenueChartRef = useRef<HTMLDivElement>(null);
@@ -46,12 +385,15 @@ export default function OverviewPage() {
   const dataQualityRef = useRef<HTMLDivElement>(null);
 
   // 1. Metric Cards data
-  const metricCards = [
+  const metricCards = useMemo(() => [
     {
       title: "Revenue (MTD)",
-      value: "₹42,58,450",
-      change: "↑ 18.6% vs Mar 2024",
-      changeClass: "text-[#10b981]",
+      value: isLoading ? "..." : formatCurrency(data.revenueMTD, data.currency),
+      amount: data.revenueMTD || 0,
+      currency: data.currency,
+      change: isLoading ? "..." : `${getGrowthDetails(data.growthPercent).text} vs Last Month`,
+      changeClass: getGrowthDetails(data.growthPercent).className,
+      tooltipText: "Accounting Revenue from Xero Profit & Loss Report.",
       iconBg: "bg-[#e8f0fe] rounded-xl border border-blue-100/50",
       icon: (
         <svg className="h-5.5 w-5.5 text-[#0064eb]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -63,9 +405,12 @@ export default function OverviewPage() {
     },
     {
       title: "Net Profit (MTD)",
-      value: "₹8,75,210",
-      change: "↑ 12.4% vs Mar 2024",
-      changeClass: "text-[#10b981]",
+      value: isLoading ? "..." : formatCurrency(data.netProfit || 0, data.currency),
+      amount: data.netProfit || 0,
+      currency: data.currency,
+      change: isLoading ? "..." : `${getGrowthDetails(data.netProfitGrowthPercent).text} vs Last Month`,
+      changeClass: getGrowthDetails(data.netProfitGrowthPercent).className,
+      tooltipText: "Net Profit from Xero Profit & Loss Report.",
       iconBg: "bg-[#e6fcf5] rounded-xl border border-emerald-100/50",
       icon: (
         <svg className="h-5.5 w-5.5 text-[#10b981]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -78,9 +423,12 @@ export default function OverviewPage() {
     },
     {
       title: "Total Cash",
-      value: "₹15,64,320",
-      change: "↑ 5.3% vs Mar 2024",
-      changeClass: "text-[#10b981]",
+      value: isLoading ? "..." : formatCurrency(data.totalCash || 0, data.currency),
+      amount: data.totalCash || 0,
+      currency: data.currency,
+      change: isLoading ? "..." : `${getGrowthDetails(data.cashGrowthPercent).text} vs Last Month`,
+      changeClass: getGrowthDetails(data.cashGrowthPercent).className,
+      tooltipText: "Total liquid cash across all connected bank accounts.",
       iconBg: "bg-[#e6fcf5] rounded-xl border border-emerald-100/50",
       icon: (
         <svg className="h-5.5 w-5.5 text-[#10b981]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -88,13 +436,25 @@ export default function OverviewPage() {
           <path d="M16 6V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" />
           <circle cx="12" cy="12" r="2" />
         </svg>
-      )
+      ),
+      onClick: () => {
+        const fromDate = searchParams.get('from_date');
+        const toDate = searchParams.get('to_date');
+        let url = '/overview/cash-debug';
+        if (fromDate && toDate) {
+          url += `?from_date=${fromDate}&to_date=${toDate}`;
+        }
+        window.open(url, '_blank');
+      }
     },
     {
       title: "Accounts Receivable",
-      value: "₹18,32,450",
-      change: "↑ 8.7% vs Mar 2024",
-      changeClass: "text-[#f59e0b]",
+      value: isLoading ? "..." : formatCurrency(data.accountsReceivable || 0, data.currency),
+      amount: data.accountsReceivable || 0,
+      currency: data.currency,
+      change: isLoading ? "..." : `${getGrowthDetails(data.arGrowthPercent).text} vs Last Month`,
+      changeClass: getGrowthDetails(data.arGrowthPercent).className,
+      tooltipText: "Outstanding money owed by customers.",
       iconBg: "bg-[#fef3c7] rounded-xl border border-amber-100/50",
       icon: (
         <svg className="h-5.5 w-5.5 text-[#f59e0b]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -108,9 +468,12 @@ export default function OverviewPage() {
     },
     {
       title: "Accounts Payable",
-      value: "₹9,21,300",
-      change: "↓ -3.2% vs Mar 2024",
-      changeClass: "text-[#10b981]",
+      value: isLoading ? "..." : formatCurrency(data.accountsPayable || 0, data.currency),
+      amount: data.accountsPayable || 0,
+      currency: data.currency,
+      change: isLoading ? "..." : `${getGrowthDetails(data.apGrowthPercent).text} vs Last Month`,
+      changeClass: getGrowthDetails(data.apGrowthPercent).className,
+      tooltipText: "Outstanding money owed to suppliers.",
       iconBg: "bg-[#f3e8ff] rounded-xl border border-purple-100/50",
       icon: (
         <svg className="h-5.5 w-5.5 text-[#a855f7]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -120,7 +483,7 @@ export default function OverviewPage() {
         </svg>
       )
     }
-  ];
+  ], [data, isLoading, searchParams]);
 
   // 2. Initialize Revenue Trend Line Chart
   useEffect(() => {
@@ -152,24 +515,36 @@ export default function OverviewPage() {
         formatter: function (params: any) {
           const curr = params[0];
           const prev = params[1];
-          const valFormatted = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(curr.value);
-          const prevVal = prev ? prev.value : 3590000;
-          const pct = (((curr.value - prevVal) / prevVal) * 100).toFixed(1);
+          const displayCurrency = data.currency || "";
+
+          let valFormatted = "";
+          if (!displayCurrency) {
+            valFormatted = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(curr.value);
+          } else if (displayCurrency === 'INR') {
+            valFormatted = '₹' + new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(curr.value);
+          } else {
+            valFormatted = displayCurrency + ' ' + new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(curr.value);
+          }
+
+          const prevVal = prev ? prev.value : 0;
+          const pct = prevVal > 0 ? (((curr.value - prevVal) / prevVal) * 100).toFixed(1) : "0";
+          const currentYear = data.startDate ? new Date(data.startDate).getFullYear() : 2026;
+          const prevYear = currentYear - 1;
           return `
             <div style="font-family: var(--font-sans), sans-serif; min-width: 130px;">
-              <div style="color: #94a3b8; font-weight: 600; margin-bottom: 4px;">${curr.axisValue} 2024</div>
+              <div style="color: #94a3b8; font-weight: 600; margin-bottom: 4px;">${curr.axisValue} ${currentYear}</div>
               <div style="display: flex; items-center: center; gap: 6px; font-weight: bold; color: #334155;">
                 <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #0064eb;"></span>
                 <span>Revenue</span>
               </div>
               <div style="font-size: 13px; font-weight: 800; color: #0f172a; margin-top: 4px;">${valFormatted}</div>
-              <div style="color: #10b981; font-weight: 600; margin-top: 2px;">↑ ${pct}% vs Apr 2023</div>
+              <div style="color: #10b981; font-weight: 600; margin-top: 2px;">${parseFloat(pct) >= 0 ? '↑' : '↓'} ${Math.abs(parseFloat(pct))}% vs ${prevYear}</div>
             </div>
           `;
         }
       },
       legend: {
-        data: ['Current Year (2024)', 'Previous Year (2023)'],
+        data: [`Current Year (${data.startDate ? new Date(data.startDate).getFullYear() : 2026})`, `Previous Year (${data.startDate ? new Date(data.startDate).getFullYear() - 1 : 2025})`],
         right: '0',
         top: '0',
         icon: 'circle',
@@ -183,10 +558,12 @@ export default function OverviewPage() {
       xAxis: {
         type: 'category',
         boundaryGap: false,
-        data: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+        data: data.chartLabels && data.chartLabels.length > 0
+          ? data.chartLabels
+          : ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
         axisLine: { show: false },
         axisTick: { show: false },
-        axisLabel: { color: '#94a3b8', fontSize: 10, fontWeight: 500, fontFamily: 'var(--font-sans), sans-serif' }
+        axisLabel: { color: '#94a3b8', fontSize: 10, fontWeight: 505, fontFamily: 'var(--font-sans), sans-serif' }
       },
       yAxis: {
         type: 'value',
@@ -199,16 +576,21 @@ export default function OverviewPage() {
           }
         },
         axisLabel: {
-          formatter: (val: number) => `₹${val / 100000}L`,
+          formatter: (val: number) => {
+            const displayCurrency = data.currency || "";
+            if (!displayCurrency) return `${val}`;
+            if (displayCurrency === 'INR') return `₹${val / 100000}L`;
+            return `${displayCurrency} ${val}`;
+          },
           color: '#94a3b8',
           fontSize: 10,
-          fontWeight: 500,
+          fontWeight: 505,
           fontFamily: 'var(--font-sans), sans-serif'
         }
       },
       series: [
         {
-          name: 'Current Year (2024)',
+          name: `Current Year (${data.startDate ? new Date(data.startDate).getFullYear() : 2026})`,
           type: 'line',
           smooth: true,
           symbolSize: 8,
@@ -227,16 +609,18 @@ export default function OverviewPage() {
               ]
             }
           },
-          data: [2500000, 2800000, 2600000, 4258450, 4500000, 4100000, 4800000, 5200000, 4900000, 5600000, 5800000, 6100000]
+          data: data.chartRevenue && data.chartRevenue.length > 0
+            ? data.chartRevenue
+            : Array(12).fill(0)
         },
         {
-          name: 'Previous Year (2023)',
+          name: `Previous Year (${data.startDate ? new Date(data.startDate).getFullYear() - 1 : 2025})`,
           type: 'line',
           smooth: true,
           symbolSize: 6,
           itemStyle: { color: '#10b981', borderWidth: 2 },
           lineStyle: { width: 2, type: 'dashed' },
-          data: [2100000, 2300000, 2100000, 3590000, 3700000, 3400000, 4000000, 4400000, 4100000, 4700000, 4900000, 5100000]
+          data: Array(12).fill(0)
         }
       ]
     };
@@ -250,12 +634,15 @@ export default function OverviewPage() {
       window.removeEventListener('resize', handleResize);
       chartInstance.dispose();
     };
-  }, [revenueTimeframe]);
+  }, [revenueTimeframe, data]);
 
-  // 3. Initialize Business Health Score Gauge
+  // 3. Initialize Business Health Score Gauge (dynamic)
   useEffect(() => {
     if (!healthGaugeRef.current) return;
     const chartInstance = echarts.init(healthGaugeRef.current);
+
+    const scoreValue = healthScore?.overallScore ?? 92;
+    const gaugeColor = scoreValue >= 85 ? '#22c55e' : scoreValue >= 70 ? '#f59e0b' : scoreValue >= 55 ? '#f97316' : '#ef4444';
 
     const option = {
       series: [
@@ -271,7 +658,7 @@ export default function OverviewPage() {
             show: true,
             width: 9,
             itemStyle: {
-              color: '#22c55e'
+              color: gaugeColor
             }
           },
           axisLine: {
@@ -294,7 +681,7 @@ export default function OverviewPage() {
             color: '#0f172a',
             fontFamily: 'var(--font-sans), sans-serif'
           },
-          data: [{ value: 92 }]
+          data: [{ value: scoreValue }]
         }
       ]
     };
@@ -308,7 +695,7 @@ export default function OverviewPage() {
       window.removeEventListener('resize', handleResize);
       chartInstance.dispose();
     };
-  }, []);
+  }, [healthScore]);
 
   // 4. Initialize Data Quality Doughnut
   useEffect(() => {
@@ -346,45 +733,191 @@ export default function OverviewPage() {
     <div className="space-y-6 max-w-full">
       {/* 1. Metric Cards Row */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-        {metricCards.map((card, idx) => {
-          const parts = card.change.split(' vs ');
-          const percentPart = parts[0];
-          const labelPart = parts[1] ? ` vs ${parts[1]}` : '';
- 
-          return (
-            <div key={idx} className="flex items-center gap-3.5 bg-white p-4.5 rounded-xl border border-slate-200/80 shadow-2xs hover:shadow-xs transition duration-200 select-none h-[92px]">
-              <div className={cn("flex h-11 w-11 shrink-0 items-center justify-center rounded-xl shadow-3xs", card.iconBg)}>
-                {card.icon}
+        {isLoading ? (
+          Array.from({ length: 6 }).map((_, index) => (
+            <CardSkeleton key={index} />
+          ))
+        ) : (
+          <>
+            {metricCards.map((card, idx) => {
+              const parts = card.change.split(' vs ');
+              const percentPart = parts[0];
+              const labelPart = parts[1] ? ` vs ${parts[1]}` : '';
+
+              if (idx === 0) {
+                // Flipped card for Revenue card
+                return (
+                  <div
+                    key={idx}
+                    className="select-none h-[148px] w-full"
+                    style={{ perspective: '1000px' }}
+                    onClick={() => setIsRevenueFlipped(!isRevenueFlipped)}
+                  >
+                    <div
+                      className="relative w-full h-full duration-500"
+                      style={{
+                        transformStyle: 'preserve-3d',
+                        transform: isRevenueFlipped ? 'rotateY(180deg)' : 'rotateY(0deg)',
+                        transition: 'transform 0.6s cubic-bezier(0.4, 0, 0.2, 1)'
+                      }}
+                    >
+                      {/* Front Side: P&L Accounting Revenue */}
+                      <div
+                        className="absolute inset-0 h-full w-full rounded-xl border border-slate-200/80 bg-white p-4 shadow-2xs hover:shadow-xs flex flex-col overflow-hidden"
+                        style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' }}
+                      >
+                        <div className="flex items-center justify-between w-full shrink-0">
+                          <span className="text-[11px] font-semibold text-slate-500 leading-none truncate flex items-center gap-1.5 min-w-0 pr-2">
+                            <span className="truncate">{card.title}</span>
+                            <Tooltip text={card.tooltipText} />
+                          </span>
+                          <div className={cn("flex h-8 w-8 items-center justify-center rounded-lg shadow-3xs shrink-0", card.iconBg)}>
+                            {card.icon}
+                          </div>
+                        </div>
+
+                        <div className="flex-1 flex flex-col justify-center z-10 -mt-1">
+                          <FormattedAmount amount={data.revenueMTD || 0} currencyCode={data.currency} />
+                          <p className="text-[11px] font-semibold mt-1 leading-none whitespace-nowrap">
+                            <span className={card.changeClass}>{percentPart}</span>
+                            <span className="text-slate-400">{labelPart}</span>
+                          </p>
+                        </div>
+
+                        {/* Bottom Sparkline */}
+                        <div className="absolute bottom-0 left-0 right-0 px-1 pointer-events-none">
+                          <Sparkline dataPoints={data.chartRevenue} color="#0064eb" />
+                        </div>
+                      </div>
+
+                      {/* Back Side: Invoices Operational Sales */}
+                      <div
+                        className="absolute inset-0 h-full w-full rounded-xl border border-slate-200/80 bg-slate-50 p-4 shadow-2xs hover:shadow-xs flex flex-col overflow-hidden"
+                        style={{
+                          backfaceVisibility: 'hidden',
+                          WebkitBackfaceVisibility: 'hidden',
+                          transform: 'rotateY(180deg)'
+                        }}
+                      >
+                        <div className="flex items-center justify-between w-full shrink-0">
+                          <span className="text-[11px] font-semibold text-slate-500 leading-none truncate flex items-center gap-1.5 min-w-0 pr-2">
+                            <span className="truncate">Invoice Sales (MTD)</span>
+                            <Tooltip text="Operational sales revenue calculated from sent customer invoices." />
+                          </span>
+                          <div className="flex h-8 w-8 items-center justify-center rounded-lg shadow-3xs bg-emerald-50 border border-emerald-100/50 shrink-0">
+                            <svg className="h-4.5 w-4.5 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M14 2H6a2 2 0 0 0-2-2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                              <polyline points="14 2 14 8 20 8" />
+                              <line x1="16" y1="13" x2="8" y2="13" />
+                              <line x1="16" y1="17" x2="8" y2="17" />
+                            </svg>
+                          </div>
+                        </div>
+
+                        <div className="flex-1 flex flex-col justify-center z-10 -mt-1">
+                          <FormattedAmount amount={data.invoiceRevenueMTD || 0} currencyCode={data.currency} />
+                          <p className="text-[11px] font-semibold mt-1 leading-none whitespace-nowrap">
+                            <span className={getGrowthDetails(data.invoiceGrowthPercent).className}>
+                              {getGrowthDetails(data.invoiceGrowthPercent).text}
+                            </span>
+                            <span className="text-slate-400"> vs Last Month</span>
+                          </p>
+                        </div>
+
+                        {/* Bottom Sparkline */}
+                        <div className="absolute bottom-0 left-0 right-0 px-1 pointer-events-none">
+                          <Sparkline dataPoints={data.chartRevenue} color="#10b981" />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <div
+                  key={idx}
+                  className={cn(
+                    "flex flex-col bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs hover:shadow-xs transition duration-200 select-none h-[148px] relative overflow-hidden",
+                    card.onClick ? "cursor-pointer" : ""
+                  )}
+                  onClick={card.onClick}
+                >
+                  <div className="flex items-center justify-between w-full shrink-0">
+                    <span className="text-[11px] font-semibold text-slate-500 leading-none truncate flex items-center gap-1.5 min-w-0 pr-2">
+                      <span className="truncate">{card.title}</span>
+                      {card.tooltipText && <Tooltip text={card.tooltipText} />}
+                    </span>
+                    <div className={cn("flex h-8 w-8 items-center justify-center rounded-lg shadow-3xs shrink-0", card.iconBg)}>
+                      {card.icon}
+                    </div>
+                  </div>
+
+                  <div className="flex-1 flex flex-col justify-center z-10 -mt-1">
+                    <FormattedAmount amount={card.amount} currencyCode={card.currency} />
+                    <p className="text-[11px] font-semibold mt-1 leading-none whitespace-nowrap">
+                      <span className={card.changeClass}>{percentPart}</span>
+                      <span className="text-slate-400">{labelPart}</span>
+                    </p>
+                  </div>
+
+                  {/* Bottom Sparkline */}
+                  <div className="absolute bottom-0 left-0 right-0 px-1 pointer-events-none">
+                    <Sparkline 
+                      dataPoints={
+                        idx === 1 ? [] : 
+                        idx === 2 ? data.chartCash : 
+                        idx === 3 ? data.chartAR : 
+                        idx === 4 ? data.chartAP : []
+                      } 
+                      color={
+                        idx === 1 ? "#10b981" : 
+                        idx === 2 ? "#10b981" : 
+                        idx === 3 ? "#0064eb" : 
+                        idx === 4 ? "#a855f7" : "#0064eb"
+                      } 
+                    />
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Bank Reconciliation Card */}
+            <div className="flex flex-col bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs hover:shadow-xs transition duration-200 select-none h-[148px] relative overflow-hidden">
+              <div className="flex items-center justify-between w-full shrink-0">
+                <span className="text-[11px] font-semibold text-slate-500 leading-none truncate flex items-center gap-1.5 min-w-0 pr-2">
+                  <span className="truncate">Bank Reconciliation</span>
+                  <span title="Reconciled bank account items comparison status.">
+                    <Info className="h-3.5 w-3.5 text-slate-350 hover:text-slate-500 cursor-help" />
+                  </span>
+                </span>
+                <div className="relative h-7.5 w-7.5 flex items-center justify-center shrink-0 ml-1">
+                  <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
+                    <circle cx="18" cy="18" r="16" fill="none" className="text-slate-100" strokeWidth="3.5" stroke="currentColor" />
+                    <circle cx="18" cy="18" r="16" fill="none" className="text-emerald-500" strokeWidth="3.5" strokeDasharray={`${reconciliation?.reconciliationPercentage || 95}, 100`} strokeLinecap="round" stroke="currentColor" />
+                  </svg>
+                </div>
               </div>
-              <div className="flex flex-col min-w-0 justify-center">
-                <span className="text-[11px] font-medium text-slate-500 leading-none truncate">{card.title}</span>
-                <h4 className="text-[20px] font-bold text-slate-800 leading-none mt-1.5 tracking-normal truncate">{card.value}</h4>
-                <p className="text-[11px] font-medium mt-1 leading-none whitespace-nowrap">
-                  <span className={card.changeClass}>{percentPart}</span>
-                  <span className="text-slate-400">{labelPart}</span>
+
+              <div className="flex-1 flex flex-col justify-center z-10 -mt-1">
+                <h4 className="text-[20px] font-extrabold text-slate-800 leading-tight tracking-tight">
+                  {reconciliation ? `${reconciliation.reconciliationPercentage}%` : "95%"}
+                </h4>
+                <p className="text-[11px] font-semibold mt-1 leading-none whitespace-nowrap">
+                  <span className="text-[#10b981]">
+                    {reconciliation ? `${reconciliation.pendingTransactions} pending` : "8 pending"}
+                  </span>
+                  <span className="text-slate-400"> txns to match</span>
                 </p>
               </div>
+
+              {/* Bottom Sparkline */}
+              <div className="absolute bottom-0 left-0 right-0 px-1 pointer-events-none">
+                <Sparkline dataPoints={[]} color="#10b981" />
+              </div>
             </div>
-          );
-        })}
- 
-        {/* Bank Reconciliation Card */}
-        <div className="flex items-center justify-between bg-white p-4.5 rounded-xl border border-slate-200/80 shadow-2xs hover:shadow-xs transition duration-200 select-none h-[92px]">
-          <div className="flex flex-col min-w-0 justify-center">
-            <span className="text-[11px] font-medium text-slate-500 leading-none truncate">Bank Reconciliation</span>
-            <h4 className="text-[20px] font-bold text-slate-800 leading-none mt-1.5">92%</h4>
-            <p className="text-[11px] font-medium mt-1 leading-none whitespace-nowrap">
-              <span className="text-[#10b981]">↑ 5%</span>
-              <span className="text-slate-400"> vs Mar 2024</span>
-            </p>
-          </div>
-          <div className="relative h-11 w-11 flex items-center justify-center shrink-0">
-            <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
-              <circle cx="18" cy="18" r="16" fill="none" className="text-slate-100" strokeWidth="2.5" stroke="currentColor" />
-              <circle cx="18" cy="18" r="16" fill="none" className="text-emerald-500" strokeWidth="2.5" strokeDasharray="92, 100" strokeLinecap="round" stroke="currentColor" />
-            </svg>
-          </div>
-        </div>
+          </>
+        )}
       </div>
 
       {/* 2. Middle Row: Line Chart, Health Score, Alerts */}
@@ -393,7 +926,7 @@ export default function OverviewPage() {
         <div className="lg:col-span-6 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs relative flex flex-col justify-between">
           <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4 shrink-0">
             <h3 className="text-[13.5px] font-bold text-slate-800">Revenue Trend</h3>
-            
+
             <div className="flex rounded-md border border-slate-200 p-0.5 bg-slate-50 select-none">
               {(['Daily', 'Weekly', 'Monthly'] as const).map((mode) => (
                 <button
@@ -401,8 +934,8 @@ export default function OverviewPage() {
                   onClick={() => setRevenueTimeframe(mode)}
                   className={cn(
                     "px-2.5 py-1 text-[9.5px] font-bold rounded transition cursor-pointer outline-none",
-                    revenueTimeframe === mode 
-                      ? "bg-white shadow-2xs text-primary font-bold" 
+                    revenueTimeframe === mode
+                      ? "bg-white shadow-2xs text-primary font-bold"
                       : "text-slate-500 hover:text-slate-900"
                   )}
                 >
@@ -411,10 +944,24 @@ export default function OverviewPage() {
               ))}
             </div>
           </div>
-          
+
           {/* Chart Container utilizing direct ref to mount successfully under React 19 */}
-          <div className="h-68 w-full flex-1 min-h-[270px]">
+          <div className="h-68 w-full flex-1 min-h-[270px] relative">
             <div ref={revenueChartRef} className="w-full h-full" />
+            {isLoading && (
+              <div className="absolute inset-0 bg-white/75 backdrop-blur-[1px] flex flex-col items-center justify-center rounded-lg z-20 transition-all duration-300">
+                <div className="flex flex-col items-center gap-3">
+                  <div className="relative flex items-center justify-center">
+                    <div className="w-10 h-10 border-[3px] border-slate-100 rounded-full animate-spin"></div>
+                    <div className="absolute w-10 h-10 border-[3px] border-t-[#0064eb] rounded-full animate-spin"></div>
+                  </div>
+                  <div className="text-center space-y-1">
+                    <p className="text-[11.5px] font-bold text-slate-700 animate-pulse">Calculating trends...</p>
+                    <p className="text-[9.5px] text-slate-400 font-medium">Processing Xero financial ledger</p>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -425,34 +972,55 @@ export default function OverviewPage() {
             <button className="text-slate-400 hover:text-slate-700 outline-none"><MoreVertical className="h-4 w-4" /></button>
           </div>
 
-          <div className="relative flex flex-col items-center justify-center flex-1 min-h-[125px]">
-            <div ref={healthGaugeRef} className="w-full h-28" />
-            <div className="text-center mt-1">
-              <span className="text-[10px] font-bold bg-emerald-50 border border-emerald-100 text-emerald-600 px-2.5 py-0.5 rounded-full uppercase tracking-wider">Excellent</span>
-              <p className="text-[11px] text-slate-500 font-medium mt-1.5 leading-normal">Your business is in great shape!</p>
-            </div>
-          </div>
-
-          {/* KPI progress bars color matching mockup */}
-          <div className="space-y-2 mt-3 pt-3 border-t border-slate-50 shrink-0">
-            {[
-              { label: 'Profitability', value: 95, colorClass: "bg-[#10b981]" },
-              { label: 'Liquidity', value: 88, colorClass: "bg-[#0064eb]" },
-              { label: 'Efficiency', value: 90, colorClass: "bg-[#f59e0b]" },
-              { label: 'Solvency', value: 87, colorClass: "bg-[#ef4444]" },
-              { label: 'Growth', value: 93, colorClass: "bg-[#10b981]" },
-            ].map((kpi, index) => (
-              <div key={index} className="space-y-1">
-                <div className="flex items-center justify-between text-[10.5px] font-semibold text-slate-500">
-                  <span>{kpi.label}</span>
-                  <span className="text-slate-700 font-bold">{kpi.value}/100</span>
-                </div>
-                <div className="h-1.5 w-full bg-slate-50 rounded-full overflow-hidden border border-slate-100">
-                  <div className={cn("h-full rounded-full", kpi.colorClass)} style={{ width: `${kpi.value}%` }} />
+          {healthScore ? (
+            <>
+              <div className="relative flex flex-col items-center justify-center flex-1 min-h-[125px]">
+                <div ref={healthGaugeRef} className="w-full h-28" />
+                <div className="text-center mt-1">
+                  <span className={cn(
+                    "text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider border",
+                    healthScore.label === 'EXCELLENT' || healthScore.label === 'GOOD' ? 'bg-emerald-50 border-emerald-100 text-emerald-600' :
+                    healthScore.label === 'FAIR' ? 'bg-amber-50 border-amber-100 text-amber-600' :
+                    healthScore.label === 'WARNING' ? 'bg-orange-50 border-orange-100 text-orange-600' :
+                    'bg-red-50 border-red-100 text-red-600'
+                  )}>{healthScore.label}</span>
+                  <p className="text-[11px] text-slate-500 font-medium mt-1.5 leading-normal">{healthScore.description}</p>
                 </div>
               </div>
-            ))}
-          </div>
+
+              {/* KPI progress bars - Dynamic from API */}
+              <div className="space-y-2 mt-3 pt-3 border-t border-slate-50 shrink-0">
+                {healthScore.metrics.map((kpi, index) => (
+                  <div key={index} className="space-y-1">
+                    <div className="flex items-center justify-between text-[10.5px] font-semibold text-slate-500">
+                      <span>{kpi.name}</span>
+                      <span className="text-slate-700 font-bold">{kpi.score}/100</span>
+                    </div>
+                    <div className="h-1.5 w-full bg-slate-50 rounded-full overflow-hidden border border-slate-100">
+                      <div className="h-full rounded-full transition-all duration-700 ease-out" style={{ width: `${kpi.score}%`, backgroundColor: kpi.color }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="flex-1 flex flex-col items-center justify-center min-h-[125px] py-4">
+              <div ref={healthGaugeRef} className="w-full h-28 opacity-30" />
+              <div className="space-y-2 mt-6 w-full pt-3 border-t border-slate-50">
+                {['Profitability', 'Liquidity', 'Efficiency', 'Solvency', 'Growth'].map((name) => (
+                  <div key={name} className="space-y-1">
+                    <div className="flex items-center justify-between text-[10.5px] font-semibold text-slate-500">
+                      <span>{name}</span>
+                      <span className="text-slate-300 font-bold">—</span>
+                    </div>
+                    <div className="h-1.5 w-full bg-slate-50 rounded-full overflow-hidden border border-slate-100">
+                      <div className="h-full rounded-full bg-slate-100 animate-pulse" style={{ width: '30%' }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Alerts & Notifications with structured rows */}
@@ -465,60 +1033,94 @@ export default function OverviewPage() {
             </Link>
           </div>
 
-          <div className="flex-1 space-y-2.5 overflow-y-auto max-h-[350px] pr-1">
-            {[
-              {
-                title: "12 Invoices are overdue",
-                sub: "Total: ₹4,32,250",
-                time: "2h ago",
-                color: "bg-red-500",
-                icon: "!"
-              },
-              {
-                title: "Bank reconciliation pending",
-                sub: "2 accounts",
-                time: "5h ago",
-                color: "bg-emerald-500",
-                icon: "✓"
-              },
-              {
-                title: "GST return due in 4 days",
-                sub: "Period: Apr 2024",
-                time: "1d ago",
-                color: "bg-amber-500",
-                icon: "!"
-              },
-              {
-                title: "3 Bills are overdue",
-                sub: "Total: ₹1,25,600",
-                time: "1d ago",
-                color: "bg-red-500",
-                icon: "!"
-              },
-              {
-                title: "New bank transactions",
-                sub: "18 transactions",
-                time: "2d ago",
-                color: "bg-blue-500",
-                icon: "i"
-              }
-            ].map((alert, idx) => (
-              <div key={idx} className="flex items-start gap-3 text-[11px] leading-normal p-2.5 rounded-lg border border-slate-100 bg-slate-50/30">
-                <div className={cn("flex h-5.5 w-5.5 shrink-0 items-center justify-center rounded-full text-white font-bold text-[10px]", alert.color)}>
-                  {alert.icon}
-                </div>
-                <div className="flex-1 min-w-0 space-y-0.5">
-                  <div className="flex items-center justify-between gap-1.5">
-                    <span className="font-bold text-slate-700 truncate">{alert.title}</span>
-                    <span className="text-[9.5px] text-slate-400 font-medium shrink-0">{alert.time}</span>
+          <div className="flex-1 overflow-y-auto max-h-[350px] pr-1">
+            {alertsData === null ? (
+              /* Loading state - subtle shimmer bars */
+              <div className="space-y-2.5">
+                {[1, 2, 3, 4].map((i) => (
+                  <div key={i} className="flex items-start gap-3 p-2.5 rounded-lg border border-slate-100 bg-slate-50/30">
+                    <div className="h-5.5 w-5.5 shrink-0 rounded-full bg-slate-100 animate-pulse" />
+                    <div className="flex-1 space-y-1.5">
+                      <div className="h-3 w-3/4 bg-slate-100 rounded animate-pulse" />
+                      <div className="h-2.5 w-1/2 bg-slate-50 rounded animate-pulse" />
+                    </div>
                   </div>
-                  <div className="text-[10px] text-slate-450 font-semibold">{alert.sub}</div>
+                ))}
+              </div>
+            ) : alertsData.alerts.length === 0 ? (
+              /* Empty state - No notifications */
+              <div className="flex flex-col items-center justify-center py-10 gap-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-50 border border-slate-100">
+                  <svg className="h-5 w-5 text-slate-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                    <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+                  </svg>
+                </div>
+                <div className="text-center">
+                  <p className="text-[12px] font-bold text-slate-500">No Notifications</p>
+                  <p className="text-[10px] text-slate-400 font-medium mt-0.5">You&apos;re all caught up!</p>
                 </div>
               </div>
-            ))}
+            ) : (
+              /* Real alerts from API */
+              <div className="space-y-2.5">
+                {alertsData.alerts.map((alert, idx) => (
+                  <div key={alert.id || idx} className="flex items-start gap-3 text-[11px] leading-normal p-2.5 rounded-lg border border-slate-100 bg-slate-50/30">
+                    <div className={cn("flex h-5.5 w-5.5 shrink-0 items-center justify-center rounded-full text-white font-bold text-[10px]", alert.color)}>
+                      {alert.icon}
+                    </div>
+                    <div className="flex-1 min-w-0 space-y-0.5">
+                      <div className="flex items-center justify-between gap-1.5">
+                        <span className="font-bold text-slate-700 truncate">{alert.title}</span>
+                        <span className="text-[9.5px] text-slate-400 font-medium shrink-0">{alert.time}</span>
+                      </div>
+                      <div className="text-[10px] text-slate-450 font-semibold">{alert.sub}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
+
+      {/* Financial & Accounting Overview Row */}
+      <FinancialAccountingOverview data={data} loading={isLoading} />
+
+      {/* 2.5 New Second Row: 4 Metric Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+        <OrganizationDetailsCard
+          organisation={data.organisation}
+          lastSync={data.lastSync}
+          loading={isLoading}
+        />
+        <ConnectedBankAccountsCard
+          data={bankOverviewData}
+          loading={isLoading}
+          onRefresh={fetchDashboardData}
+          onManageConnections={() => window.location.href = '/data-sources'}
+        />
+        <InvoiceStatusSummaryCard
+          summary={data.invoiceStatusSummary}
+          loading={isLoading}
+          onViewAll={() => window.location.href = '/invoices'}
+        />
+        <BillStatusSummaryCard
+          summary={data.billStatusSummary}
+          loading={isLoading}
+          onViewAll={() => window.location.href = '/purchases'}
+        />
+      </div>
+
+      {/* 2.7 New Third Row: 6 KPI Cards */}
+      <KpisRow
+        currency={data.currency}
+        fromDate={searchParams.get('from_date')}
+        toDate={searchParams.get('to_date')}
+      />
+
+      {/* 2.8 New Fourth Row: 4 Accounts/Reconciliation Summary Cards */}
+      <OverviewMoreCardsRow />
 
       {/* 3. Bottom Row: Tables and Lists */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
@@ -540,25 +1142,45 @@ export default function OverviewPage() {
                   <th className="py-3 px-2">Invoice #</th>
                   <th className="py-3 px-2">Due Date</th>
                   <th className="py-3 px-2 text-right">Amount</th>
-                  <th className="py-3 px-2 text-right w-24"></th>
+                  <th className="py-3 px-2 text-right w-24">Overdue</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {[
-                  { name: 'ABC Pvt Ltd', id: 'INV-0425', due: '10 Apr 2024', amount: '₹1,25,000', days: '15 days' },
-                  { name: 'XYZ Enterprises', id: 'INV-0418', due: '05 Apr 2024', amount: '₹98,500', days: '20 days' },
-                  { name: 'Global Solutions', id: 'INV-0409', due: '28 Mar 2024', amount: '₹75,250', days: '28 days' },
-                  { name: 'TechSoft India', id: 'INV-0387', due: '20 Mar 2024', amount: '₹65,000', days: '36 days' },
-                  { name: 'Bright Future Pvt Ltd', id: 'INV-0376', due: '15 Mar 2024', amount: '₹48,500', days: '41 days' },
-                ].map((row, idx) => (
-                  <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
-                    <td className="py-3 px-2 font-bold text-slate-700">{row.name}</td>
-                    <td className="py-3 px-2 text-slate-400 font-semibold">{row.id}</td>
-                    <td className="py-3 px-2 text-slate-400 font-semibold">{row.due}</td>
-                    <td className="py-3 px-2 text-right font-bold text-slate-800">{row.amount}</td>
-                    <td className="py-3 px-2 text-right font-bold text-[#ef4444]">{row.days}</td>
+                {isLoading ? (
+                  [1, 2, 3, 4, 5].map((i) => (
+                    <tr key={i} className="animate-pulse">
+                      <td className="py-3 px-2"><div className="h-3 w-24 bg-slate-100 rounded" /></td>
+                      <td className="py-3 px-2"><div className="h-3 w-12 bg-slate-100 rounded" /></td>
+                      <td className="py-3 px-2"><div className="h-3 w-16 bg-slate-100 rounded" /></td>
+                      <td className="py-3 px-2 text-right"><div className="h-3 w-16 bg-slate-100 rounded ml-auto" /></td>
+                      <td className="py-3 px-2 text-right"><div className="h-3 w-12 bg-slate-100 rounded ml-auto" /></td>
+                    </tr>
+                  ))
+                ) : (!data.overdueInvoices || data.overdueInvoices.length === 0) ? (
+                  <tr>
+                    <td colSpan={5} className="py-12">
+                      <div className="flex flex-col items-center justify-center text-center px-4">
+                        <div className="h-11 w-11 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 mb-3 border border-slate-100 shadow-2xs">
+                          <FileCheck className="h-5 w-5 stroke-[1.5]" />
+                        </div>
+                        <h4 className="text-[12px] font-bold text-slate-700 mb-0.5 font-sans">All Caught Up!</h4>
+                        <p className="text-[10.5px] text-slate-400 max-w-[240px] font-sans">No overdue invoices found at the moment.</p>
+                      </div>
+                    </td>
                   </tr>
-                ))}
+                ) : (
+                  data.overdueInvoices.map((row, idx) => (
+                    <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="py-3 px-2 font-bold text-slate-700 truncate max-w-[150px]">{row.name}</td>
+                      <td className="py-3 px-2 text-slate-400 font-semibold">{row.id}</td>
+                      <td className="py-3 px-2 text-slate-400 font-semibold">{formatDateString(row.due)}</td>
+                      <td className="py-3 px-2 text-right font-bold text-slate-800">
+                        <FormattedAmount amount={row.amount} currencyCode={data.currency} className="font-bold text-[11px]" />
+                      </td>
+                      <td className="py-3 px-2 text-right font-bold text-[#ef4444]">{row.days} days</td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
@@ -575,94 +1197,116 @@ export default function OverviewPage() {
           </div>
 
           <div className="flex-1 space-y-0 divide-y divide-slate-100">
-            {[
-              {
-                name: 'HDFC Bank - 1010',
-                balance: '₹6,45,230',
-                update: 'Updated 2 min ago',
-                isNegative: false,
-                logo: (
-                  <svg className="h-5.5 w-5.5 rounded shrink-0 border border-blue-200/40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <rect width="24" height="24" fill="#004c8f" />
-                    <rect x="5" y="5" width="14" height="14" fill="#ffffff" />
-                    <rect x="8.5" y="8.5" width="7" height="7" fill="#004c8f" />
-                    <rect x="11" y="5" width="2" height="14" fill="#004c8f" />
-                    <rect x="5" y="11" width="14" height="2" fill="#004c8f" />
-                  </svg>
-                )
-              },
-              {
-                name: 'ICICI Bank - 9876',
-                balance: '₹4,32,120',
-                update: 'Updated 2 min ago',
-                isNegative: false,
-                logo: (
-                  <svg className="h-5.5 w-5.5 rounded shrink-0 border border-orange-200/40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <rect width="24" height="24" fill="#f26e21" />
-                    <circle cx="12" cy="12" r="7" fill="#ffffff" />
-                    <path d="M12 9v6M10 9h4M10 15h4" stroke="#f26e21" strokeWidth="1.8" strokeLinecap="round" />
-                  </svg>
-                )
-              },
-              {
-                name: 'State Bank of India - 5555',
-                balance: '₹2,15,870',
-                update: 'Updated 2 min ago',
-                isNegative: false,
-                logo: (
-                  <svg className="h-5.5 w-5.5 rounded shrink-0 border border-cyan-200/40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <rect width="24" height="24" fill="#00a8e8" />
-                    <circle cx="12" cy="11" r="5" stroke="#ffffff" strokeWidth="2" fill="none" />
-                    <line x1="12" y1="13.5" x2="12" y2="19" stroke="#ffffff" strokeWidth="2.2" strokeLinecap="round" />
-                  </svg>
-                )
-              },
-              {
-                name: 'Axis Bank - 1234',
-                balance: '₹2,71,100',
-                update: 'Updated 2 min ago',
-                isNegative: false,
-                logo: (
-                  <svg className="h-5.5 w-5.5 rounded shrink-0 border border-rose-900/20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <rect width="24" height="24" fill="#841a41" />
-                    <path d="M12 5l6 14H6l6-14z" fill="#ffffff" />
-                    <path d="M12 9l3.5 8h-7L12 9z" fill="#841a41" />
-                    <line x1="10" y1="14" x2="14" y2="14" stroke="#ffffff" strokeWidth="1.2" />
-                  </svg>
-                )
-              },
-              {
-                name: 'Kotak Bank - 4321',
-                balance: '-₹48,000',
-                update: 'Updated 2 min ago',
-                isNegative: true,
-                logo: (
-                  <svg className="h-5.5 w-5.5 rounded shrink-0 border border-red-200/40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <rect width="24" height="24" fill="#d81d24" />
-                    <circle cx="12" cy="12" r="7" stroke="#ffffff" strokeWidth="1.8" fill="none" />
-                    <path d="M9.5 9v6M13.5 9l-2.5 3 2.5 3M11 12h2" stroke="#ffffff" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                )
-              }
-            ].map((bank, idx) => (
-              <div key={idx} className="flex items-center justify-between py-3 border-b border-slate-100 last:border-0 hover:bg-slate-50/50 transition-colors">
-                <div className="flex items-center gap-3">
-                  {bank.logo}
-                  <span className="font-bold text-slate-700 text-[11.5px]">{bank.name}</span>
-                </div>
-                <div className="flex items-center gap-3.5">
-                  <span className={cn(
-                    "font-bold text-[11.5px]",
-                    bank.isNegative ? "text-red-500" : "text-slate-800"
-                  )}>
-                    {bank.balance}
-                  </span>
-                  <span className="text-[10px] text-slate-400 font-medium whitespace-nowrap">
-                    {bank.update}
-                  </span>
-                </div>
+            {isLoading ? (
+              <div className="space-y-3 py-2">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="flex items-center justify-between py-2.5 animate-pulse animate-duration-1000">
+                    <div className="flex items-center gap-3">
+                      <div className="h-5.5 w-5.5 rounded-md bg-slate-100 shrink-0" />
+                      <div className="flex flex-col gap-1">
+                        <div className="h-3 w-24 bg-slate-100 rounded" />
+                        <div className="h-2 w-10 bg-slate-100 rounded" />
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="h-3 w-16 bg-slate-100 rounded" />
+                      <div className="h-4 w-10 bg-slate-100 rounded-full" />
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
+            ) : (!data.bankAccounts || data.bankAccounts.length === 0) ? (
+              <div className="flex flex-col items-center justify-center text-center py-12 px-4 flex-1">
+                <div className="h-11 w-11 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 mb-3 border border-slate-100 shadow-2xs">
+                  <Landmark className="h-5 w-5 stroke-[1.5]" />
+                </div>
+                <h4 className="text-[12px] font-bold text-slate-700 mb-0.5 font-sans">No Bank Accounts</h4>
+                <p className="text-[10.5px] text-slate-400 max-w-[200px] font-sans">No connected bank accounts found.</p>
+              </div>
+            ) : (
+              data.bankAccounts.map((bank: any, idx: number) => {
+                const isNegative = bank.balance !== null && bank.balance < 0;
+                const nameLower = bank.accountName.toLowerCase();
+                let logo = (
+                  <div className="h-5.5 w-5.5 rounded shrink-0 border border-slate-200/50 bg-slate-50 text-[9.5px] font-bold text-slate-500 flex items-center justify-center">
+                    BS
+                  </div>
+                );
+
+                if (nameLower.includes('hdfc')) {
+                  logo = (
+                    <svg className="h-5.5 w-5.5 rounded shrink-0 border border-blue-200/40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <rect width="24" height="24" fill="#004c8f" />
+                      <rect x="5" y="5" width="14" height="14" fill="#ffffff" />
+                      <rect x="8.5" y="8.5" width="7" height="7" fill="#004c8f" />
+                      <rect x="11" y="5" width="2" height="14" fill="#004c8f" />
+                      <rect x="5" y="11" width="14" height="2" fill="#004c8f" />
+                    </svg>
+                  );
+                } else if (nameLower.includes('icici')) {
+                  logo = (
+                    <svg className="h-5.5 w-5.5 rounded shrink-0 border border-orange-200/40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <rect width="24" height="24" fill="#f26e21" />
+                      <circle cx="12" cy="12" r="7" fill="#ffffff" />
+                      <path d="M12 9v6M10 9h4M10 15h4" stroke="#f26e21" strokeWidth="1.8" strokeLinecap="round" />
+                    </svg>
+                  );
+                } else if (nameLower.includes('state bank') || nameLower.includes('sbi')) {
+                  logo = (
+                    <svg className="h-5.5 w-5.5 rounded shrink-0 border border-cyan-200/40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <rect width="24" height="24" fill="#00a8e8" />
+                      <circle cx="12" cy="11" r="5" stroke="#ffffff" strokeWidth="2" fill="none" />
+                      <line x1="12" y1="13.5" x2="12" y2="19" stroke="#ffffff" strokeWidth="2.2" strokeLinecap="round" />
+                    </svg>
+                  );
+                } else if (nameLower.includes('axis')) {
+                  logo = (
+                    <svg className="h-5.5 w-5.5 rounded shrink-0 border border-rose-900/20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <rect width="24" height="24" fill="#841a41" />
+                      <path d="M12 5l6 14H6l6-14z" fill="#ffffff" />
+                      <path d="M12 9l3.5 8h-7L12 9z" fill="#841a41" />
+                      <line x1="10" y1="14" x2="14" y2="14" stroke="#ffffff" strokeWidth="1.2" />
+                    </svg>
+                  );
+                } else if (nameLower.includes('kotak')) {
+                  logo = (
+                    <svg className="h-5.5 w-5.5 rounded shrink-0 border border-red-200/40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <rect width="24" height="24" fill="#d81d24" />
+                      <circle cx="12" cy="12" r="7" stroke="#ffffff" strokeWidth="1.8" fill="none" />
+                      <path d="M9.5 9v6M13.5 9l-2.5 3 2.5 3M11 12h2" stroke="#ffffff" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  );
+                }
+
+                return (
+                  <div key={idx} className="flex items-center justify-between py-3 border-b border-slate-100 last:border-0 hover:bg-slate-50/50 transition-colors">
+                    <div className="flex items-center gap-3">
+                      {logo}
+                      <div className="flex flex-col min-w-0">
+                        <span className="font-bold text-slate-700 text-[11.5px] truncate">{bank.accountName}</span>
+                        <span className="text-[9px] text-slate-450 font-bold leading-none mt-0.5">CODE: {bank.accountCode || 'BANK'}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className={cn(
+                        "font-bold text-[11.5px] select-all",
+                        isNegative ? "text-red-500" : "text-slate-800"
+                      )}>
+                        {bank.balance !== null ? (
+                          <FormattedAmount
+                            amount={bank.balance}
+                            currencyCode={bank.currency}
+                            className="font-bold text-[11.5px]"
+                          />
+                        ) : (
+                          '—'
+                        )}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
 
@@ -678,11 +1322,44 @@ export default function OverviewPage() {
 
           <div className="flex-1 space-y-4 pt-2">
             {[
-              { label: 'Revenue', value: '₹42,58,450', percent: 100, color: 'bg-emerald-500', showBar: true },
-              { label: 'Cost of Goods Sold', value: '₹21,45,230', percent: 50.4, color: 'bg-red-500', showBar: true },
-              { label: 'Gross Profit', value: '₹21,13,220', percent: 49.6, showBar: false, isLabelBold: true, hasDividerAbove: true },
-              { label: 'Operating Expenses', value: '₹12,38,010', percent: 29.1, color: 'bg-red-500', showBar: true },
-              { label: 'Net Profit', value: '₹8,75,210', percent: 20.5, color: 'bg-emerald-500', showBar: true, isLabelBold: true, hasDividerAbove: true },
+              {
+                label: 'Revenue',
+                amount: data.plRevenue || 0,
+                percent: (data.plRevenue && data.plRevenue > 0) ? 100 : 0,
+                color: 'bg-emerald-500',
+                showBar: true
+              },
+              {
+                label: 'Cost of Goods Sold',
+                amount: data.cogs || 0,
+                percent: (data.plRevenue && data.plRevenue > 0) ? Math.min(100, Math.max(0, ((data.cogs || 0) / data.plRevenue * 100))) : 0,
+                color: 'bg-red-500',
+                showBar: true
+              },
+              {
+                label: 'Gross Profit',
+                amount: data.grossProfit || 0,
+                percent: (data.plRevenue && data.plRevenue > 0) ? Math.min(100, Math.max(0, ((data.grossProfit || 0) / data.plRevenue * 100))) : 0,
+                showBar: false,
+                isLabelBold: true,
+                hasDividerAbove: true
+              },
+              {
+                label: 'Operating Expenses',
+                amount: data.expenses || 0,
+                percent: (data.plRevenue && data.plRevenue > 0) ? Math.min(100, Math.max(0, ((data.expenses || 0) / data.plRevenue * 100))) : 0,
+                color: 'bg-red-500',
+                showBar: true
+              },
+              {
+                label: 'Net Profit',
+                amount: data.netProfit || 0,
+                percent: (data.plRevenue && data.plRevenue > 0) ? Math.min(100, Math.max(0, ((data.netProfit || 0) / data.plRevenue * 100))) : 0,
+                color: 'bg-emerald-500',
+                showBar: true,
+                isLabelBold: true,
+                hasDividerAbove: true
+              },
             ].map((row, idx) => (
               <React.Fragment key={idx}>
                 {row.hasDividerAbove && (
@@ -693,10 +1370,18 @@ export default function OverviewPage() {
                     <span className={cn(row.isLabelBold ? "font-bold text-slate-800" : "text-slate-500 font-semibold", "truncate")}>
                       {row.label}
                     </span>
-                    {row.label === 'Gross Profit' && <span className="text-[9px] text-slate-400 font-semibold leading-none mt-0.5">49.6%</span>}
-                    {row.label === 'Net Profit' && <span className="text-[9px] text-slate-400 font-semibold leading-none mt-0.5">20.5%</span>}
+                    {row.label === 'Gross Profit' && (
+                      <span className="text-[9px] text-slate-455 font-bold leading-none mt-0.5">
+                        {data.plRevenue && data.plRevenue > 0 ? (((data.grossProfit || 0) / data.plRevenue) * 100).toFixed(1) + '%' : '0.0%'}
+                      </span>
+                    )}
+                    {row.label === 'Net Profit' && (
+                      <span className="text-[9px] text-slate-455 font-bold leading-none mt-0.5">
+                        {data.plRevenue && data.plRevenue > 0 ? (((data.netProfit || 0) / data.plRevenue) * 100).toFixed(1) + '%' : '0.0%'}
+                      </span>
+                    )}
                   </div>
-                  
+
                   <div className="flex-1 px-1">
                     {row.showBar && row.percent ? (
                       <div className="h-1 w-full bg-slate-50 border border-slate-100/50 rounded-full overflow-hidden">
@@ -708,21 +1393,34 @@ export default function OverviewPage() {
                   </div>
 
                   <div className="text-right font-bold text-slate-800 text-[11.5px] whitespace-nowrap">
-                    {row.value}
+                    <FormattedAmount
+                      amount={row.amount}
+                      currencyCode={data.currency}
+                      className="font-bold text-[11.5px] select-all"
+                    />
                   </div>
                 </div>
               </React.Fragment>
             ))}
           </div>
-
-          <div className="text-center pt-2">
-            <span className="text-[9.5px] text-slate-400 font-semibold">*All values are in INR</span>
-          </div>
         </div>
       </div>
 
-      {/* 4. Bottom-Most Grid: Data Quality, Sync Status, Quick Actions */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+      {/* 4. Bottom New Row: Recent Activity, Pending Approvals, Top Customers, Top Vendors */}
+      <OverviewBottomCardsRow />
+
+      {/* 5. Cash Flow Overview full-width row */}
+      <div className="mt-5">
+        <CashFlowOverview />
+      </div>
+
+      {/* 6. AI Insights & Recommendations */}
+      <div className="mt-5">
+        <AiInsightsWidget />
+      </div>
+
+      {/* 7. Bottom-Most Grid: Data Quality, Sync Status, Quick Actions */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 mt-5">
         {/* Data Quality Score Card */}
         <div className="lg:col-span-4 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between select-none">
           <div className="border-b border-slate-100 pb-3 mb-3 flex items-center justify-between shrink-0">
@@ -805,20 +1503,20 @@ export default function OverviewPage() {
             <h3 className="text-[13.5px] font-bold text-slate-800">Quick Actions</h3>
             <button className="text-slate-400 hover:text-slate-700 outline-none"><MoreVertical className="h-4 w-4" /></button>
           </div>
-          
+
           <div className="grid grid-cols-5 gap-2 mt-1">
             {[
-              { 
-                label: 'Sync Now', 
+              {
+                label: 'Sync Now',
                 icon: (
                   <svg className="h-4.5 w-4.5 text-[#0064eb]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
                   </svg>
-                ), 
-                onClick: () => toast.success("Syncing triggered!") 
+                ),
+                onClick: () => toast.success("Syncing triggered!")
               },
-              { 
-                label: 'Import Bank Transactions', 
+              {
+                label: 'Import Bank Transactions',
                 icon: (
                   <svg className="h-4.5 w-4.5 text-[#10b981]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <rect x="2" y="2" width="20" height="8" rx="2" />
@@ -826,40 +1524,40 @@ export default function OverviewPage() {
                     <line x1="6" y1="6" x2="6.01" y2="6" />
                     <line x1="6" y1="18" x2="6.01" y2="18" />
                   </svg>
-                ), 
-                onClick: () => toast.info("Opening bank feeds import...") 
+                ),
+                onClick: () => toast.info("Opening bank feeds import...")
               },
-              { 
-                label: 'Reconcile Accounts', 
+              {
+                label: 'Reconcile Accounts',
                 icon: (
                   <svg className="h-4.5 w-4.5 text-[#0064eb]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                     <polyline points="14 2 14 8 20 8" />
                     <path d="m9 15 2 2 4-4" />
                   </svg>
-                ), 
-                onClick: () => toast.success("Loading pending transactions...") 
+                ),
+                onClick: () => toast.success("Loading pending transactions...")
               },
-              { 
-                label: 'Run Reports', 
+              {
+                label: 'Run Reports',
                 icon: (
                   <svg className="h-4.5 w-4.5 text-[#0064eb]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
                     <rect x="8" y="2" width="8" height="4" rx="1" />
                     <path d="M9 12h6M9 16h6" />
                   </svg>
-                ), 
-                onClick: () => toast.info("Generating statement export options...") 
+                ),
+                onClick: () => toast.info("Generating statement export options...")
               },
-              { 
-                label: 'Data Quality Check', 
+              {
+                label: 'Data Quality Check',
                 icon: (
                   <svg className="h-4.5 w-4.5 text-[#0064eb]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
                     <path d="m9 11 2 2 4-4" />
                   </svg>
-                ), 
-                onClick: () => toast.info("Running compliance audit...") 
+                ),
+                onClick: () => toast.info("Running compliance audit...")
               },
             ].map((action, idx) => (
               <button

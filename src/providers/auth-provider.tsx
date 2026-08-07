@@ -20,22 +20,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Perform initial hydration checks/JWT validation
+    // Perform initial hydration checks
     const token = localStorage.getItem('cfo_auth_token');
-    if (!token || !user) {
+    if (!token) {
       clearStore();
     }
     setIsLoading(false);
-  }, [user, clearStore]);
+  }, [clearStore]);
 
   const login = (token: string, profile: UserProfile) => {
     localStorage.setItem('cfo_auth_token', token);
     setUser(profile);
   };
 
-  const logout = () => {
+  const logout = async () => {
     localStorage.removeItem('cfo_auth_token');
     clearStore();
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch (err) {
+      console.error('API logout failed:', err);
+    }
+    window.location.href = '/login';
   };
 
   const checkPermission = (permission: Permission): boolean => {
