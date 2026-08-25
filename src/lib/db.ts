@@ -750,20 +750,22 @@ export const db = {
     if (isPgConnected) {
       try {
         const { rows } = await pgPool.query('SELECT * FROM invoices WHERE tenant_id = $1', [tenantId]);
-        return rows.map(r => ({
-          ...r,
-          InvoiceID: r.external_id,
-          InvoiceNumber: r.invoice_number,
-          Type: r.type,
-          Status: r.status,
-          Total: parseFloat(r.total || 0),
-          AmountDue: parseFloat(r.amount_due || 0),
-          AmountPaid: parseFloat(r.amount_paid || 0),
-          CurrencyCode: r.currency,
-          Date: r.invoice_date,
-          ContactName: r.contact_name,
-          DueDate: r.due_date
-        }));
+        if (rows.length > 0) {
+          return rows.map(r => ({
+            ...r,
+            InvoiceID: r.external_id,
+            InvoiceNumber: r.invoice_number,
+            Type: r.type,
+            Status: r.status,
+            Total: parseFloat(r.total || 0),
+            AmountDue: parseFloat(r.amount_due || 0),
+            AmountPaid: parseFloat(r.amount_paid || 0),
+            CurrencyCode: r.currency,
+            Date: r.invoice_date,
+            ContactName: r.contact_name,
+            DueDate: r.due_date
+          }));
+        }
       } catch (e) {
         console.error("Database query failed, falling back to JSON DB:", e);
         isPgConnected = false;
@@ -781,14 +783,16 @@ export const db = {
     if (isPgConnected) {
       try {
         const { rows } = await pgPool.query('SELECT * FROM payments WHERE tenant_id = $1', [tenantId]);
-        return rows.map(r => ({
-          ...r,
-          PaymentID: r.external_id,
-          Amount: parseFloat(r.amount || 0),
-          PaymentType: r.payment_type,
-          Status: r.status,
-          Date: r.payment_date || r.created_at
-        }));
+        if (rows.length > 0) {
+          return rows.map(r => ({
+            ...r,
+            PaymentID: r.external_id,
+            Amount: parseFloat(r.amount || 0),
+            PaymentType: r.payment_type,
+            Status: r.status,
+            Date: r.payment_date || r.created_at
+          }));
+        }
       } catch (e) {
         console.error("Database query failed, falling back to JSON DB:", e);
         isPgConnected = false;
@@ -802,14 +806,16 @@ export const db = {
     if (isPgConnected) {
       try {
         const { rows } = await pgPool.query('SELECT * FROM accounts WHERE tenant_id = $1', [tenantId]);
-        return rows.map(r => ({
-          ...r,
-          AccountID: r.external_id,
-          Name: r.name,
-          Code: r.code,
-          Type: r.type,
-          Status: r.status || 'ACTIVE'
-        }));
+        if (rows.length > 0) {
+          return rows.map(r => ({
+            ...r,
+            AccountID: r.external_id,
+            Name: r.name,
+            Code: r.code,
+            Type: r.type,
+            Status: r.status || 'ACTIVE'
+          }));
+        }
       } catch (e) {
         console.error("Database query failed, falling back to JSON DB:", e);
         isPgConnected = false;
@@ -902,7 +908,9 @@ export const db = {
           'SELECT raw_data FROM reports WHERE tenant_id = $1 AND report_type = $2',
           [tenantId, reportType]
         );
-        return rows[0] ? rows[0].raw_data : null;
+        if (rows[0] && rows[0].raw_data) {
+          return rows[0].raw_data;
+        }
       } catch (e) {
         console.error("Database query failed, falling back to JSON DB:", e);
         isPgConnected = false;
