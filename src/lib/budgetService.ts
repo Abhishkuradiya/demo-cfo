@@ -29,8 +29,12 @@ export const XeroBudgetService = {
   /**
    * Helper to fetch the list of budgets from the Xero Accounting API.
    */
-  fetchBudgetsList: async (accessToken: string, xeroTenantId: string): Promise<any[]> => {
+  fetchBudgetsList: async (accessToken: string, xeroTenantId: string, retriesLeft = 3): Promise<any[]> => {
     const url = 'https://api.xero.com/api.xro/2.0/Budgets';
+    
+    // Throttle to naturally pace concurrent requests
+    await new Promise(resolve => setTimeout(resolve, 150));
+
     const res = await fetch(url, {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -39,9 +43,16 @@ export const XeroBudgetService = {
       }
     });
 
+    if (res.status === 429 && retriesLeft > 0) {
+      const retryAfter = parseInt(res.headers.get('Retry-After') || '2') * 1000;
+      console.warn(`[Xero Budgets API] Rate limit (429) hit. Waiting ${retryAfter}ms before retry...`);
+      await new Promise(resolve => setTimeout(resolve, retryAfter));
+      return XeroBudgetService.fetchBudgetsList(accessToken, xeroTenantId, retriesLeft - 1);
+    }
+
     if (!res.ok) {
       const errText = await res.text();
-      throw new Error(`Xero Budgets list API error: ${errText}`);
+      throw new Error(`Xero Budgets list API error (Status ${res.status}): ${errText}`);
     }
 
     const data = await res.json();

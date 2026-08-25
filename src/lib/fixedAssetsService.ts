@@ -13,8 +13,12 @@ export const XeroFixedAssetsService = {
   /**
    * Helper to fetch fixed assets from the Xero Fixed Assets API (which uses a different base URL).
    */
-  fetchXeroAssets: async (accessToken: string, xeroTenantId: string, status: 'DRAFT' | 'REGISTERED' | 'DISPOSED', page = 1, pageSize = 200): Promise<any[]> => {
+  fetchXeroAssets: async (accessToken: string, xeroTenantId: string, status: 'DRAFT' | 'REGISTERED' | 'DISPOSED', page = 1, pageSize = 200, retriesLeft = 3): Promise<any[]> => {
     const url = `https://api.xero.com/assets.xro/1.0/Assets?status=${status}&page=${page}&pageSize=${pageSize}`;
+    
+    // Throttle to naturally pace concurrent requests
+    await new Promise(resolve => setTimeout(resolve, 150));
+
     const res = await fetch(url, {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -23,9 +27,16 @@ export const XeroFixedAssetsService = {
       }
     });
 
+    if (res.status === 429 && retriesLeft > 0) {
+      const retryAfter = parseInt(res.headers.get('Retry-After') || '2') * 1000;
+      console.warn(`[Xero Assets API] Rate limit (429) hit. Waiting ${retryAfter}ms before retry...`);
+      await new Promise(resolve => setTimeout(resolve, retryAfter));
+      return XeroFixedAssetsService.fetchXeroAssets(accessToken, xeroTenantId, status, page, pageSize, retriesLeft - 1);
+    }
+
     if (!res.ok) {
       const errText = await res.text();
-      throw new Error(`Xero Assets API error: ${errText}`);
+      throw new Error(`Xero Assets API error (Status ${res.status}): ${errText}`);
     }
 
     const data = await res.json();
