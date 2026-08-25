@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getTenantIdFromSession } from '@/lib/auth';
 import { getXeroAccessToken, fetchXeroReport, fetchXeroResource } from '@/lib/xero';
+import { BalanceSheetParser } from '@/lib/services/BalanceSheetParser';
 
 export const dynamic = 'force-dynamic';
 
@@ -197,6 +198,46 @@ export async function GET(req: NextRequest) {
     const difference = assetsSum - (liabilitiesSum + equitySum);
     const isBalanced = Math.abs(difference) < 0.05;
 
+    // Calculate last 6 months ending on the selected date for Equity Trend
+    const targetDate = new Date(date);
+    const monthsRange: { year: number; month: number; label: string }[] = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(targetDate.getFullYear(), targetDate.getMonth() - i, 1);
+      const label = d.toLocaleString('en-US', { month: 'short', year: 'numeric' });
+      monthsRange.push({
+        year: d.getFullYear(),
+        month: d.getMonth(),
+        label
+      });
+    }
+
+    const equityTrend: { label: string; value: number }[] = [];
+    for (const m of monthsRange) {
+      const pad = (n: number) => String(n).padStart(2, '0');
+      const lastDayOfMonth = new Date(m.year, m.month + 1, 0).getDate();
+      const mDateStr = `${m.year}-${pad(m.month + 1)}-${pad(lastDayOfMonth)}`;
+      
+      const mBsCacheKey = `BalanceSheet_${mDateStr}`;
+      let mBsReport = await db.getReport(tenantId, mBsCacheKey);
+      
+      if (!mBsReport && tokenInfo) {
+        try {
+          mBsReport = await fetchXeroReport(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'BalanceSheet', `date=${mDateStr}`);
+          if (mBsReport) {
+            await db.saveReport(tenantId, mBsCacheKey, mBsReport);
+          }
+        } catch (err) {
+          console.error(`Failed to fetch dynamic BalanceSheet for trend point ${mDateStr}`);
+        }
+      }
+      
+      const mEquity = mBsReport ? (BalanceSheetParser.findTotalEquity(mBsReport.Rows) || 0) : 0;
+      equityTrend.push({
+        label: m.label,
+        value: parseFloat(mEquity.toFixed(2))
+      });
+    }
+
     return NextResponse.json({
       connected: true,
       summary: {
@@ -209,6 +250,7 @@ export async function GET(req: NextRequest) {
       assets: parsed.assets,
       liabilities: parsed.liabilities,
       equity: parsed.equity,
+      equityTrend,
       meta: {
         currency: finalCurrency,
         calculatedAt: new Date().toISOString()

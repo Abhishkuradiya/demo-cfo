@@ -53,6 +53,7 @@ interface BSData {
     nonCurrent: BSItem[];
   };
   equity: BSItem[];
+  equityTrend?: { label: string; value: number }[];
   meta: {
     currency: string;
     calculatedAt: string;
@@ -216,12 +217,27 @@ export default function BalanceSheetPage() {
     ]
   };
 
+  const getEquityTrendData = () => {
+    if (!data || !data.equityTrend || data.equityTrend.length === 0) {
+      return {
+        categories: ['Mar 2026', 'Apr 2026', 'May 2026', 'Jun 2026', 'Jul 2026', 'Aug 2026'],
+        values: [0, 0, 0, 0, 0, data?.summary?.equity || 0]
+      };
+    }
+    return {
+      categories: data.equityTrend.map(item => item.label),
+      values: data.equityTrend.map(item => item.value)
+    };
+  };
+
+  const trendData = getEquityTrendData();
+
   const equityTrendOption = {
     grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
     xAxis: {
       type: 'category',
       boundaryGap: false,
-      data: ['Mar 2026', 'Apr 2026', 'May 2026', 'Jun 2026', 'Jul 2026', 'Aug 2026'],
+      data: trendData.categories,
       axisLine: { lineStyle: { color: '#cbd5e1' } },
       axisLabel: { color: '#64748b', fontSize: 10 }
     },
@@ -235,7 +251,7 @@ export default function BalanceSheetPage() {
       {
         name: 'Equity',
         type: 'line',
-        data: [0, 0, 0, 0, 0, data?.summary?.equity || 0],
+        data: trendData.values,
         itemStyle: { color: '#10b981' },
         lineStyle: { width: 2 },
         symbol: 'circle',
