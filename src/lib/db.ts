@@ -1696,5 +1696,17 @@ export const db = {
       json.tenant_credentials[idx].scopes = null;
       writeJsonDb(json);
     }
+  },
+  isPgActive: (): boolean => {
+    return isPgConnected;
+  },
+  query: async (text: string, params?: any[]): Promise<any> => {
+    return pgPool.query(text, params);
+  },
+  readJsonDb: (): any => {
+    return readJsonDb();
+  },
+  writeJsonDb: (data: any): void => {
+    return writeJsonDb(data);
   }
 };
