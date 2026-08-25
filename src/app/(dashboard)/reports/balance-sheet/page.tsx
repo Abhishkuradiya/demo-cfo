@@ -555,10 +555,14 @@ export default function BalanceSheetPage() {
                   </div>
                 </div>
 
-                <div className="pt-2 border-t border-dashed border-slate-200">
+                <div className="pt-2 border-t border-dashed border-slate-200 space-y-2">
+                  <div className="flex justify-between text-xs font-bold text-slate-700 bg-slate-50 p-2.5 rounded-lg border border-slate-200/50 mt-1">
+                    <span>Net Assets (Assets - Liabilities)</span>
+                    <span className="text-slate-900 font-extrabold">{formatAmount(data.summary.assets - data.summary.liabilities)}</span>
+                  </div>
                   <div className="flex justify-between text-sm font-extrabold text-slate-805 border-y-2 border-slate-900 py-3 uppercase tracking-wide">
-                    <span>Total Liabilities + Equity</span>
-                    <span>{formatAmount(data.summary.liabilities + data.summary.equity)}</span>
+                    <span>Total Capital & Reserves (Equity)</span>
+                    <span>{formatAmount(data.summary.equity)}</span>
                   </div>
                 </div>
               </div>
@@ -608,7 +612,10 @@ export default function BalanceSheetPage() {
 
                 <div className="space-y-2 text-xs font-semibold text-slate-500 pt-1">
                   <div className="flex justify-between"><span>Total Assets</span><span className="text-slate-805">{formatAmount(data.summary.assets)}</span></div>
-                  <div className="flex justify-between"><span>Total Liabilities + Equity</span><span className="text-slate-805">{formatAmount(data.summary.liabilities + data.summary.equity)}</span></div>
+                  <div className="flex justify-between"><span>Total Liabilities</span><span className="text-slate-805">{formatAmount(data.summary.liabilities)}</span></div>
+                  <div className="border-t border-slate-100/60 my-1" />
+                  <div className="flex justify-between font-bold text-slate-700"><span>Net Assets</span><span className="text-slate-805">{formatAmount(data.summary.assets - data.summary.liabilities)}</span></div>
+                  <div className="flex justify-between"><span>Total Equity</span><span className="text-slate-850 font-bold">{formatAmount(data.summary.equity)}</span></div>
                   <div className="border-t border-slate-100/60 my-1" />
                   <div className="flex justify-between font-bold text-slate-705">
                     <span>Difference</span>
