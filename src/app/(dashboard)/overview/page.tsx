@@ -490,7 +490,7 @@ export default function OverviewPage() {
       currency: data.currency,
       change: isLoading ? "..." : `${getGrowthDetails(data.growthPercent).text} vs Last Month`,
       changeClass: getGrowthDetails(data.growthPercent).className,
-      tooltipText: "Accounting Revenue from Xero Profit & Loss Report.",
+      tooltipText: "Accounting Revenue from Xero Profit & Loss Report (VAT Excluded, Credit Notes Excluded).",
       iconBg: "bg-[#e8f0fe] rounded-xl border border-blue-100/50",
       icon: (
         <svg className="h-5.5 w-5.5 text-[#0064eb]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -507,7 +507,7 @@ export default function OverviewPage() {
       currency: data.currency,
       change: isLoading ? "..." : `${getGrowthDetails(data.netProfitGrowthPercent).text} vs Last Month`,
       changeClass: getGrowthDetails(data.netProfitGrowthPercent).className,
-      tooltipText: "Net Profit from Xero Profit & Loss Report.",
+      tooltipText: "Net Profit from Xero Profit & Loss Report (VAT Excluded, Credit Notes Excluded).",
       iconBg: "bg-[#e6fcf5] rounded-xl border border-emerald-100/50",
       icon: (
         <svg className="h-5.5 w-5.5 text-[#10b981]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -551,7 +551,7 @@ export default function OverviewPage() {
       currency: data.currency,
       change: isLoading ? "..." : `${getGrowthDetails(data.arGrowthPercent).text} vs Last Month`,
       changeClass: getGrowthDetails(data.arGrowthPercent).className,
-      tooltipText: "Total money collected from paid sales invoices in this period.",
+      tooltipText: "Total money collected from paid sales invoices in this period (VAT Included, Credit Notes Excluded).",
       iconBg: "bg-[#fef3c7] rounded-xl border border-amber-100/50",
       icon: (
         <svg className="h-5.5 w-5.5 text-[#f59e0b]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -570,7 +570,7 @@ export default function OverviewPage() {
       currency: data.currency,
       change: isLoading ? "..." : `${getGrowthDetails(data.apGrowthPercent).text} vs Last Month`,
       changeClass: getGrowthDetails(data.apGrowthPercent).className,
-      tooltipText: "Total money paid to suppliers for bills in this period.",
+      tooltipText: "Total money paid to suppliers for bills in this period (VAT Included, Credit Notes Excluded).",
       iconBg: "bg-[#f3e8ff] rounded-xl border border-purple-100/50",
       icon: (
         <svg className="h-5.5 w-5.5 text-[#a855f7]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -899,7 +899,7 @@ export default function OverviewPage() {
                         <div className="flex items-center justify-between w-full shrink-0">
                           <span className="text-[11px] font-semibold text-slate-500 leading-none flex items-center gap-1.5 min-w-0 pr-2">
                             <span className="truncate">Invoice Sales (MTD)</span>
-                            <Tooltip text="Operational sales revenue calculated from sent customer invoices." />
+                            <Tooltip text="Operational sales revenue calculated from sent customer invoices (VAT Included)." />
                           </span>
                           <div className="flex h-8 w-8 items-center justify-center rounded-lg shadow-3xs bg-emerald-50 border border-emerald-100/50 shrink-0">
                             <svg className="h-4.5 w-4.5 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
