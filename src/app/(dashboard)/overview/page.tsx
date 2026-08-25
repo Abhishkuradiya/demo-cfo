@@ -3,21 +3,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
-import * as echarts from 'echarts/core';
-import { LineChart, GaugeChart, PieChart } from 'echarts/charts';
-import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/components';
-import { CanvasRenderer } from 'echarts/renderers';
-
-// Register the required ECharts features
-echarts.use([
-  LineChart,
-  GaugeChart,
-  PieChart,
-  GridComponent,
-  TooltipComponent,
-  LegendComponent,
-  CanvasRenderer
-]);
+import * as echarts from 'echarts';
 import {
   DollarSign,
   ArrowUpRight,
@@ -749,8 +735,8 @@ export default function OverviewPage() {
           endAngle: 0,
           min: 0,
           max: 100,
-          radius: '95%',
-          center: ['50%', '75%'],
+          radius: '85%',
+          center: ['50%', '85%'],
           progress: {
             show: true,
             width: 9,
@@ -1195,7 +1181,7 @@ export default function OverviewPage() {
 
               <div className="relative flex flex-col items-center justify-center flex-1 min-h-[125px]">
                 {/* Single stable gauge canvas node to prevent DOM swapping and rendering size glitches */}
-                <div ref={healthGaugeRef} className={cn("w-full h-28", !healthScore && "opacity-30")} />
+                <div ref={healthGaugeRef} className={cn("w-full h-32", !healthScore && "opacity-30")} />
                 
                 {healthScore ? (
                   <div className="text-center mt-1">
