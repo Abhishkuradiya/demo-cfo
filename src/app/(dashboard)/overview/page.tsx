@@ -846,7 +846,7 @@ export default function OverviewPage() {
                 return (
                   <div
                     key={idx}
-                    className="select-none h-[148px] w-full"
+                    className="select-none h-[148px] w-full transition-all duration-350 ease-out hover:translate-y-2 relative z-10 hover:z-20 cursor-pointer"
                     style={{ perspective: '1000px' }}
                     onClick={() => setIsRevenueFlipped(!isRevenueFlipped)}
                   >
@@ -860,13 +860,13 @@ export default function OverviewPage() {
                     >
                       {/* Front Side: P&L Accounting Revenue */}
                       <div
-                        className="absolute inset-0 h-full w-full rounded-xl border border-slate-200/80 bg-white p-4 shadow-2xs hover:shadow-xs flex flex-col overflow-hidden"
+                        className="absolute inset-0 h-full w-full rounded-xl border border-slate-200/80 bg-white p-4 shadow-2xs flex flex-col"
                         style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' }}
                       >
                         <div className="flex items-center justify-between w-full shrink-0">
                           <span className="text-[11px] font-semibold text-slate-500 leading-none truncate flex items-center gap-1.5 min-w-0 pr-2">
                             <span className="truncate">{card.title}</span>
-                            <Tooltip text={card.tooltipText} position="bottom" />
+                            <Tooltip text={card.tooltipText} position="top" />
                           </span>
                           <div className={cn("flex h-8 w-8 items-center justify-center rounded-lg shadow-3xs shrink-0", card.iconBg)}>
                             {card.icon}
@@ -889,7 +889,7 @@ export default function OverviewPage() {
 
                       {/* Back Side: Invoices Operational Sales */}
                       <div
-                        className="absolute inset-0 h-full w-full rounded-xl border border-slate-200/80 bg-slate-50 p-4 shadow-2xs hover:shadow-xs flex flex-col overflow-hidden"
+                        className="absolute inset-0 h-full w-full rounded-xl border border-slate-200/80 bg-slate-50 p-4 shadow-2xs flex flex-col"
                         style={{
                           backfaceVisibility: 'hidden',
                           WebkitBackfaceVisibility: 'hidden',
@@ -899,7 +899,7 @@ export default function OverviewPage() {
                         <div className="flex items-center justify-between w-full shrink-0">
                           <span className="text-[11px] font-semibold text-slate-500 leading-none flex items-center gap-1.5 min-w-0 pr-2">
                             <span className="truncate">Invoice Sales (MTD)</span>
-                            <Tooltip text="Operational sales revenue calculated from sent customer invoices (VAT Included)." />
+                            <Tooltip text="Operational sales revenue calculated from sent customer invoices (VAT Included)." position="top" />
                           </span>
                           <div className="flex h-8 w-8 items-center justify-center rounded-lg shadow-3xs bg-emerald-50 border border-emerald-100/50 shrink-0">
                             <svg className="h-4.5 w-4.5 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -935,7 +935,7 @@ export default function OverviewPage() {
                 <div
                   key={idx}
                   className={cn(
-                    "flex flex-col bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs hover:shadow-xs transition duration-200 select-none h-[148px] relative overflow-hidden",
+                    "flex flex-col bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs transition-all duration-350 ease-out select-none h-[148px] relative hover:translate-y-2 hover:shadow-xs z-10 hover:z-20",
                     card.onClick ? "cursor-pointer" : ""
                   )}
                   onClick={card.onClick}
@@ -943,7 +943,7 @@ export default function OverviewPage() {
                   <div className="flex items-center justify-between w-full shrink-0">
                     <span className="text-[11px] font-semibold text-slate-500 leading-none flex items-center gap-1.5 min-w-0 pr-2">
                       <span className="truncate">{card.title}</span>
-                      {card.tooltipText && <Tooltip text={card.tooltipText} position="bottom" />}
+                      {card.tooltipText && <Tooltip text={card.tooltipText} position="top" />}
                     </span>
                     <div className={cn("flex h-8 w-8 items-center justify-center rounded-lg shadow-3xs shrink-0", card.iconBg)}>
                       {card.icon}
