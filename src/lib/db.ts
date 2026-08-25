@@ -24,7 +24,7 @@ const pgPool = new Pool({
   user: process.env.DB_USER || 'postgres',
   password: process.env.DB_PASSWORD || 'postgres',
   database: process.env.DB_NAME || 'virtual_cfo',
-  connectionTimeoutMillis: 2000 // Quick timeout to fall back to JSON database if pg is offline
+  connectionTimeoutMillis: 5000 // Stable timeout to connect, falls back to JSON if pg is truly down
 });
  
 let isPgConnected = true;
@@ -311,6 +311,7 @@ const initPgTables = async () => {
 
     client.release();
   } catch (err) {
+    isPgConnected = false;
     console.error('CRITICAL: PostgreSQL database is offline or not created:', err);
   }
 };
@@ -423,7 +424,8 @@ export const db = {
         const { rows } = await pgPool.query('SELECT * FROM tenants ORDER BY id ASC');
         return rows;
       } catch (e) {
-        console.error("Database query failed:", e); throw e;
+        console.error("Database query failed, falling back to JSON DB:", e);
+        isPgConnected = false;
       }
     }
     const json = readJsonDb();
@@ -477,7 +479,8 @@ export const db = {
         );
         return rows[0] || null;
       } catch (e) {
-        console.error("Database query failed:", e); throw e;
+        console.error("Database query failed, falling back to JSON DB:", e);
+        isPgConnected = false;
       }
     }
     const json = readJsonDb();
@@ -602,7 +605,8 @@ export const db = {
           overpayments: Array.isArray(overpays) ? overpays.length : 0
         };
       } catch (e) {
-        console.error("Database query failed:", e); throw e;
+        console.error("Database query failed, falling back to JSON DB:", e);
+        isPgConnected = false;
       }
     }
     const json = readJsonDb();
@@ -761,7 +765,8 @@ export const db = {
           DueDate: r.due_date
         }));
       } catch (e) {
-        console.error("Database query failed:", e); throw e;
+        console.error("Database query failed, falling back to JSON DB:", e);
+        isPgConnected = false;
       }
     }
     const json = readJsonDb();
@@ -785,7 +790,8 @@ export const db = {
           Date: r.payment_date || r.created_at
         }));
       } catch (e) {
-        console.error("Database query failed:", e); throw e;
+        console.error("Database query failed, falling back to JSON DB:", e);
+        isPgConnected = false;
       }
     }
     const json = readJsonDb();
@@ -805,7 +811,8 @@ export const db = {
           Status: r.status || 'ACTIVE'
         }));
       } catch (e) {
-        console.error("Database query failed:", e); throw e;
+        console.error("Database query failed, falling back to JSON DB:", e);
+        isPgConnected = false;
       }
     }
     const json = readJsonDb();
@@ -826,7 +833,8 @@ export const db = {
         const data = await db.getReport(tenantId, 'BankTransactions');
         return Array.isArray(data) ? data : [];
       } catch (e) {
-        console.error("Database query failed:", e); throw e;
+        console.error("Database query failed, falling back to JSON DB:", e);
+        isPgConnected = false;
       }
     }
     const json = readJsonDb();
@@ -839,7 +847,8 @@ export const db = {
         const data = await db.getReport(tenantId, 'Prepayments');
         return Array.isArray(data) ? data : [];
       } catch (e) {
-        console.error("Database query failed:", e); throw e;
+        console.error("Database query failed, falling back to JSON DB:", e);
+        isPgConnected = false;
       }
     }
     const json = readJsonDb();
@@ -852,7 +861,8 @@ export const db = {
         const data = await db.getReport(tenantId, 'Overpayments');
         return Array.isArray(data) ? data : [];
       } catch (e) {
-        console.error("Database query failed:", e); throw e;
+        console.error("Database query failed, falling back to JSON DB:", e);
+        isPgConnected = false;
       }
     }
     const json = readJsonDb();
@@ -894,7 +904,8 @@ export const db = {
         );
         return rows[0] ? rows[0].raw_data : null;
       } catch (e) {
-        console.error("Database query failed:", e); throw e;
+        console.error("Database query failed, falling back to JSON DB:", e);
+        isPgConnected = false;
       }
     }
     const json = readJsonDb();
@@ -1291,7 +1302,8 @@ export const db = {
           raw_data: typeof r.raw_data === 'string' ? JSON.parse(r.raw_data) : r.raw_data
         }));
       } catch (e) {
-        console.error("Database query failed:", e); throw e;
+        console.error("Database query failed, falling back to JSON DB:", e);
+        isPgConnected = false;
       }
     }
     const json = readJsonDb();
