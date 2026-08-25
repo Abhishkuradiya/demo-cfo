@@ -40,10 +40,17 @@ const initPgTables = async () => {
     await client.query(`
       CREATE TABLE IF NOT EXISTS tenants (
         id SERIAL PRIMARY KEY,
-        name VARCHAR(255) UNIQUE NOT NULL,
+        name VARCHAR(255) NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
+
+    // Drop unique constraint on tenant name to allow duplicate/reconnected names across tenants
+    try {
+      await client.query('ALTER TABLE tenants DROP CONSTRAINT IF EXISTS tenants_name_key;');
+    } catch (err: any) {
+      console.warn('Could not drop unique constraint on tenants(name):', err.message);
+    }
 
     // Create Users Table
     await client.query(`
