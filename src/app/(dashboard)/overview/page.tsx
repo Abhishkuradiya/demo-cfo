@@ -149,6 +149,14 @@ function FormattedAmount({
     }
   }
 
+  if (compact) {
+    return (
+      <span className={className}>
+        {mainPart + decimalPart}
+      </span>
+    );
+  }
+
   return (
     <span className={className}>
       <span>{mainPart}</span>
