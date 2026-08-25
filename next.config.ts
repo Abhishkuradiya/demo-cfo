@@ -21,6 +21,7 @@ const localIPs = getLocalIPs();
 
 const nextConfig: NextConfig = {
   /* config options here */
+  reactStrictMode: false,
   allowedDevOrigins: [
     "localhost:3000",
     "http://localhost:3000",
