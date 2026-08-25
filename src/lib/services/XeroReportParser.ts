@@ -5,48 +5,55 @@ export class XeroReportParser {
    */
   static findRowValue(rows: any[], targetLabels: string[]): number | null {
     if (!rows || !Array.isArray(rows)) return null;
-    
-    const normalizedTargets = targetLabels.map(l => l.toLowerCase().trim());
- 
-    const recurse = (itemList: any[]): number | null => {
-      for (const item of itemList) {
-        if (!item) continue;
- 
-        // 1. If it's a Section row type, examine its Title and nested rows
-        if (item.RowType === 'Section') {
-          if (item.Title) {
-            const title = item.Title.toLowerCase().trim();
-            // If the section title matches, look if it has a Summary row
-            if (normalizedTargets.includes(title) && item.Summary) {
-              const val = this.extractCellValue(item.Summary);
+
+    for (const target of targetLabels) {
+      const normalizedTarget = target.toLowerCase().trim();
+
+      const recurse = (itemList: any[]): number | null => {
+        for (const item of itemList) {
+          if (!item) continue;
+
+          // 1. If it's a Section row type, examine its Title and nested rows
+          if (item.RowType === 'Section') {
+            if (item.Title) {
+              const title = item.Title.toLowerCase().trim();
+              // If the section title matches, look if it has a Summary row
+              if (title === normalizedTarget && item.Summary) {
+                const val = this.extractCellValue(item.Summary);
+                if (val !== null) return val;
+              }
+            }
+            if (item.Rows) {
+              const res = recurse(item.Rows);
+              if (res !== null) return res;
+            }
+          }
+
+          // 2. If it's a standard Row or SummaryRow, inspect the label in Cell 0
+          if (item.RowType === 'Row' || item.RowType === 'SummaryRow') {
+            const label = this.extractCellLabel(item);
+            if (label === normalizedTarget) {
+              const val = this.extractCellValue(item);
               if (val !== null) return val;
             }
           }
+
+          // 3. Fallback check for any other nested rows
           if (item.Rows) {
             const res = recurse(item.Rows);
             if (res !== null) return res;
           }
         }
- 
-        // 2. If it's a standard Row or SummaryRow, inspect the label in Cell 0
-        if (item.RowType === 'Row' || item.RowType === 'SummaryRow') {
-          const label = this.extractCellLabel(item);
-          if (label && normalizedTargets.includes(label)) {
-            const val = this.extractCellValue(item);
-            if (val !== null) return val;
-          }
-        }
- 
-        // 3. Fallback check for any other nested rows
-        if (item.Rows) {
-          const res = recurse(item.Rows);
-          if (res !== null) return res;
-        }
+        return null;
+      };
+
+      const foundVal = recurse(rows);
+      if (foundVal !== null) {
+        return foundVal;
       }
-      return null;
-    };
- 
-    return recurse(rows);
+    }
+
+    return null;
   }
  
   static extractCellLabel(row: any): string | null {

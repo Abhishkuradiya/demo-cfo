@@ -7,6 +7,10 @@ import { BalanceSheetParser } from '@/lib/services/BalanceSheetParser';
 import { BankAccountMergeService } from '@/lib/services/BankAccountMergeService';
 import { getTenantIdFromSession } from '@/lib/auth';
 import { XeroInventoryService } from '@/lib/inventoryService';
+import { XeroFixedAssetsService } from '@/lib/fixedAssetsService';
+import { XeroBudgetService } from '@/lib/budgetService';
+import { XeroTaxService } from '@/lib/taxService';
+import { XeroGeneralLedgerService } from '@/lib/generalLedgerService';
  
 export async function GET(req: NextRequest) {
   const tenantId = await getTenantIdFromSession();
@@ -404,36 +408,39 @@ export async function GET(req: NextRequest) {
         if (isCustomer) customersCount++;
         if (isSupplier) suppliersCount++;
 
-        // AccountsReceivable Outstanding
+        // AccountsReceivable & AccountsPayable Outstanding
         const arOutstanding = parseFloat(c.Balances?.AccountsReceivable?.Outstanding) || 0;
-        contactsOutstanding += arOutstanding;
+        const apOutstanding = parseFloat(c.Balances?.AccountsPayable?.Outstanding) || 0;
+        contactsOutstanding += arOutstanding + apOutstanding;
       }
     }
 
-    // 10. Calculate dynamic Accounts Receivable & Accounts Payable for selected end-date
+    // 10. Calculate dynamic Accounts Receivable & Accounts Payable (PAID/Completed payments) for selected date range
     let accountsReceivable = 0;
     let accountsPayable = 0;
     for (const inv of cachedInvoices) {
       const invDate = parseXeroDate(inv.Date);
-      if (invDate && invDate <= endDate && inv.Status === 'AUTHORISED') {
+      if (invDate && invDate >= startDate && invDate <= endDate) {
+        const paidAmount = inv.AmountPaid || 0;
         if (inv.Type === 'ACCREC') {
-          accountsReceivable += inv.AmountDue || 0;
+          accountsReceivable += paidAmount;
         } else if (inv.Type === 'ACCPAY') {
-          accountsPayable += inv.AmountDue || 0;
+          accountsPayable += paidAmount;
         }
       }
     }
  
-    // 11. Calculate dynamic Accounts Receivable & Accounts Payable for comparison end-date
+    // 11. Calculate dynamic Accounts Receivable & Accounts Payable (PAID/Completed payments) for comparison date range
     let compAccountsReceivable = 0;
     let compAccountsPayable = 0;
     for (const inv of cachedInvoices) {
       const invDate = parseXeroDate(inv.Date);
-      if (invDate && invDate <= compEndDate && inv.Status === 'AUTHORISED') {
+      if (invDate && invDate >= compStartDate && invDate <= compEndDate) {
+        const paidAmount = inv.AmountPaid || 0;
         if (inv.Type === 'ACCREC') {
-          compAccountsReceivable += inv.AmountDue || 0;
+          compAccountsReceivable += paidAmount;
         } else if (inv.Type === 'ACCPAY') {
-          compAccountsPayable += inv.AmountDue || 0;
+          compAccountsPayable += paidAmount;
         }
       }
     }
@@ -465,7 +472,7 @@ export async function GET(req: NextRequest) {
       // A. Cash trend point (Balance Sheet)
       const mBsCacheKey = `BalanceSheet_${mDateStr}`;
       let mBsReport = await db.getReport(tenantId, mBsCacheKey);
-      if (!mBsReport) {
+      if (!mBsReport && isConnected) {
         try {
           mBsReport = await fetchXeroReport(accessToken, xeroTenantId, 'BalanceSheet', `date=${mDateStr}`);
           if (mBsReport) {
@@ -523,7 +530,7 @@ export async function GET(req: NextRequest) {
  
     // Fetch cached organisation details
     let organisation = await db.getReport(tenantId, 'Organisation');
-    if (!organisation) {
+    if (!organisation && isConnected) {
       try {
         const organisations = await fetchXeroResource(accessToken, xeroTenantId, 'Organisations');
         if (organisations && organisations.length > 0) {
@@ -579,13 +586,75 @@ export async function GET(req: NextRequest) {
     let inventoryValue = 0;
     let inventoryLowStock = 0;
     let inventoryDeadStock = 0;
-    try {
-      const invSummary = await XeroInventoryService.getDashboard(tenantId);
-      inventoryValue = invSummary.inventory_value;
-      inventoryLowStock = invSummary.low_stock_items;
-      inventoryDeadStock = invSummary.dead_stock_items;
-    } catch (e) {
-      console.error('Failed to parse inventory for dashboard summary:', e);
+    if (isConnected) {
+      try {
+        const invSummary = await XeroInventoryService.getDashboard(tenantId);
+        inventoryValue = invSummary.inventory_value;
+        inventoryLowStock = invSummary.low_stock_items;
+        inventoryDeadStock = invSummary.dead_stock_items;
+      } catch (e) {
+        console.error('Failed to parse inventory for dashboard summary:', e);
+      }
+    }
+
+    // 16. Fetch fixed assets summary (using service)
+    let fixedAssetsTotal = 0;
+    let fixedAssetsAccumDeprec = 0;
+    let fixedAssetsNetBook = 0;
+    if (isConnected) {
+      try {
+        const faSummary = await XeroFixedAssetsService.getDashboard(tenantId);
+        fixedAssetsTotal = faSummary.total_assets;
+        fixedAssetsAccumDeprec = faSummary.accumulated_depreciation;
+        fixedAssetsNetBook = faSummary.net_book_value;
+      } catch (e) {
+        console.error('Failed to parse fixed assets for dashboard summary:', e);
+      }
+    }
+
+    // 17. Fetch budget vs actual summary (using service)
+    let budgetYtd = 0;
+    let budgetActual = 0;
+    let budgetVariance = 0;
+    if (isConnected) {
+      try {
+        const budgetSummary = await XeroBudgetService.getBudgetVsActual(tenantId, startDate, endDate);
+        budgetYtd = budgetSummary.budget_ytd;
+        budgetActual = budgetSummary.actual_ytd;
+        budgetVariance = budgetSummary.variance;
+      } catch (e) {
+        console.error('Failed to parse budget for dashboard summary:', e);
+      }
+    }
+
+    // 18. Fetch tax summary (using service)
+    let taxCollected = 0;
+    let taxPaid = 0;
+    let taxPayable = 0;
+    if (isConnected) {
+      try {
+        const taxSummary = await XeroTaxService.getTaxSummary(tenantId, startDate, endDate);
+        taxCollected = taxSummary.tax_collected;
+        taxPaid = taxSummary.tax_paid;
+        taxPayable = taxSummary.tax_payable;
+      } catch (e) {
+        console.error('Failed to parse tax for dashboard summary:', e);
+      }
+    }
+
+    // 19. Fetch general ledger summary (using service)
+    let glTransactions = 0;
+    let glThisMonth = 0;
+    let glLastEntry = 'No transactions';
+    if (isConnected) {
+      try {
+        const glSummary = await XeroGeneralLedgerService.getGeneralLedger(tenantId);
+        glTransactions = glSummary.total_transactions;
+        glThisMonth = glSummary.this_month;
+        glLastEntry = glSummary.last_entry;
+      } catch (e) {
+        console.error('Failed to parse general ledger for dashboard summary:', e);
+      }
     }
  
     return NextResponse.json({
@@ -593,6 +662,18 @@ export async function GET(req: NextRequest) {
       inventoryValue,
       inventoryLowStock,
       inventoryDeadStock,
+      fixedAssetsTotal,
+      fixedAssetsAccumDeprec,
+      fixedAssetsNetBook,
+      budgetYtd,
+      budgetActual,
+      budgetVariance,
+      taxCollected,
+      taxPaid,
+      taxPayable,
+      glTransactions,
+      glThisMonth,
+      glLastEntry,
       organisation,
       lastSync,
       invoiceStatusSummary: {

@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import * as echarts from 'echarts/core';
 import { LineChart, GaugeChart, PieChart } from 'echarts/charts';
 import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/components';
@@ -164,6 +164,7 @@ function CardSkeleton() {
 
 export default function OverviewPage() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const [revenueTimeframe, setRevenueTimeframe] = useState<'Daily' | 'Weekly' | 'Monthly'>('Monthly');
   const [isSyncing, setIsSyncing] = useState(false);
   const [isRevenueFlipped, setIsRevenueFlipped] = useState(false);
@@ -206,6 +207,7 @@ export default function OverviewPage() {
     endDate: ""
   });
   const [isLoading, setIsLoading] = useState(true);
+  const [chartLoading, setChartLoading] = useState(false);
 
   // Dynamic Health Score & Alerts state
   const [healthScore, setHealthScore] = useState<{
@@ -330,6 +332,15 @@ export default function OverviewPage() {
       if (res.ok) {
         const result = await res.json();
         setData(result);
+
+        // Auto-update browser URL with calculated fallback dates if no date parameter exists.
+        // This forces the date picker in the header to display the exact date range of the active data.
+        if (!fromDate && !toDate && result.startDate && result.endDate) {
+          const params = new URLSearchParams(window.location.search);
+          params.set('from_date', result.startDate);
+          params.set('to_date', result.endDate);
+          router.replace(`${window.location.pathname}?${params.toString()}`);
+        }
       }
     } catch (err) {
       console.error('Failed to fetch dashboard data:', err);
@@ -377,17 +388,66 @@ export default function OverviewPage() {
     return () => {
       window.removeEventListener('xero-sync-complete', handleSyncComplete);
     };
-  }, [searchParams, revenueTimeframe]);
+  }, [searchParams]);
 
   // Refs for ECharts initialization
   const revenueChartRef = useRef<HTMLDivElement>(null);
   const healthGaugeRef = useRef<HTMLDivElement>(null);
   const dataQualityRef = useRef<HTMLDivElement>(null);
+  const isFirstRender = useRef(true);
+
+  const fetchChartData = async () => {
+    try {
+      setChartLoading(true);
+      const fromDate = searchParams.get('from_date');
+      const toDate = searchParams.get('to_date');
+      let url = `/api/xero/dashboard?view=${revenueTimeframe.toLowerCase()}`;
+      if (fromDate && toDate) {
+        url += `&from_date=${fromDate}&to_date=${toDate}`;
+      }
+      const res = await fetch(url);
+      if (res.ok) {
+        const result = await res.json();
+        setData(prev => ({
+          ...prev,
+          chartLabels: result.chartLabels || [],
+          chartRevenue: result.chartRevenue || []
+        }));
+      }
+    } catch (err) {
+      console.error('Failed to fetch chart data:', err);
+    } finally {
+      setChartLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+    fetchChartData();
+  }, [revenueTimeframe]);
+
+  const getPeriodLabel = (baseTitle: string, startStr?: string, endStr?: string) => {
+    if (!startStr || !endStr) return `${baseTitle} (MTD)`;
+    try {
+      const start = new Date(startStr);
+      const end = new Date(endStr);
+      const monthsDiff = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth()) + 1;
+      if (monthsDiff === 1) {
+        return `${baseTitle} (MTD)`;
+      }
+      return `${baseTitle} (${monthsDiff} Months)`;
+    } catch {
+      return `${baseTitle} (Period)`;
+    }
+  };
 
   // 1. Metric Cards data
   const metricCards = useMemo(() => [
     {
-      title: "Revenue (MTD)",
+      title: getPeriodLabel("Revenue", data?.startDate, data?.endDate),
       value: isLoading ? "..." : formatCurrency(data.revenueMTD, data.currency),
       amount: data.revenueMTD || 0,
       currency: data.currency,
@@ -404,7 +464,7 @@ export default function OverviewPage() {
       )
     },
     {
-      title: "Net Profit (MTD)",
+      title: getPeriodLabel("Net Profit", data?.startDate, data?.endDate),
       value: isLoading ? "..." : formatCurrency(data.netProfit || 0, data.currency),
       amount: data.netProfit || 0,
       currency: data.currency,
@@ -448,13 +508,13 @@ export default function OverviewPage() {
       }
     },
     {
-      title: "Accounts Receivable",
+      title: "Accounts Receivable (Paid)",
       value: isLoading ? "..." : formatCurrency(data.accountsReceivable || 0, data.currency),
       amount: data.accountsReceivable || 0,
       currency: data.currency,
       change: isLoading ? "..." : `${getGrowthDetails(data.arGrowthPercent).text} vs Last Month`,
       changeClass: getGrowthDetails(data.arGrowthPercent).className,
-      tooltipText: "Outstanding money owed by customers.",
+      tooltipText: "Total money collected from paid sales invoices in this period.",
       iconBg: "bg-[#fef3c7] rounded-xl border border-amber-100/50",
       icon: (
         <svg className="h-5.5 w-5.5 text-[#f59e0b]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -467,13 +527,13 @@ export default function OverviewPage() {
       )
     },
     {
-      title: "Accounts Payable",
+      title: "Accounts Payable (Paid)",
       value: isLoading ? "..." : formatCurrency(data.accountsPayable || 0, data.currency),
       amount: data.accountsPayable || 0,
       currency: data.currency,
       change: isLoading ? "..." : `${getGrowthDetails(data.apGrowthPercent).text} vs Last Month`,
       changeClass: getGrowthDetails(data.apGrowthPercent).className,
-      tooltipText: "Outstanding money owed to suppliers.",
+      tooltipText: "Total money paid to suppliers for bills in this period.",
       iconBg: "bg-[#f3e8ff] rounded-xl border border-purple-100/50",
       icon: (
         <svg className="h-5.5 w-5.5 text-[#a855f7]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -769,7 +829,7 @@ export default function OverviewPage() {
                         <div className="flex items-center justify-between w-full shrink-0">
                           <span className="text-[11px] font-semibold text-slate-500 leading-none truncate flex items-center gap-1.5 min-w-0 pr-2">
                             <span className="truncate">{card.title}</span>
-                            <Tooltip text={card.tooltipText} />
+                            <Tooltip text={card.tooltipText} position="bottom" />
                           </span>
                           <div className={cn("flex h-8 w-8 items-center justify-center rounded-lg shadow-3xs shrink-0", card.iconBg)}>
                             {card.icon}
@@ -800,7 +860,7 @@ export default function OverviewPage() {
                         }}
                       >
                         <div className="flex items-center justify-between w-full shrink-0">
-                          <span className="text-[11px] font-semibold text-slate-500 leading-none truncate flex items-center gap-1.5 min-w-0 pr-2">
+                          <span className="text-[11px] font-semibold text-slate-500 leading-none flex items-center gap-1.5 min-w-0 pr-2">
                             <span className="truncate">Invoice Sales (MTD)</span>
                             <Tooltip text="Operational sales revenue calculated from sent customer invoices." />
                           </span>
@@ -844,9 +904,9 @@ export default function OverviewPage() {
                   onClick={card.onClick}
                 >
                   <div className="flex items-center justify-between w-full shrink-0">
-                    <span className="text-[11px] font-semibold text-slate-500 leading-none truncate flex items-center gap-1.5 min-w-0 pr-2">
+                    <span className="text-[11px] font-semibold text-slate-500 leading-none flex items-center gap-1.5 min-w-0 pr-2">
                       <span className="truncate">{card.title}</span>
-                      {card.tooltipText && <Tooltip text={card.tooltipText} />}
+                      {card.tooltipText && <Tooltip text={card.tooltipText} position="bottom" />}
                     </span>
                     <div className={cn("flex h-8 w-8 items-center justify-center rounded-lg shadow-3xs shrink-0", card.iconBg)}>
                       {card.icon}
@@ -885,7 +945,7 @@ export default function OverviewPage() {
             {/* Bank Reconciliation Card */}
             <div className="flex flex-col bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs hover:shadow-xs transition duration-200 select-none h-[148px] relative overflow-hidden">
               <div className="flex items-center justify-between w-full shrink-0">
-                <span className="text-[11px] font-semibold text-slate-500 leading-none truncate flex items-center gap-1.5 min-w-0 pr-2">
+                <span className="text-[11px] font-semibold text-slate-500 leading-none flex items-center gap-1.5 min-w-0 pr-2">
                   <span className="truncate">Bank Reconciliation</span>
                   <span title="Reconciled bank account items comparison status.">
                     <Info className="h-3.5 w-3.5 text-slate-350 hover:text-slate-500 cursor-help" />
@@ -894,18 +954,34 @@ export default function OverviewPage() {
                 <div className="relative h-7.5 w-7.5 flex items-center justify-center shrink-0 ml-1">
                   <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
                     <circle cx="18" cy="18" r="16" fill="none" className="text-slate-100" strokeWidth="3.5" stroke="currentColor" />
-                    <circle cx="18" cy="18" r="16" fill="none" className="text-emerald-500" strokeWidth="3.5" strokeDasharray={`${reconciliation?.reconciliationPercentage || 95}, 100`} strokeLinecap="round" stroke="currentColor" />
+                    <circle
+                      cx="18"
+                      cy="18"
+                      r="16"
+                      fill="none"
+                      className={cn(
+                        (!data.connected || !reconciliation || reconciliation.pendingTransactions === 0) ? "text-emerald-500" :
+                        reconciliation.pendingTransactions <= 50 ? "text-amber-500" : "text-rose-500"
+                      )}
+                      strokeWidth="3.5"
+                      strokeDasharray={`${(data.connected ? (reconciliation?.reconciliationPercentage || 0) : 0)}, 100`}
+                      strokeLinecap="round"
+                      stroke="currentColor"
+                    />
                   </svg>
                 </div>
               </div>
 
               <div className="flex-1 flex flex-col justify-center z-10 -mt-1">
                 <h4 className="text-[20px] font-extrabold text-slate-800 leading-tight tracking-tight">
-                  {reconciliation ? `${reconciliation.reconciliationPercentage}%` : "95%"}
+                  {data.connected ? (reconciliation ? `${reconciliation.reconciliationPercentage}%` : "0%") : "0%"}
                 </h4>
                 <p className="text-[11px] font-semibold mt-1 leading-none whitespace-nowrap">
-                  <span className="text-[#10b981]">
-                    {reconciliation ? `${reconciliation.pendingTransactions} pending` : "8 pending"}
+                  <span className={cn(
+                    (!data.connected || !reconciliation || reconciliation.pendingTransactions === 0) ? "text-[#10b981]" :
+                    reconciliation.pendingTransactions <= 50 ? "text-amber-500" : "text-rose-500"
+                  )}>
+                    {data.connected ? (reconciliation ? `${reconciliation.pendingTransactions} pending` : "0 pending") : "0 pending"}
                   </span>
                   <span className="text-slate-400"> txns to match</span>
                 </p>
@@ -922,166 +998,277 @@ export default function OverviewPage() {
 
       {/* 2. Middle Row: Line Chart, Health Score, Alerts */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        {/* Revenue Trend Line Chart */}
-        <div className="lg:col-span-6 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs relative flex flex-col justify-between">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4 shrink-0">
-            <h3 className="text-[13.5px] font-bold text-slate-800">Revenue Trend</h3>
-
-            <div className="flex rounded-md border border-slate-200 p-0.5 bg-slate-50 select-none">
-              {(['Daily', 'Weekly', 'Monthly'] as const).map((mode) => (
-                <button
-                  key={mode}
-                  onClick={() => setRevenueTimeframe(mode)}
-                  className={cn(
-                    "px-2.5 py-1 text-[9.5px] font-bold rounded transition cursor-pointer outline-none",
-                    revenueTimeframe === mode
-                      ? "bg-white shadow-2xs text-primary font-bold"
-                      : "text-slate-500 hover:text-slate-900"
-                  )}
-                >
-                  {mode}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Chart Container utilizing direct ref to mount successfully under React 19 */}
-          <div className="h-68 w-full flex-1 min-h-[270px] relative">
-            <div ref={revenueChartRef} className="w-full h-full" />
-            {isLoading && (
-              <div className="absolute inset-0 bg-white/75 backdrop-blur-[1px] flex flex-col items-center justify-center rounded-lg z-20 transition-all duration-300">
-                <div className="flex flex-col items-center gap-3">
-                  <div className="relative flex items-center justify-center">
-                    <div className="w-10 h-10 border-[3px] border-slate-100 rounded-full animate-spin"></div>
-                    <div className="absolute w-10 h-10 border-[3px] border-t-[#0064eb] rounded-full animate-spin"></div>
-                  </div>
-                  <div className="text-center space-y-1">
-                    <p className="text-[11.5px] font-bold text-slate-700 animate-pulse">Calculating trends...</p>
-                    <p className="text-[9.5px] text-slate-400 font-medium">Processing Xero financial ledger</p>
-                  </div>
+        {isLoading ? (
+          <>
+            {/* 1. Revenue Trend Line Chart Skeleton */}
+            <div className="lg:col-span-6 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs h-[350px] flex flex-col justify-between select-none">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
+                <div className="h-4 w-28 bg-slate-100 rounded animate-pulse" />
+                <div className="h-6 w-32 bg-slate-50 rounded animate-pulse" />
+              </div>
+              <div className="flex-1 flex flex-col justify-end gap-3 h-52 relative">
+                {/* Visual line wave skeleton representation */}
+                <svg className="w-full h-full opacity-10" viewBox="0 0 100 30" preserveAspectRatio="none">
+                  <path d="M0,25 C15,10 30,22 45,5 C60,18 75,5 90,15 C95,20 100,5 100,5" fill="none" stroke="#cbd5e1" strokeWidth="2" className="animate-pulse" />
+                </svg>
+                <div className="flex justify-between items-center px-1 text-[10px] text-slate-200">
+                  <div className="h-3 w-8 bg-slate-100 rounded animate-pulse" />
+                  <div className="h-3 w-8 bg-slate-100 rounded animate-pulse" />
+                  <div className="h-3 w-8 bg-slate-100 rounded animate-pulse" />
+                  <div className="h-3 w-8 bg-slate-100 rounded animate-pulse" />
+                  <div className="h-3 w-8 bg-slate-100 rounded animate-pulse" />
+                  <div className="h-3 w-8 bg-slate-100 rounded animate-pulse" />
                 </div>
               </div>
-            )}
-          </div>
-        </div>
+            </div>
 
-        {/* Business Health Score Gauge */}
-        <div className="lg:col-span-3 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between select-none">
-          <div className="border-b border-slate-100 pb-3 mb-2 flex items-center justify-between shrink-0">
-            <h3 className="text-[13.5px] font-bold text-slate-800">Business Health Score</h3>
-            <button className="text-slate-400 hover:text-slate-700 outline-none"><MoreVertical className="h-4 w-4" /></button>
-          </div>
-
-          {healthScore ? (
-            <>
-              <div className="relative flex flex-col items-center justify-center flex-1 min-h-[125px]">
-                <div ref={healthGaugeRef} className="w-full h-28" />
-                <div className="text-center mt-1">
-                  <span className={cn(
-                    "text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider border",
-                    healthScore.label === 'EXCELLENT' || healthScore.label === 'GOOD' ? 'bg-emerald-50 border-emerald-100 text-emerald-600' :
-                    healthScore.label === 'FAIR' ? 'bg-amber-50 border-amber-100 text-amber-600' :
-                    healthScore.label === 'WARNING' ? 'bg-orange-50 border-orange-100 text-orange-600' :
-                    'bg-red-50 border-red-100 text-red-600'
-                  )}>{healthScore.label}</span>
-                  <p className="text-[11px] text-slate-500 font-medium mt-1.5 leading-normal">{healthScore.description}</p>
-                </div>
+            {/* 2. Business Health Score Skeleton */}
+            <div className="lg:col-span-3 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between select-none h-[350px]">
+              <div className="border-b border-slate-100 pb-3 mb-2 flex items-center justify-between">
+                <div className="h-4 w-36 bg-slate-100 rounded animate-pulse" />
+                <div className="h-4 w-4 bg-slate-100 rounded animate-pulse" />
               </div>
-
-              {/* KPI progress bars - Dynamic from API */}
-              <div className="space-y-2 mt-3 pt-3 border-t border-slate-50 shrink-0">
-                {healthScore.metrics.map((kpi, index) => (
-                  <div key={index} className="space-y-1">
-                    <div className="flex items-center justify-between text-[10.5px] font-semibold text-slate-500">
-                      <span>{kpi.name}</span>
-                      <span className="text-slate-700 font-bold">{kpi.score}/100</span>
-                    </div>
-                    <div className="h-1.5 w-full bg-slate-50 rounded-full overflow-hidden border border-slate-100">
-                      <div className="h-full rounded-full transition-all duration-700 ease-out" style={{ width: `${kpi.score}%`, backgroundColor: kpi.color }} />
-                    </div>
-                  </div>
-                ))}
+              <div className="flex-1 flex flex-col items-center justify-center py-4">
+                {/* Circle gauge representation skeleton */}
+                <div className="h-24 w-24 rounded-full border-[7px] border-slate-50 border-t-slate-200 animate-spin" />
+                <div className="h-3 w-20 bg-slate-100 rounded animate-pulse mt-4" />
+                <div className="h-2 w-32 bg-slate-100 rounded animate-pulse mt-2" />
               </div>
-            </>
-          ) : (
-            <div className="flex-1 flex flex-col items-center justify-center min-h-[125px] py-4">
-              <div ref={healthGaugeRef} className="w-full h-28 opacity-30" />
-              <div className="space-y-2 mt-6 w-full pt-3 border-t border-slate-50">
-                {['Profitability', 'Liquidity', 'Efficiency', 'Solvency', 'Growth'].map((name) => (
-                  <div key={name} className="space-y-1">
-                    <div className="flex items-center justify-between text-[10.5px] font-semibold text-slate-500">
-                      <span>{name}</span>
-                      <span className="text-slate-300 font-bold">—</span>
-                    </div>
-                    <div className="h-1.5 w-full bg-slate-50 rounded-full overflow-hidden border border-slate-100">
-                      <div className="h-full rounded-full bg-slate-100 animate-pulse" style={{ width: '30%' }} />
-                    </div>
-                  </div>
-                ))}
+              <div className="space-y-2 mt-3 pt-3 border-t border-slate-50">
+                <div className="h-2.5 w-full bg-slate-100 rounded animate-pulse" />
+                <div className="h-2.5 w-5/6 bg-slate-100 rounded animate-pulse" />
               </div>
             </div>
-          )}
-        </div>
 
-        {/* Alerts & Notifications with structured rows */}
-        <div className="lg:col-span-3 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between select-none">
-          <div className="border-b border-slate-100 pb-3 mb-3 flex items-center justify-between shrink-0">
-            <h3 className="text-[13.5px] font-bold text-slate-800">Alerts & Notifications</h3>
-            <Link href="/alerts" className="text-[11px] text-primary hover:underline font-bold flex items-center gap-0.5">
-              <span>View All</span>
-              <ArrowRight className="h-3 w-3" />
-            </Link>
-          </div>
-
-          <div className="flex-1 overflow-y-auto max-h-[350px] pr-1">
-            {alertsData === null ? (
-              /* Loading state - subtle shimmer bars */
-              <div className="space-y-2.5">
-                {[1, 2, 3, 4].map((i) => (
-                  <div key={i} className="flex items-start gap-3 p-2.5 rounded-lg border border-slate-100 bg-slate-50/30">
-                    <div className="h-5.5 w-5.5 shrink-0 rounded-full bg-slate-100 animate-pulse" />
-                    <div className="flex-1 space-y-1.5">
+            {/* 3. Alerts & Notifications Skeleton */}
+            <div className="lg:col-span-3 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between select-none h-[350px]">
+              <div className="border-b border-slate-100 pb-3 mb-3 flex items-center justify-between">
+                <div className="h-4 w-36 bg-slate-100 rounded animate-pulse" />
+                <div className="h-3.5 w-12 bg-slate-100 rounded animate-pulse" />
+              </div>
+              <div className="flex-1 space-y-3 overflow-hidden">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="flex items-start gap-3 p-2.5 rounded-lg border border-slate-50 bg-slate-50/20">
+                    <div className="h-6 w-6 rounded-full bg-slate-100 shrink-0 animate-pulse" />
+                    <div className="flex-1 space-y-1.5 min-w-0">
                       <div className="h-3 w-3/4 bg-slate-100 rounded animate-pulse" />
                       <div className="h-2.5 w-1/2 bg-slate-50 rounded animate-pulse" />
                     </div>
                   </div>
                 ))}
               </div>
-            ) : alertsData.alerts.length === 0 ? (
-              /* Empty state - No notifications */
-              <div className="flex flex-col items-center justify-center py-10 gap-3">
-                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-50 border border-slate-100">
-                  <svg className="h-5 w-5 text-slate-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-                    <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-                  </svg>
-                </div>
-                <div className="text-center">
-                  <p className="text-[12px] font-bold text-slate-500">No Notifications</p>
-                  <p className="text-[10px] text-slate-400 font-medium mt-0.5">You&apos;re all caught up!</p>
+            </div>
+          </>
+        ) : !data.connected ? (
+          <>
+            {/* Revenue Trend Disconnected */}
+            <div className="lg:col-span-6 bg-white rounded-lg border border-slate-200/80 p-8 shadow-2xs flex flex-col items-center justify-center text-center select-none min-h-[350px]">
+              <div className="h-10 w-10 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-400 mb-3.5 animate-pulse">
+                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="2" y1="12" x2="22" y2="12" />
+                  <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                </svg>
+              </div>
+              <h4 className="text-[12.5px] font-bold text-slate-700 mb-1">Xero Disconnected</h4>
+              <p className="text-[10.5px] text-slate-400 max-w-[240px] leading-relaxed font-sans">
+                Please connect your Xero organization to view your Revenue Trend analytics.
+              </p>
+            </div>
+            {/* Business Health Score Disconnected */}
+            <div className="lg:col-span-3 bg-white rounded-lg border border-slate-200/80 p-8 shadow-2xs flex flex-col items-center justify-center text-center select-none min-h-[350px]">
+              <div className="h-10 w-10 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-400 mb-3.5 animate-pulse">
+                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="2" y1="12" x2="22" y2="12" />
+                  <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                </svg>
+              </div>
+              <h4 className="text-[12.5px] font-bold text-slate-700 mb-1">Xero Disconnected</h4>
+              <p className="text-[10.5px] text-slate-400 max-w-[200px] leading-relaxed font-sans">
+                Please connect your Xero organization to calculate your Business Health Score.
+              </p>
+            </div>
+            {/* Alerts Disconnected */}
+            <div className="lg:col-span-3 bg-white rounded-lg border border-slate-200/80 p-8 shadow-2xs flex flex-col items-center justify-center text-center select-none min-h-[350px]">
+              <div className="h-10 w-10 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-400 mb-3.5 animate-pulse">
+                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="2" y1="12" x2="22" y2="12" />
+                  <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                </svg>
+              </div>
+              <h4 className="text-[12.5px] font-bold text-slate-700 mb-1">Xero Disconnected</h4>
+              <p className="text-[10.5px] text-slate-400 max-w-[200px] leading-relaxed font-sans">
+                Please connect your Xero organization to view alerts and notifications.
+              </p>
+            </div>
+          </>
+        ) : (
+          <>
+            {/* Revenue Trend Line Chart */}
+            <div className="lg:col-span-6 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs relative flex flex-col justify-between">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4 shrink-0">
+                <h3 className="text-[13.5px] font-bold text-slate-800">Revenue Trend</h3>
+
+                <div className="flex rounded-md border border-slate-200 p-0.5 bg-slate-50 select-none">
+                  {(['Daily', 'Weekly', 'Monthly'] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      onClick={() => setRevenueTimeframe(mode)}
+                      className={cn(
+                        "px-2.5 py-1 text-[9.5px] font-bold rounded transition cursor-pointer outline-none",
+                        revenueTimeframe === mode
+                          ? "bg-white shadow-2xs text-primary font-bold"
+                          : "text-slate-500 hover:text-slate-900"
+                      )}
+                    >
+                      {mode}
+                    </button>
+                  ))}
                 </div>
               </div>
-            ) : (
-              /* Real alerts from API */
-              <div className="space-y-2.5">
-                {alertsData.alerts.map((alert, idx) => (
-                  <div key={alert.id || idx} className="flex items-start gap-3 text-[11px] leading-normal p-2.5 rounded-lg border border-slate-100 bg-slate-50/30">
-                    <div className={cn("flex h-5.5 w-5.5 shrink-0 items-center justify-center rounded-full text-white font-bold text-[10px]", alert.color)}>
-                      {alert.icon}
-                    </div>
-                    <div className="flex-1 min-w-0 space-y-0.5">
-                      <div className="flex items-center justify-between gap-1.5">
-                        <span className="font-bold text-slate-700 truncate">{alert.title}</span>
-                        <span className="text-[9.5px] text-slate-400 font-medium shrink-0">{alert.time}</span>
+
+              {/* Chart Container utilizing direct ref to mount successfully under React 19 */}
+              <div className="h-68 w-full flex-1 min-h-[270px] relative">
+                <div ref={revenueChartRef} className="w-full h-full" />
+                {(isLoading || chartLoading) && (
+                  <div className="absolute inset-0 bg-white/75 backdrop-blur-[1px] flex flex-col items-center justify-center rounded-lg z-20 transition-all duration-300">
+                    <div className="flex flex-col items-center gap-3">
+                      <div className="relative flex items-center justify-center">
+                        <div className="w-10 h-10 border-[3px] border-slate-100 rounded-full animate-spin"></div>
+                        <div className="absolute w-10 h-10 border-[3px] border-t-[#0064eb] rounded-full animate-spin"></div>
                       </div>
-                      <div className="text-[10px] text-slate-450 font-semibold">{alert.sub}</div>
+                      <div className="text-center space-y-1">
+                        <p className="text-[11.5px] font-bold text-slate-700 animate-pulse">Calculating trends...</p>
+                        <p className="text-[9.5px] text-slate-400 font-medium">Processing Xero financial ledger</p>
+                      </div>
                     </div>
                   </div>
-                ))}
+                )}
               </div>
-            )}
-          </div>
-        </div>
+            </div>
+
+            {/* Business Health Score Gauge */}
+            <div className="lg:col-span-3 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between select-none">
+              <div className="border-b border-slate-100 pb-3 mb-2 flex items-center justify-between shrink-0">
+                <h3 className="text-[13.5px] font-bold text-slate-800">Business Health Score</h3>
+                <button className="text-slate-400 hover:text-slate-700 outline-none"><MoreVertical className="h-4 w-4" /></button>
+              </div>
+
+              {healthScore ? (
+                <>
+                  <div className="relative flex flex-col items-center justify-center flex-1 min-h-[125px]">
+                    <div ref={healthGaugeRef} className="w-full h-28" />
+                    <div className="text-center mt-1">
+                      <span className={cn(
+                        "text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider border",
+                        healthScore.label === 'EXCELLENT' || healthScore.label === 'GOOD' ? 'bg-emerald-50 border-emerald-100 text-emerald-600' :
+                        healthScore.label === 'FAIR' ? 'bg-amber-50 border-amber-100 text-amber-600' :
+                        healthScore.label === 'WARNING' ? 'bg-orange-50 border-orange-100 text-orange-600' :
+                        healthScore.label === 'OFFLINE' || healthScore.label === 'DISCONNECTED' ? 'bg-slate-55 border-slate-200 text-slate-500' :
+                        'bg-red-50 border-red-100 text-red-600'
+                      )}>{healthScore.label}</span>
+                      <p className="text-[11px] text-slate-500 font-medium mt-1.5 leading-normal">{healthScore.description}</p>
+                    </div>
+                  </div>
+
+                  {/* KPI progress bars - Dynamic from API */}
+                  <div className="space-y-2 mt-3 pt-3 border-t border-slate-50 shrink-0">
+                    {healthScore.metrics.map((kpi, index) => (
+                      <div key={index} className="space-y-1">
+                        <div className="flex items-center justify-between text-[10.5px] font-semibold text-slate-500">
+                          <span>{kpi.name}</span>
+                          <span className="text-slate-700 font-bold">{kpi.score}/100</span>
+                        </div>
+                        <div className="h-1.5 w-full bg-slate-50 rounded-full overflow-hidden border border-slate-100">
+                          <div className="h-full rounded-full transition-all duration-700 ease-out" style={{ width: `${kpi.score}%`, backgroundColor: kpi.color }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div className="flex-1 flex flex-col items-center justify-center min-h-[125px] py-4">
+                  <div ref={healthGaugeRef} className="w-full h-28 opacity-30" />
+                  <div className="space-y-2 mt-6 w-full pt-3 border-t border-slate-50">
+                    {['Profitability', 'Liquidity', 'Efficiency', 'Solvency', 'Growth'].map((name) => (
+                      <div key={name} className="space-y-1">
+                        <div className="flex items-center justify-between text-[10.5px] font-semibold text-slate-500">
+                          <span>{name}</span>
+                          <span className="text-slate-300 font-bold">—</span>
+                        </div>
+                        <div className="h-1.5 w-full bg-slate-50 rounded-full overflow-hidden border border-slate-100">
+                          <div className="h-full rounded-full bg-slate-100 animate-pulse" style={{ width: '30%' }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Alerts & Notifications with structured rows */}
+            <div className="lg:col-span-3 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between select-none">
+              <div className="border-b border-slate-100 pb-3 mb-3 flex items-center justify-between shrink-0">
+                <h3 className="text-[13.5px] font-bold text-slate-800">Alerts & Notifications</h3>
+                <Link href="/alerts" className="text-[11px] text-primary hover:underline font-bold flex items-center gap-0.5">
+                  <span>View All</span>
+                  <ArrowRight className="h-3 w-3" />
+                </Link>
+              </div>
+
+              <div className="flex-1 overflow-y-auto max-h-[350px] pr-1">
+                {alertsData === null ? (
+                  /* Loading state - subtle shimmer bars */
+                  <div className="space-y-2.5">
+                    {[1, 2, 3, 4].map((i) => (
+                      <div key={i} className="flex items-start gap-3 p-2.5 rounded-lg border border-slate-100 bg-slate-50/30">
+                        <div className="h-5.5 w-5.5 shrink-0 rounded-full bg-slate-100 animate-pulse" />
+                        <div className="flex-1 space-y-1.5">
+                          <div className="h-3 w-3/4 bg-slate-100 rounded animate-pulse" />
+                          <div className="h-2.5 w-1/2 bg-slate-50 rounded animate-pulse" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : alertsData.alerts.length === 0 ? (
+                  /* Empty state - No notifications */
+                  <div className="flex flex-col items-center justify-center py-10 gap-3">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-50 border border-slate-100">
+                      <svg className="h-5 w-5 text-slate-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                        <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+                      </svg>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-[12px] font-bold text-slate-500">No Notifications</p>
+                      <p className="text-[10px] text-slate-400 font-medium mt-0.5">You&apos;re all caught up!</p>
+                    </div>
+                  </div>
+                ) : (
+                  /* Real alerts from API */
+                  <div className="space-y-2.5">
+                    {alertsData.alerts.map((alert, idx) => (
+                      <div key={alert.id || idx} className="flex items-start gap-3 text-[11px] leading-normal p-2.5 rounded-lg border border-slate-100 bg-slate-50/30">
+                        <div className={cn("flex h-5.5 w-5.5 shrink-0 items-center justify-center rounded-full text-white font-bold text-[10px]", alert.color)}>
+                          {alert.icon}
+                        </div>
+                        <div className="flex-1 min-w-0 space-y-0.5">
+                          <div className="flex items-center justify-between gap-1.5">
+                            <span className="font-bold text-slate-700 truncate">{alert.title}</span>
+                            <span className="text-[9.5px] text-slate-400 font-medium shrink-0">{alert.time}</span>
+                          </div>
+                          <div className="text-[10px] text-slate-450 font-semibold">{alert.sub}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Financial & Accounting Overview Row */}
@@ -1120,303 +1307,402 @@ export default function OverviewPage() {
       />
 
       {/* 2.8 New Fourth Row: 4 Accounts/Reconciliation Summary Cards */}
-      <OverviewMoreCardsRow />
-
-      {/* 3. Bottom Row: Tables and Lists */}
+      <OverviewMoreCardsRow connected={data.connected} loading={isLoading} />
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        {/* Top Overdue Invoices Table */}
-        <div className="lg:col-span-6 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs overflow-hidden select-none">
-          <div className="border-b border-slate-100 pb-3 mb-4 flex items-center justify-between">
-            <h3 className="text-[13.5px] font-bold text-slate-800">Top Overdue Invoices</h3>
-            <Link href="/invoices" className="text-[11px] text-primary hover:underline font-bold flex items-center gap-0.5">
-              <span>View All</span>
-              <ArrowRight className="h-3 w-3" />
-            </Link>
-          </div>
-
-          <div className="overflow-x-auto w-full">
-            <table className="w-full text-left border-collapse text-[11px]">
-              <thead>
-                <tr className="border-b border-slate-200/80 text-slate-400 font-bold uppercase tracking-wider">
-                  <th className="py-3 px-2">Customer</th>
-                  <th className="py-3 px-2">Invoice #</th>
-                  <th className="py-3 px-2">Due Date</th>
-                  <th className="py-3 px-2 text-right">Amount</th>
-                  <th className="py-3 px-2 text-right w-24">Overdue</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {isLoading ? (
-                  [1, 2, 3, 4, 5].map((i) => (
-                    <tr key={i} className="animate-pulse">
-                      <td className="py-3 px-2"><div className="h-3 w-24 bg-slate-100 rounded" /></td>
-                      <td className="py-3 px-2"><div className="h-3 w-12 bg-slate-100 rounded" /></td>
-                      <td className="py-3 px-2"><div className="h-3 w-16 bg-slate-100 rounded" /></td>
-                      <td className="py-3 px-2 text-right"><div className="h-3 w-16 bg-slate-100 rounded ml-auto" /></td>
-                      <td className="py-3 px-2 text-right"><div className="h-3 w-12 bg-slate-100 rounded ml-auto" /></td>
-                    </tr>
-                  ))
-                ) : (!data.overdueInvoices || data.overdueInvoices.length === 0) ? (
-                  <tr>
-                    <td colSpan={5} className="py-12">
-                      <div className="flex flex-col items-center justify-center text-center px-4">
-                        <div className="h-11 w-11 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 mb-3 border border-slate-100 shadow-2xs">
-                          <FileCheck className="h-5 w-5 stroke-[1.5]" />
-                        </div>
-                        <h4 className="text-[12px] font-bold text-slate-700 mb-0.5 font-sans">All Caught Up!</h4>
-                        <p className="text-[10.5px] text-slate-400 max-w-[240px] font-sans">No overdue invoices found at the moment.</p>
-                      </div>
-                    </td>
-                  </tr>
-                ) : (
-                  data.overdueInvoices.map((row, idx) => (
-                    <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="py-3 px-2 font-bold text-slate-700 truncate max-w-[150px]">{row.name}</td>
-                      <td className="py-3 px-2 text-slate-400 font-semibold">{row.id}</td>
-                      <td className="py-3 px-2 text-slate-400 font-semibold">{formatDateString(row.due)}</td>
-                      <td className="py-3 px-2 text-right font-bold text-slate-800">
-                        <FormattedAmount amount={row.amount} currencyCode={data.currency} className="font-bold text-[11px]" />
-                      </td>
-                      <td className="py-3 px-2 text-right font-bold text-[#ef4444]">{row.days} days</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Bank Accounts feeds list */}
-        <div className="lg:col-span-3 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between select-none">
-          <div className="border-b border-slate-100 pb-3 mb-3 flex items-center justify-between">
-            <h3 className="text-[13.5px] font-bold text-slate-800">Bank Accounts</h3>
-            <Link href="/cash-flow" className="text-[11px] text-primary hover:underline font-bold flex items-center gap-0.5">
-              <span>View All</span>
-              <ArrowRight className="h-3 w-3" />
-            </Link>
-          </div>
-
-          <div className="flex-1 space-y-0 divide-y divide-slate-100">
-            {isLoading ? (
-              <div className="space-y-3 py-2">
-                {[1, 2, 3].map((i) => (
-                  <div key={i} className="flex items-center justify-between py-2.5 animate-pulse animate-duration-1000">
-                    <div className="flex items-center gap-3">
-                      <div className="h-5.5 w-5.5 rounded-md bg-slate-100 shrink-0" />
-                      <div className="flex flex-col gap-1">
-                        <div className="h-3 w-24 bg-slate-100 rounded" />
-                        <div className="h-2 w-10 bg-slate-100 rounded" />
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <div className="h-3 w-16 bg-slate-100 rounded" />
-                      <div className="h-4 w-10 bg-slate-100 rounded-full" />
-                    </div>
+        {isLoading ? (
+          <>
+            {/* 1. Top Overdue Invoices Skeleton */}
+            <div className="lg:col-span-6 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs overflow-hidden select-none min-h-[290px] flex flex-col justify-between">
+              <div className="border-b border-slate-100 pb-3 mb-4 flex items-center justify-between">
+                <div className="h-4 w-36 bg-slate-100 rounded animate-pulse" />
+                <div className="h-4 w-12 bg-slate-100 rounded animate-pulse" />
+              </div>
+              <div className="space-y-4 flex-1">
+                {[1, 2, 3, 4].map((i) => (
+                  <div key={i} className="flex justify-between items-center gap-3">
+                    <div className="h-3 w-1/4 bg-slate-100 rounded animate-pulse" />
+                    <div className="h-3 w-1/6 bg-slate-100 rounded animate-pulse" />
+                    <div className="h-3.5 w-1/6 bg-slate-200/60 rounded animate-pulse ml-auto" />
                   </div>
                 ))}
               </div>
-            ) : (!data.bankAccounts || data.bankAccounts.length === 0) ? (
-              <div className="flex flex-col items-center justify-center text-center py-12 px-4 flex-1">
-                <div className="h-11 w-11 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 mb-3 border border-slate-100 shadow-2xs">
-                  <Landmark className="h-5 w-5 stroke-[1.5]" />
-                </div>
-                <h4 className="text-[12px] font-bold text-slate-700 mb-0.5 font-sans">No Bank Accounts</h4>
-                <p className="text-[10.5px] text-slate-400 max-w-[200px] font-sans">No connected bank accounts found.</p>
+            </div>
+
+            {/* 2. Bank Accounts Skeleton */}
+            <div className="lg:col-span-3 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between select-none min-h-[290px]">
+              <div className="border-b border-slate-100 pb-3 mb-3 flex items-center justify-between">
+                <div className="h-4 w-28 bg-slate-100 rounded animate-pulse" />
+                <div className="h-4 w-16 bg-slate-100 rounded animate-pulse" />
               </div>
-            ) : (
-              data.bankAccounts.map((bank: any, idx: number) => {
-                const isNegative = bank.balance !== null && bank.balance < 0;
-                const nameLower = bank.accountName.toLowerCase();
-                let logo = (
-                  <div className="h-5.5 w-5.5 rounded shrink-0 border border-slate-200/50 bg-slate-50 text-[9.5px] font-bold text-slate-500 flex items-center justify-center">
-                    BS
+              <div className="space-y-3 flex-1">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="flex justify-between items-center gap-3">
+                    <div className="h-3.5 w-1/2 bg-slate-100 rounded animate-pulse" />
+                    <div className="h-3.5 w-1/4 bg-slate-200/60 rounded animate-pulse" />
                   </div>
-                );
+                ))}
+              </div>
+            </div>
 
-                if (nameLower.includes('hdfc')) {
-                  logo = (
-                    <svg className="h-5.5 w-5.5 rounded shrink-0 border border-blue-200/40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <rect width="24" height="24" fill="#004c8f" />
-                      <rect x="5" y="5" width="14" height="14" fill="#ffffff" />
-                      <rect x="8.5" y="8.5" width="7" height="7" fill="#004c8f" />
-                      <rect x="11" y="5" width="2" height="14" fill="#004c8f" />
-                      <rect x="5" y="11" width="14" height="2" fill="#004c8f" />
-                    </svg>
-                  );
-                } else if (nameLower.includes('icici')) {
-                  logo = (
-                    <svg className="h-5.5 w-5.5 rounded shrink-0 border border-orange-200/40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <rect width="24" height="24" fill="#f26e21" />
-                      <circle cx="12" cy="12" r="7" fill="#ffffff" />
-                      <path d="M12 9v6M10 9h4M10 15h4" stroke="#f26e21" strokeWidth="1.8" strokeLinecap="round" />
-                    </svg>
-                  );
-                } else if (nameLower.includes('state bank') || nameLower.includes('sbi')) {
-                  logo = (
-                    <svg className="h-5.5 w-5.5 rounded shrink-0 border border-cyan-200/40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <rect width="24" height="24" fill="#00a8e8" />
-                      <circle cx="12" cy="11" r="5" stroke="#ffffff" strokeWidth="2" fill="none" />
-                      <line x1="12" y1="13.5" x2="12" y2="19" stroke="#ffffff" strokeWidth="2.2" strokeLinecap="round" />
-                    </svg>
-                  );
-                } else if (nameLower.includes('axis')) {
-                  logo = (
-                    <svg className="h-5.5 w-5.5 rounded shrink-0 border border-rose-900/20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <rect width="24" height="24" fill="#841a41" />
-                      <path d="M12 5l6 14H6l6-14z" fill="#ffffff" />
-                      <path d="M12 9l3.5 8h-7L12 9z" fill="#841a41" />
-                      <line x1="10" y1="14" x2="14" y2="14" stroke="#ffffff" strokeWidth="1.2" />
-                    </svg>
-                  );
-                } else if (nameLower.includes('kotak')) {
-                  logo = (
-                    <svg className="h-5.5 w-5.5 rounded shrink-0 border border-red-200/40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <rect width="24" height="24" fill="#d81d24" />
-                      <circle cx="12" cy="12" r="7" stroke="#ffffff" strokeWidth="1.8" fill="none" />
-                      <path d="M9.5 9v6M13.5 9l-2.5 3 2.5 3M11 12h2" stroke="#ffffff" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  );
-                }
-
-                return (
-                  <div key={idx} className="flex items-center justify-between py-3 border-b border-slate-100 last:border-0 hover:bg-slate-50/50 transition-colors">
-                    <div className="flex items-center gap-3">
-                      {logo}
-                      <div className="flex flex-col min-w-0">
-                        <span className="font-bold text-slate-700 text-[11.5px] truncate">{bank.accountName}</span>
-                        <span className="text-[9px] text-slate-450 font-bold leading-none mt-0.5">CODE: {bank.accountCode || 'BANK'}</span>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className={cn(
-                        "font-bold text-[11.5px] select-all",
-                        isNegative ? "text-red-500" : "text-slate-800"
-                      )}>
-                        {bank.balance !== null ? (
-                          <FormattedAmount
-                            amount={bank.balance}
-                            currencyCode={bank.currency}
-                            className="font-bold text-[11.5px]"
-                          />
-                        ) : (
-                          '—'
-                        )}
-                      </span>
-                    </div>
+            {/* 3. Profit & Loss Skeleton */}
+            <div className="lg:col-span-3 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between select-none min-h-[290px]">
+              <div className="border-b border-slate-100 pb-3 mb-3 flex items-center justify-between">
+                <div className="h-4 w-32 bg-slate-100 rounded animate-pulse" />
+                <div className="h-4 w-12 bg-slate-100 rounded animate-pulse" />
+              </div>
+              <div className="space-y-3 flex-1">
+                {[1, 2, 3, 4].map((i) => (
+                  <div key={i} className="flex justify-between items-center gap-3">
+                    <div className="h-3 w-1/3 bg-slate-100 rounded animate-pulse" />
+                    <div className="h-2 w-12 bg-slate-100 rounded animate-pulse" />
+                    <div className="h-3 w-16 bg-slate-200/60 rounded animate-pulse ml-auto" />
                   </div>
-                );
-              })
-            )}
-          </div>
-        </div>
+                ))}
+              </div>
+            </div>
+          </>
+        ) : !data.connected ? (
+          <>
+            {/* Top Overdue Invoices Disconnected */}
+            <div className="lg:col-span-6 bg-white rounded-lg border border-slate-200/80 p-8 shadow-2xs flex flex-col items-center justify-center text-center select-none min-h-[290px]">
+              <div className="h-10 w-10 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-400 mb-3.5 animate-pulse">
+                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="2" y1="12" x2="22" y2="12" />
+                  <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                </svg>
+              </div>
+              <h4 className="text-[12.5px] font-bold text-slate-700 mb-1">Xero Disconnected</h4>
+              <p className="text-[10.5px] text-slate-455 font-bold max-w-[240px] leading-relaxed font-sans">
+                Please connect your Xero organization to view overdue invoices.
+              </p>
+            </div>
+            {/* Bank Accounts Disconnected */}
+            <div className="lg:col-span-3 bg-white rounded-lg border border-slate-200/80 p-8 shadow-2xs flex flex-col items-center justify-center text-center select-none min-h-[290px]">
+              <div className="h-10 w-10 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-400 mb-3.5 animate-pulse">
+                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="2" y1="12" x2="22" y2="12" />
+                  <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                </svg>
+              </div>
+              <h4 className="text-[12.5px] font-bold text-slate-700 mb-1">Xero Disconnected</h4>
+              <p className="text-[10.5px] text-slate-455 font-bold max-w-[200px] leading-relaxed font-sans">
+                Please connect your Xero organization to view your bank accounts.
+              </p>
+            </div>
+            {/* Profit & Loss Disconnected */}
+            <div className="lg:col-span-3 bg-white rounded-lg border border-slate-200/80 p-8 shadow-2xs flex flex-col items-center justify-center text-center select-none min-h-[290px]">
+              <div className="h-10 w-10 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-400 mb-3.5 animate-pulse">
+                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="2" y1="12" x2="22" y2="12" />
+                  <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                </svg>
+              </div>
+              <h4 className="text-[12.5px] font-bold text-slate-700 mb-1">Xero Disconnected</h4>
+              <p className="text-[10.5px] text-slate-455 font-bold max-w-[200px] leading-relaxed font-sans">
+                Please connect your Xero organization to view your Profit & Loss statements.
+              </p>
+            </div>
+          </>
+        ) : (
+          <>
+            {/* Top Overdue Invoices Table */}
+            <div className="lg:col-span-6 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs overflow-hidden select-none">
+              <div className="border-b border-slate-100 pb-3 mb-4 flex items-center justify-between">
+                <h3 className="text-[13.5px] font-bold text-slate-800">Top Overdue Invoices</h3>
+                <Link href="/invoices" className="text-[11px] text-primary hover:underline font-bold flex items-center gap-0.5">
+                  <span>View All</span>
+                  <ArrowRight className="h-3 w-3" />
+                </Link>
+              </div>
 
-        {/* Profit & Loss summary widget */}
-        <div className="lg:col-span-3 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between select-none">
-          <div className="border-b border-slate-100 pb-3 mb-3 flex items-center justify-between">
-            <h3 className="text-[13.5px] font-bold text-slate-800">Profit & Loss (MTD)</h3>
-            <Link href="/reports" className="text-[11px] text-primary hover:underline font-bold flex items-center gap-0.5">
-              <span>View Report</span>
-              <ArrowRight className="h-3 w-3" />
-            </Link>
-          </div>
-
-          <div className="flex-1 space-y-4 pt-2">
-            {[
-              {
-                label: 'Revenue',
-                amount: data.plRevenue || 0,
-                percent: (data.plRevenue && data.plRevenue > 0) ? 100 : 0,
-                color: 'bg-emerald-500',
-                showBar: true
-              },
-              {
-                label: 'Cost of Goods Sold',
-                amount: data.cogs || 0,
-                percent: (data.plRevenue && data.plRevenue > 0) ? Math.min(100, Math.max(0, ((data.cogs || 0) / data.plRevenue * 100))) : 0,
-                color: 'bg-red-500',
-                showBar: true
-              },
-              {
-                label: 'Gross Profit',
-                amount: data.grossProfit || 0,
-                percent: (data.plRevenue && data.plRevenue > 0) ? Math.min(100, Math.max(0, ((data.grossProfit || 0) / data.plRevenue * 100))) : 0,
-                showBar: false,
-                isLabelBold: true,
-                hasDividerAbove: true
-              },
-              {
-                label: 'Operating Expenses',
-                amount: data.expenses || 0,
-                percent: (data.plRevenue && data.plRevenue > 0) ? Math.min(100, Math.max(0, ((data.expenses || 0) / data.plRevenue * 100))) : 0,
-                color: 'bg-red-500',
-                showBar: true
-              },
-              {
-                label: 'Net Profit',
-                amount: data.netProfit || 0,
-                percent: (data.plRevenue && data.plRevenue > 0) ? Math.min(100, Math.max(0, ((data.netProfit || 0) / data.plRevenue * 100))) : 0,
-                color: 'bg-emerald-500',
-                showBar: true,
-                isLabelBold: true,
-                hasDividerAbove: true
-              },
-            ].map((row, idx) => (
-              <React.Fragment key={idx}>
-                {row.hasDividerAbove && (
-                  <div className="border-t border-slate-100 my-2.5" />
-                )}
-                <div className="grid grid-cols-[120px_1fr_95px] gap-2 items-center text-[11px] min-h-[32px]">
-                  <div className="flex flex-col min-w-0">
-                    <span className={cn(row.isLabelBold ? "font-bold text-slate-800" : "text-slate-500 font-semibold", "truncate")}>
-                      {row.label}
-                    </span>
-                    {row.label === 'Gross Profit' && (
-                      <span className="text-[9px] text-slate-455 font-bold leading-none mt-0.5">
-                        {data.plRevenue && data.plRevenue > 0 ? (((data.grossProfit || 0) / data.plRevenue) * 100).toFixed(1) + '%' : '0.0%'}
-                      </span>
-                    )}
-                    {row.label === 'Net Profit' && (
-                      <span className="text-[9px] text-slate-455 font-bold leading-none mt-0.5">
-                        {data.plRevenue && data.plRevenue > 0 ? (((data.netProfit || 0) / data.plRevenue) * 100).toFixed(1) + '%' : '0.0%'}
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="flex-1 px-1">
-                    {row.showBar && row.percent ? (
-                      <div className="h-1 w-full bg-slate-50 border border-slate-100/50 rounded-full overflow-hidden">
-                        <div className={cn("h-full rounded-full", row.color)} style={{ width: `${row.percent}%` }} />
-                      </div>
+              <div className="overflow-x-auto w-full">
+                <table className="w-full text-left border-collapse text-[11px]">
+                  <thead>
+                    <tr className="border-b border-slate-200/80 text-slate-400 font-bold uppercase tracking-wider">
+                      <th className="py-3 px-2">Customer</th>
+                      <th className="py-3 px-2">Invoice #</th>
+                      <th className="py-3 px-2">Due Date</th>
+                      <th className="py-3 px-2 text-right">Amount</th>
+                      <th className="py-3 px-2 text-right w-24">Overdue</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {isLoading ? (
+                      [1, 2, 3, 4, 5].map((i) => (
+                        <tr key={i} className="animate-pulse">
+                          <td className="py-3 px-2"><div className="h-3 w-24 bg-slate-100 rounded" /></td>
+                          <td className="py-3 px-2"><div className="h-3 w-12 bg-slate-100 rounded" /></td>
+                          <td className="py-3 px-2"><div className="h-3 w-16 bg-slate-100 rounded" /></td>
+                          <td className="py-3 px-2 text-right"><div className="h-3 w-16 bg-slate-100 rounded ml-auto" /></td>
+                          <td className="py-3 px-2 text-right"><div className="h-3 w-12 bg-slate-100 rounded ml-auto" /></td>
+                        </tr>
+                      ))
+                    ) : (!data.overdueInvoices || data.overdueInvoices.length === 0) ? (
+                      <tr>
+                        <td colSpan={5} className="py-12">
+                          <div className="flex flex-col items-center justify-center text-center px-4">
+                            <div className="h-11 w-11 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 mb-3 border border-slate-100 shadow-2xs">
+                              <FileCheck className="h-5 w-5 stroke-[1.5]" />
+                            </div>
+                            <h4 className="text-[12px] font-bold text-slate-700 mb-0.5 font-sans">All Caught Up!</h4>
+                            <p className="text-[10.5px] text-slate-400 max-w-[240px] font-sans">No overdue invoices found at the moment.</p>
+                          </div>
+                        </td>
+                      </tr>
                     ) : (
-                      <div className="h-1 w-full" />
+                      data.overdueInvoices.map((row, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
+                          <td className="py-3 px-2 font-bold text-slate-700 truncate max-w-[150px]">{row.name}</td>
+                          <td className="py-3 px-2 text-slate-400 font-semibold">{row.id}</td>
+                          <td className="py-3 px-2 text-slate-400 font-semibold">{formatDateString(row.due)}</td>
+                          <td className="py-3 px-2 text-right font-bold text-slate-800">
+                            <FormattedAmount amount={row.amount} currencyCode={data.currency} className="font-bold text-[11px]" />
+                          </td>
+                          <td className="py-3 px-2 text-right font-bold text-[#ef4444]">{row.days} days</td>
+                        </tr>
+                      ))
                     )}
-                  </div>
+                  </tbody>
+                </table>
+              </div>
+            </div>
 
-                  <div className="text-right font-bold text-slate-800 text-[11.5px] whitespace-nowrap">
-                    <FormattedAmount
-                      amount={row.amount}
-                      currencyCode={data.currency}
-                      className="font-bold text-[11.5px] select-all"
-                    />
+            {/* Bank Accounts feeds list */}
+            <div className="lg:col-span-3 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between select-none">
+              <div className="border-b border-slate-100 pb-3 mb-3 flex items-center justify-between">
+                <h3 className="text-[13.5px] font-bold text-slate-800">Bank Accounts</h3>
+                <Link href="/cash-flow" className="text-[11px] text-primary hover:underline font-bold flex items-center gap-0.5">
+                  <span>View All</span>
+                  <ArrowRight className="h-3 w-3" />
+                </Link>
+              </div>
+
+              <div className="flex-1 space-y-0 divide-y divide-slate-100">
+                {isLoading ? (
+                  <div className="space-y-3 py-2">
+                    {[1, 2, 3].map((i) => (
+                      <div key={i} className="flex items-center justify-between py-2.5 animate-pulse animate-duration-1000">
+                        <div className="flex items-center gap-3">
+                          <div className="h-5.5 w-5.5 rounded-md bg-slate-100 shrink-0" />
+                          <div className="flex flex-col gap-1">
+                            <div className="h-3 w-24 bg-slate-100 rounded" />
+                            <div className="h-2 w-10 bg-slate-100 rounded" />
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <div className="h-3 w-16 bg-slate-100 rounded" />
+                          <div className="h-4 w-10 bg-slate-100 rounded-full" />
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                </div>
-              </React.Fragment>
-            ))}
-          </div>
-        </div>
+                ) : (!data.bankAccounts || data.bankAccounts.length === 0) ? (
+                  <div className="flex flex-col items-center justify-center text-center py-12 px-4 flex-1">
+                    <div className="h-11 w-11 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 mb-3 border border-slate-100 shadow-2xs">
+                      <Landmark className="h-5 w-5 stroke-[1.5]" />
+                    </div>
+                    <h4 className="text-[12px] font-bold text-slate-700 mb-0.5 font-sans">No Bank Accounts</h4>
+                    <p className="text-[10.5px] text-slate-400 max-w-[200px] font-sans">No connected bank accounts found.</p>
+                  </div>
+                ) : (
+                  data.bankAccounts.map((bank: any, idx: number) => {
+                    const isNegative = bank.balance !== null && bank.balance < 0;
+                    const nameLower = bank.accountName.toLowerCase();
+                    let logo = (
+                      <div className="h-5.5 w-5.5 rounded shrink-0 border border-slate-200/50 bg-slate-50 text-[9.5px] font-bold text-slate-500 flex items-center justify-center">
+                        BS
+                      </div>
+                    );
+
+                    if (nameLower.includes('hdfc')) {
+                      logo = (
+                        <svg className="h-5.5 w-5.5 rounded shrink-0 border border-blue-200/40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <rect width="24" height="24" fill="#004c8f" />
+                          <rect x="5" y="5" width="14" height="14" fill="#ffffff" />
+                          <rect x="8.5" y="8.5" width="7" height="7" fill="#004c8f" />
+                          <rect x="11" y="5" width="2" height="14" fill="#004c8f" />
+                          <rect x="5" y="11" width="14" height="2" fill="#004c8f" />
+                        </svg>
+                      );
+                    } else if (nameLower.includes('icici')) {
+                      logo = (
+                        <svg className="h-5.5 w-5.5 rounded shrink-0 border border-orange-200/40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <rect width="24" height="24" fill="#f26e21" />
+                          <circle cx="12" cy="12" r="7" fill="#ffffff" />
+                          <path d="M12 9v6M10 9h4M10 15h4" stroke="#f26e21" strokeWidth="1.8" strokeLinecap="round" />
+                        </svg>
+                      );
+                    } else if (nameLower.includes('state bank') || nameLower.includes('sbi')) {
+                      logo = (
+                        <svg className="h-5.5 w-5.5 rounded shrink-0 border border-cyan-200/40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <rect width="24" height="24" fill="#00a8e8" />
+                          <circle cx="12" cy="11" r="5" stroke="#ffffff" strokeWidth="2" fill="none" />
+                          <line x1="12" y1="13.5" x2="12" y2="19" stroke="#ffffff" strokeWidth="2.2" strokeLinecap="round" />
+                        </svg>
+                      );
+                    } else if (nameLower.includes('axis')) {
+                      logo = (
+                        <svg className="h-5.5 w-5.5 rounded shrink-0 border border-rose-900/20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <rect width="24" height="24" fill="#841a41" />
+                          <path d="M12 5l6 14H6l6-14z" fill="#ffffff" />
+                          <path d="M12 9l3.5 8h-7L12 9z" fill="#841a41" />
+                          <line x1="10" y1="14" x2="14" y2="14" stroke="#ffffff" strokeWidth="1.2" />
+                        </svg>
+                      );
+                    } else if (nameLower.includes('kotak')) {
+                      logo = (
+                        <svg className="h-5.5 w-5.5 rounded shrink-0 border border-red-200/40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <rect width="24" height="24" fill="#d81d24" />
+                          <circle cx="12" cy="12" r="7" stroke="#ffffff" strokeWidth="1.8" fill="none" />
+                          <path d="M9.5 9v6M13.5 9l-2.5 3 2.5 3M11 12h2" stroke="#ffffff" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      );
+                    }
+
+                    return (
+                      <div key={idx} className="flex items-center justify-between py-3 border-b border-slate-100 last:border-0 hover:bg-slate-50/50 transition-colors">
+                        <div className="flex items-center gap-3">
+                          {logo}
+                          <div className="flex flex-col min-w-0">
+                            <span className="font-bold text-slate-700 text-[11.5px] truncate">{bank.accountName}</span>
+                            <span className="text-[9px] text-slate-455 font-bold leading-none mt-0.5">CODE: {bank.accountCode || 'BANK'}</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className={cn(
+                            "font-bold text-[11.5px] select-all",
+                            isNegative ? "text-red-500" : "text-slate-800"
+                          )}>
+                            {bank.balance !== null ? (
+                              <FormattedAmount
+                                amount={bank.balance}
+                                currencyCode={bank.currency}
+                                className="font-bold text-[11.5px]"
+                              />
+                            ) : (
+                              '—'
+                            )}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            {/* Profit & Loss summary widget */}
+            <div className="lg:col-span-3 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between select-none">
+              <div className="border-b border-slate-100 pb-3 mb-3 flex items-center justify-between">
+                <h3 className="text-[13.5px] font-bold text-slate-800">Profit & Loss (MTD)</h3>
+                <Link href="/reports" className="text-[11px] text-primary hover:underline font-bold flex items-center gap-0.5">
+                  <span>View Report</span>
+                  <ArrowRight className="h-3 w-3" />
+                </Link>
+              </div>
+
+              <div className="flex-1 space-y-4 pt-2">
+                {[
+                  {
+                    label: 'Revenue',
+                    amount: data.plRevenue || 0,
+                    percent: (data.plRevenue && data.plRevenue > 0) ? 100 : 0,
+                    color: 'bg-emerald-500',
+                    showBar: true
+                  },
+                  {
+                    label: 'Cost of Goods Sold',
+                    amount: data.cogs || 0,
+                    percent: (data.plRevenue && data.plRevenue > 0) ? Math.min(100, Math.max(0, ((data.cogs || 0) / data.plRevenue * 100))) : 0,
+                    color: 'bg-red-500',
+                    showBar: true
+                  },
+                  {
+                    label: 'Gross Profit',
+                    amount: data.grossProfit || 0,
+                    percent: (data.plRevenue && data.plRevenue > 0) ? Math.min(100, Math.max(0, ((data.grossProfit || 0) / data.plRevenue * 100))) : 0,
+                    showBar: false,
+                    isLabelBold: true,
+                    hasDividerAbove: true
+                  },
+                  {
+                    label: 'Operating Expenses',
+                    amount: data.expenses || 0,
+                    percent: (data.plRevenue && data.plRevenue > 0) ? Math.min(100, Math.max(0, ((data.expenses || 0) / data.plRevenue * 100))) : 0,
+                    color: 'bg-red-500',
+                    showBar: true
+                  },
+                  {
+                    label: 'Net Profit',
+                    amount: data.netProfit || 0,
+                    percent: (data.plRevenue && data.plRevenue > 0) ? Math.min(100, Math.max(0, ((data.netProfit || 0) / data.plRevenue * 100))) : 0,
+                    color: 'bg-emerald-500',
+                    showBar: true,
+                    isLabelBold: true,
+                    hasDividerAbove: true
+                  },
+                ].map((row, idx) => (
+                  <React.Fragment key={idx}>
+                    {row.hasDividerAbove && (
+                      <div className="border-t border-slate-100 my-2.5" />
+                    )}
+                    <div className="grid grid-cols-[120px_1fr_95px] gap-2 items-center text-[11px] min-h-[32px]">
+                      <div className="flex flex-col min-w-0">
+                        <span className={cn(row.isLabelBold ? "font-bold text-slate-800" : "text-slate-500 font-semibold", "truncate")}>
+                          {row.label}
+                        </span>
+                        {row.label === 'Gross Profit' && (
+                          <span className="text-[9px] text-slate-455 font-bold leading-none mt-0.5">
+                            {data.plRevenue && data.plRevenue > 0 ? (((data.grossProfit || 0) / data.plRevenue) * 100).toFixed(1) + '%' : '0.0%'}
+                          </span>
+                        )}
+                        {row.label === 'Net Profit' && (
+                          <span className="text-[9px] text-slate-455 font-bold leading-none mt-0.5">
+                            {data.plRevenue && data.plRevenue > 0 ? (((data.netProfit || 0) / data.plRevenue) * 100).toFixed(1) + '%' : '0.0%'}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex-1 px-1">
+                        {row.showBar && row.percent ? (
+                          <div className="h-1 w-full bg-slate-50 border border-slate-100/50 rounded-full overflow-hidden">
+                            <div className={cn("h-full rounded-full", row.color)} style={{ width: `${row.percent}%` }} />
+                          </div>
+                        ) : (
+                          <div className="h-1 w-full" />
+                        )}
+                      </div>
+
+                      <div className="text-right font-bold text-slate-800 text-[11.5px] whitespace-nowrap">
+                        <FormattedAmount
+                          amount={row.amount}
+                          currencyCode={data.currency}
+                          className="font-bold text-[11.5px] select-all"
+                        />
+                      </div>
+                    </div>
+                  </React.Fragment>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       {/* 4. Bottom New Row: Recent Activity, Pending Approvals, Top Customers, Top Vendors */}
-      <OverviewBottomCardsRow />
+      <OverviewBottomCardsRow currency={data.currency} connected={data.connected} loading={isLoading} />
 
       {/* 5. Cash Flow Overview full-width row */}
       <div className="mt-5">
-        <CashFlowOverview />
+        <CashFlowOverview currency={data.currency} />
       </div>
 
       {/* 6. AI Insights & Recommendations */}
       <div className="mt-5">
-        <AiInsightsWidget />
+        <AiInsightsWidget connected={data.connected} loading={isLoading} />
       </div>
 
       {/* 7. Bottom-Most Grid: Data Quality, Sync Status, Quick Actions */}

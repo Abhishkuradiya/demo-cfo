@@ -19,20 +19,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const { user, isAuthenticated, setUser, logout: clearStore } = useUserStore();
   const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    // Perform initial hydration checks
-    const token = localStorage.getItem('cfo_auth_token');
-    if (!token) {
-      clearStore();
-    }
-    setIsLoading(false);
-  }, [clearStore]);
-
-  const login = (token: string, profile: UserProfile) => {
-    localStorage.setItem('cfo_auth_token', token);
-    setUser(profile);
-  };
-
   const logout = async () => {
     localStorage.removeItem('cfo_auth_token');
     clearStore();
@@ -42,6 +28,78 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.error('API logout failed:', err);
     }
     window.location.href = '/login';
+  };
+
+  useEffect(() => {
+    // Perform initial session verification on mount
+    const verifySession = async () => {
+      try {
+        const token = localStorage.getItem('cfo_auth_token');
+        if (!token) {
+          clearStore();
+          setIsLoading(false);
+          return;
+        }
+
+        const res = await fetch('/api/auth/me');
+        if (res.status === 401) {
+          await logout();
+          return;
+        }
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.user) {
+            setUser({
+              id: String(data.user.id),
+              name: data.user.email.split('@')[0],
+              email: data.user.email,
+              role: 'owner',
+              permissions: ['*']
+            });
+          } else {
+            await logout();
+          }
+        }
+      } catch (err) {
+        console.error('Session verification failed:', err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    verifySession();
+
+    // Global fetch interceptor for 401 errors
+    const originalFetch = window.fetch;
+    window.fetch = async function (...args) {
+      const response = await originalFetch(...args);
+      if (response.status === 401) {
+        const url = typeof args[0] === 'string'
+          ? args[0]
+          : (args[0] instanceof URL ? args[0].toString() : (args[0] as Request).url);
+        
+        // Don't intercept authentication routes to avoid redirection loops
+        if (
+          !url.includes('/api/auth/login') &&
+          !url.includes('/api/auth/register') &&
+          !url.includes('/api/auth/logout') &&
+          !url.includes('/api/auth/me')
+        ) {
+          await logout();
+        }
+      }
+      return response;
+    };
+
+    return () => {
+      window.fetch = originalFetch;
+    };
+  }, [clearStore]);
+
+  const login = (token: string, profile: UserProfile) => {
+    localStorage.setItem('cfo_auth_token', token);
+    setUser(profile);
   };
 
   const checkPermission = (permission: Permission): boolean => {

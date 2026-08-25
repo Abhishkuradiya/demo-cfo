@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getTenantIdFromSession } from '@/lib/auth';
+import { getXeroAccessToken } from '@/lib/xero';
 
 export async function GET(req: NextRequest) {
   const tenantId = await getTenantIdFromSession();
@@ -9,9 +10,23 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    const tokenInfo = await getXeroAccessToken(tenantId);
+    if (!tokenInfo) {
+      return NextResponse.json({
+        reconciliationPercentage: 0,
+        unreconciledTransactions: 0,
+        pendingTransactions: 0,
+        lastReconciliation: "Never"
+      });
+    }
     const credentials = await db.getCredentials(tenantId, 'xero');
-    const lastSync = credentials?.last_synced_at || new Date().toISOString();
-    const lastReconciliationDate = lastSync ? new Date(lastSync) : new Date();
+    let lastReconciliationDate = new Date();
+    if (credentials?.last_synced_at) {
+      const d = new Date(credentials.last_synced_at);
+      if (!isNaN(d.getTime())) {
+        lastReconciliationDate = d;
+      }
+    }
 
     const options: Intl.DateTimeFormatOptions = { 
       month: 'short', 
@@ -22,14 +37,18 @@ export async function GET(req: NextRequest) {
     };
     const lastReconciliation = lastReconciliationDate.toLocaleDateString('en-US', options);
 
-    // Dynamic but realistic reconciliation values for standard dashboard state
-    const pendingTransactions = 8;
-    const unreconciledTransactions = 12;
-    const reconciledTransactions = 230;
-    const reconciliationPercentage = Math.round((reconciledTransactions / (reconciledTransactions + unreconciledTransactions)) * 100);
+    // Compute real reconciliation data from the database
+    const payments = await db.getPayments(tenantId);
+    const bankTransactions = await db.getBankTransactions(tenantId);
+
+    const reconciledTransactions = payments.filter((p: any) => p.IsReconciled === true).length;
+    const unreconciledTransactions = payments.filter((p: any) => p.IsReconciled !== true).length + bankTransactions.filter((bt: any) => bt.IsReconciled !== true).length;
+    const pendingTransactions = unreconciledTransactions;
+    const totalTransactions = reconciledTransactions + unreconciledTransactions;
+    const reconciliationPercentage = totalTransactions > 0 ? Math.round((reconciledTransactions / totalTransactions) * 100) : 0;
 
     return NextResponse.json({
-      reconciliationPercentage: reconciliationPercentage || 95,
+      reconciliationPercentage,
       unreconciledTransactions,
       pendingTransactions,
       lastReconciliation

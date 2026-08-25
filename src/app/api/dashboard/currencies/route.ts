@@ -11,6 +11,17 @@ export async function GET(req: NextRequest) {
 
   try {
     const tokenInfo = await getXeroAccessToken(tenantId);
+    if (!tokenInfo) {
+      return NextResponse.json({
+        baseCurrency: "N/A",
+        baseCurrencyDescription: "No base currency configured",
+        allCurrencies: [],
+        otherCurrencies: [],
+        totalCurrencies: 0,
+        multiCurrencyEnabled: false,
+        exchangeRateUpdated: "Never"
+      });
+    }
     let baseCurrency = 'INR';
     let rawCurrencies: { code: string; description: string }[] = [];
 

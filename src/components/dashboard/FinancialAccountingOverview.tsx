@@ -60,8 +60,9 @@ export function FinancialAccountingOverview({ data, loading }: FinancialAccounti
   const tbCredit = (data?.tbCredit !== undefined && data?.tbCredit !== null) ? data.tbCredit : 0;
   const tbDiff = Math.abs(tbDebit - tbCredit);
 
-  const glTransactions = 0;
-  const glThisMonth = 0;
+  const glTransactions = data?.glTransactions || 0;
+  const glThisMonth = data?.glThisMonth || 0;
+  const glLastEntry = data?.glLastEntry || "Just now";
 
   const jeTotal = 0;
   const jePending = 0;
@@ -74,17 +75,17 @@ export function FinancialAccountingOverview({ data, loading }: FinancialAccounti
   const invLowStock = data?.inventoryLowStock || 0;
   const invDeadStock = data?.inventoryDeadStock || 0;
 
-  const faAssets = 0;
-  const faDeprec = 0;
-  const faNetBook = faAssets - faDeprec;
+  const faAssets = data?.fixedAssetsTotal || 0;
+  const faDeprec = data?.fixedAssetsAccumDeprec || 0;
+  const faNetBook = data?.fixedAssetsNetBook !== undefined ? data.fixedAssetsNetBook : (faAssets - faDeprec);
 
-  const budgetYtd = 0;
-  const budgetActual = plRevenue;
-  const budgetVariance = budgetYtd - budgetActual;
+  const budgetYtd = data?.budgetYtd || 0;
+  const budgetActual = data?.budgetActual || 0;
+  const budgetVariance = data?.budgetVariance !== undefined ? data.budgetVariance : (budgetYtd - budgetActual);
 
-  const taxCollected = (plRevenue * 0.15) || 0;
-  const taxPaid = (plExpenses * 0.12) || 0;
-  const taxPayable = taxCollected - taxPaid;
+  const taxCollected = data?.taxCollected !== undefined ? data.taxCollected : ((plRevenue * 0.15) || 0);
+  const taxPaid = data?.taxPaid !== undefined ? data.taxPaid : ((plExpenses * 0.12) || 0);
+  const taxPayable = data?.taxPayable !== undefined ? data.taxPayable : (taxCollected - taxPaid);
 
   const ratioCurrent = (data?.currentAssets && data?.accountsPayable) 
     ? (data.currentAssets / (data.accountsPayable || 1)).toFixed(2) 
@@ -101,7 +102,7 @@ export function FinancialAccountingOverview({ data, loading }: FinancialAccounti
       icon: Scale,
       iconBg: "bg-blue-50 border border-blue-100/50 text-blue-600",
       action: "View Balance Sheet",
-      url: "/reports",
+      url: "/reports/balance-sheet",
       metrics: [
         { label: "Total Assets", value: formatVal(balanceSheetAssets) },
         { label: "Total Liabilities", value: formatVal(balanceSheetLiabilities) },
@@ -114,7 +115,7 @@ export function FinancialAccountingOverview({ data, loading }: FinancialAccounti
       icon: TrendingUp,
       iconBg: "bg-emerald-50 border border-emerald-100/50 text-emerald-600",
       action: "View Profit & Loss",
-      url: "/reports",
+      url: "/reports/profit-and-loss",
       metrics: [
         { label: "Revenue (YTD)", value: formatVal(plRevenue) },
         { label: "Expenses (YTD)", value: formatVal(plExpenses) },
@@ -127,7 +128,7 @@ export function FinancialAccountingOverview({ data, loading }: FinancialAccounti
       icon: ArrowDownUp,
       iconBg: "bg-purple-50 border border-purple-100/50 text-purple-600",
       action: "View Cash Flow",
-      url: "/reports",
+      url: "/reports/cash-flow",
       metrics: [
         { label: "Operating Cash Flow", value: formatVal(cfOperating), valueClass: "text-emerald-600" },
         { label: "Investing Cash Flow", value: formatVal(cfInvesting), valueClass: "text-red-500" },
@@ -140,7 +141,7 @@ export function FinancialAccountingOverview({ data, loading }: FinancialAccounti
       icon: BookOpen,
       iconBg: "bg-blue-50 border border-blue-100/50 text-blue-600",
       action: "View Trial Balance",
-      url: "/reports",
+      url: "/reports/trial-balance",
       metrics: [
         { label: "Total Debit", value: formatVal(tbDebit) },
         { label: "Total Credit", value: formatVal(tbCredit) },
@@ -157,7 +158,7 @@ export function FinancialAccountingOverview({ data, loading }: FinancialAccounti
       metrics: [
         { label: "Total Transactions", value: formatVal(glTransactions, false) },
         { label: "This Month", value: formatVal(glThisMonth, false) },
-        { label: "Last Entry", value: "Just now", valueClass: "text-slate-600" }
+        { label: "Last Entry", value: glLastEntry, valueClass: "text-slate-600" }
       ]
     },
     {
@@ -218,7 +219,7 @@ export function FinancialAccountingOverview({ data, loading }: FinancialAccounti
       icon: Target,
       iconBg: "bg-emerald-50 border border-emerald-100/50 text-emerald-600",
       action: "View Budget Analysis",
-      url: "/reports",
+      url: "/reports/budget-actual",
       metrics: [
         { label: "Budget (YTD)", value: formatVal(budgetYtd) },
         { label: "Actual (YTD)", value: formatVal(budgetActual) },
@@ -231,7 +232,7 @@ export function FinancialAccountingOverview({ data, loading }: FinancialAccounti
       icon: Percent,
       iconBg: "bg-rose-50 border border-rose-100/50 text-rose-600",
       action: "View Tax Center",
-      url: "/reports",
+      url: "/reports/tax-center",
       metrics: [
         { label: "Tax Collected", value: formatVal(taxCollected) },
         { label: "Tax Paid", value: formatVal(taxPaid) },

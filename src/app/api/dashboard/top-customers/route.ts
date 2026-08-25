@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getTenantIdFromSession } from '@/lib/auth';
 
+import { getXeroAccessToken } from '@/lib/xero';
+
 function parseXeroDate(val: any): Date | null {
   if (!val) return null;
   if (val instanceof Date) return val;
@@ -21,24 +23,28 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    const tokenInfo = await getXeroAccessToken(tenantId);
+    if (!tokenInfo) {
+      return NextResponse.json([]);
+    }
     const invoices = await db.getInvoices(tenantId);
     
-    // Determine the current month and year
+    // Use the last 6 months window to match the dashboard header date range
     const now = new Date();
-    const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth(); // 0-indexed
+    const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 6, 1);
 
-    // Filter ACCREC, PAID invoices in the current month
-    const currentMonthInvoices = invoices.filter(inv => {
-      if (inv.Type !== 'ACCREC' || inv.Status !== 'PAID') return false;
+    // Filter ACCREC invoices (PAID or AUTHORISED) in the last 6 months
+    const recentInvoices = invoices.filter(inv => {
+      if (inv.Type !== 'ACCREC') return false;
+      if (inv.Status !== 'PAID' && inv.Status !== 'AUTHORISED') return false;
       const date = parseXeroDate(inv.Date);
       if (!date) return false;
-      return date.getFullYear() === currentYear && date.getMonth() === currentMonth;
+      return date >= sixMonthsAgo && date <= now;
     });
 
     // Group by contact name
     const customerMap: Record<string, number> = {};
-    for (const inv of currentMonthInvoices) {
+    for (const inv of recentInvoices) {
       const contactName = inv.ContactName || inv.Contact?.Name || 'Unknown Customer';
       const total = inv.Total || 0;
       customerMap[contactName] = (customerMap[contactName] || 0) + total;
@@ -54,16 +60,9 @@ export async function GET(req: NextRequest) {
       .sort((a, b) => b.revenue - a.revenue)
       .slice(0, 5);
 
-    // If database is empty, return a nice mock set so the dashboard isn't completely blank
+    // If database is empty, return empty list (no fake data)
     if (sortedCustomers.length === 0) {
-      const demoCustomers = [
-        { name: 'City Limousines', revenue: 4500, avatar: 'CL' },
-        { name: 'Eastside Limo Services', revenue: 3200, avatar: 'EL' },
-        { name: 'Marine Safe Ltd', revenue: 2800, avatar: 'MS' },
-        { name: 'Ridgeway University', revenue: 1950, avatar: 'RU' },
-        { name: 'Bayside Club', revenue: 1200, avatar: 'BC' }
-      ];
-      return NextResponse.json({ customers: demoCustomers });
+      return NextResponse.json({ customers: [] });
     }
 
     return NextResponse.json({ customers: sortedCustomers });

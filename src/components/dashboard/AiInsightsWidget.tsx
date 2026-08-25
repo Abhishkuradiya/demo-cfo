@@ -48,14 +48,14 @@ function SkeletonRow() {
 // ==================================================
 // COMPONENT
 // ==================================================
-export function AiInsightsWidget() {
+export function AiInsightsWidget({ connected = false, loading = false }: { connected?: boolean; loading?: boolean }) {
   const [data, setData] = useState<InsightsData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loadingLocal, setLoadingLocal] = useState(true);
   const [error, setError] = useState(false);
 
   const fetchInsights = async () => {
     try {
-      setLoading(true);
+      setLoadingLocal(true);
       setError(false);
       const res = await fetch('/api/dashboard/insights');
       if (res.ok) {
@@ -66,19 +66,47 @@ export function AiInsightsWidget() {
     } catch {
       setError(true);
     } finally {
-      setLoading(false);
+      setLoadingLocal(false);
     }
   };
 
   useEffect(() => {
-    fetchInsights();
+    if (connected) {
+      fetchInsights();
+    }
 
-    const handleSync = () => fetchInsights();
+    const handleSync = () => {
+      if (connected) {
+        fetchInsights();
+      }
+    };
     window.addEventListener('xero-sync-complete', handleSync);
     return () => window.removeEventListener('xero-sync-complete', handleSync);
-  }, []);
+  }, [connected]);
 
-  if (loading) return <SkeletonRow />;
+  if (loading) {
+    return <SkeletonRow />;
+  }
+
+  if (!connected) {
+    return (
+      <div className="bg-white rounded-lg border border-slate-200/80 p-8 shadow-2xs flex flex-col items-center justify-center text-center select-none min-h-[180px]">
+        <div className="h-10 w-10 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-455 mb-3.5 animate-pulse">
+          <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="2" y1="12" x2="22" y2="12" />
+            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+          </svg>
+        </div>
+        <h4 className="text-[12.5px] font-bold text-slate-700 mb-1">Xero Disconnected</h4>
+        <p className="text-[10.5px] text-slate-400 max-w-[340px] leading-relaxed font-sans">
+          Please connect your Xero organization to view AI Insights & Recommendations.
+        </p>
+      </div>
+    );
+  }
+
+  if (loading || loadingLocal) return <SkeletonRow />;
   if (error || !data) {
     return (
       <div className="bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs flex flex-col items-center justify-center text-center select-none min-h-[160px]">

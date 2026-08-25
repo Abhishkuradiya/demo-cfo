@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getTenantIdFromSession } from '@/lib/auth';
+import { getXeroAccessToken } from '@/lib/xero';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -408,6 +409,37 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    const tokenInfo = await getXeroAccessToken(tenantId);
+    if (!tokenInfo) {
+      return NextResponse.json({
+        connected: false,
+        summary: {
+          cashIn: 0,
+          cashOut: 0,
+          netCashFlow: 0,
+          incomingPaymentsCount: 0,
+          outgoingPaymentsCount: 0,
+          verifiedCashIn: 0,
+          verifiedCashOut: 0,
+          pendingVerificationAmount: 0,
+          verificationPercentage: 0
+        },
+        breakdown: { cashInFromPayments: 0, cashInFromBankTxns: 0, cashInFromPrepayments: 0, cashInFromOverpayments: 0, duplicatesSkipped: 0 },
+        sources: {
+          payments: { count: 0, total: 0, enabled: false },
+          bankTransactions: { count: 0, total: 0, enabled: false },
+          prepayments: { count: 0, total: 0, enabled: false },
+          overpayments: { count: 0, total: 0, enabled: false },
+          bankTransfers: { count: 0, total: 0, enabled: false, reason: 'Internal movement' }
+        },
+        reconciliation: { reconciledCount: 0, pendingCount: 0, reconciledPercentage: 0, reconciledAmount: 0, pendingAmount: 0 },
+        dataQuality: { paymentsImported: false, bankFeedImported: false, reconciliationRate: 0, duplicatesDetected: 0, pendingReview: 0, confidenceScore: 0 },
+        meta: { calculatedAt: new Date().toISOString(), dataSourcesUsed: [], deduplicationMethod: 'None', totalRecordsProcessed: 0, totalRecordsSkipped: 0 },
+        history: [],
+        historyDetailed: []
+      });
+    }
+
     const calculatedAt = new Date().toISOString();
 
     // 1. Fetch raw API data from warehouse
@@ -541,59 +573,11 @@ export async function GET(req: NextRequest) {
       pendingIn: Math.round((m.cashIn - m.verifiedCashIn) * 100) / 100
     }));
 
-    // Fallback if no payment data exists (e.g. empty sandbox company)
-    if (totalCashIn === 0 && totalCashOut === 0) {
-      const fallbackValues = [
-        { month: 'Sep', cashIn: 8200, cashOut: 5800 },
-        { month: 'Oct', cashIn: 9400, cashOut: 6200 },
-        { month: 'Nov', cashIn: 8900, cashOut: 7100 },
-        { month: 'Dec', cashIn: 10500, cashOut: 8500 },
-        { month: 'Jan', cashIn: 7800, cashOut: 6900 },
-        { month: 'Feb', cashIn: 8500, cashOut: 5200 },
-        { month: 'Mar', cashIn: 9100, cashOut: 6300 },
-        { month: 'Apr', cashIn: 11200, cashOut: 9000 },
-        { month: 'May', cashIn: 12500, cashOut: 9800 },
-        { month: 'Jun', cashIn: 10200, cashOut: 8100 },
-        { month: 'Jul', cashIn: 11800, cashOut: 9500 },
-        { month: 'Aug', cashIn: 12900, cashOut: 10200 }
-      ];
-      const fh = fallbackValues.map(fv => ({ month: fv.month, cashIn: fv.cashIn, cashOut: fv.cashOut, netCashFlow: fv.cashIn - fv.cashOut }));
-      const fhd = fallbackValues.map(fv => ({
-        month: fv.month, cashIn: fv.cashIn, cashOut: fv.cashOut, netCashFlow: fv.cashIn - fv.cashOut,
-        cashInFromPayments: Math.round(fv.cashIn * 0.85), cashInFromBankTxns: Math.round(fv.cashIn * 0.10),
-        cashInFromPrepayments: Math.round(fv.cashIn * 0.03), cashInFromOverpayments: Math.round(fv.cashIn * 0.02),
-        reconciledIn: Math.round(fv.cashIn * 0.94), pendingIn: Math.round(fv.cashIn * 0.06)
-      }));
-
-      return NextResponse.json({
-        summary: {
-          cashIn: 123500,
-          cashOut: 92600,
-          netCashFlow: 30900,
-          incomingPaymentsCount: 42,
-          outgoingPaymentsCount: 31,
-          verifiedCashIn: 116090,
-          verifiedCashOut: 87044,
-          pendingVerificationAmount: 12966,
-          verificationPercentage: 94
-        },
-        breakdown: { cashInFromPayments: 104975, cashInFromBankTxns: 12350, cashInFromPrepayments: 3705, cashInFromOverpayments: 2470, duplicatesSkipped: 0 },
-        sources: {
-          payments: { count: 42, total: 104975, enabled: true },
-          bankTransactions: { count: 8, total: 12350, enabled: true },
-          prepayments: { count: 3, total: 3705, enabled: true },
-          overpayments: { count: 2, total: 2470, enabled: true },
-          bankTransfers: { count: 0, total: 0, enabled: false, reason: 'Internal movement' }
-        },
-        reconciliation: { reconciledCount: 50, pendingCount: 5, reconciledPercentage: 91, reconciledAmount: 112385, pendingAmount: 11115 },
-        dataQuality: { paymentsImported: true, bankFeedImported: true, reconciliationRate: 91, duplicatesDetected: 0, pendingReview: 5, confidenceScore: 94 },
-        meta: { calculatedAt, dataSourcesUsed, deduplicationMethod: 'PaymentID + BankTransactionID + LinkedTransaction', totalRecordsProcessed: 55, totalRecordsSkipped: 0 },
-        history: fh,
-        historyDetailed: fhd
-      });
-    }
+    // If no payment data exists, just return the real zero-valued data
+    // (no fake/demo data — the UI will show actual zeros)
 
     return NextResponse.json({
+      connected: true,
       summary: {
         cashIn: Math.round(totalCashIn * 100) / 100,
         cashOut: Math.round(totalCashOut * 100) / 100,
@@ -647,6 +631,6 @@ export async function GET(req: NextRequest) {
 
   } catch (err: any) {
     console.error('Cash Flow endpoint error:', err);
-    return NextResponse.json({ error: err.message || 'Internal Server Error' }, { status: 500 });
+    return NextResponse.json({ connected: false, error: err.message || 'Internal Server Error' }, { status: 500 });
   }
 }

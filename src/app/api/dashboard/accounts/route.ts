@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getTenantIdFromSession } from '@/lib/auth';
+import { getXeroAccessToken } from '@/lib/xero';
 
 function getAccountGroup(type: string, cls?: string): 'Assets' | 'Liabilities' | 'Equity' | 'Revenue' | 'Expenses' | null {
   const c = (cls || '').toUpperCase();
@@ -36,6 +37,19 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    const tokenInfo = await getXeroAccessToken(tenantId);
+    if (!tokenInfo) {
+      return NextResponse.json({
+        totalAccounts: 0,
+        distribution: {
+          assets: 0,
+          liabilities: 0,
+          equity: 0,
+          revenue: 0,
+          expenses: 0
+        }
+      });
+    }
     const cachedAccounts = await db.getAccounts(tenantId);
     
     // Only ACTIVE accounts
@@ -58,16 +72,16 @@ export async function GET(req: NextRequest) {
 
     const totalAccounts = activeAccounts.length;
 
-    // If zero accounts are found, return some demo accounts so the user isn't shown an empty chart immediately
+    // If zero accounts are found, return real zeros (no fake data)
     if (totalAccounts === 0) {
       return NextResponse.json({
-        totalAccounts: 45,
+        totalAccounts: 0,
         distribution: {
-          assets: 18,
-          liabilities: 10,
-          equity: 5,
-          revenue: 7,
-          expenses: 5
+          assets: 0,
+          liabilities: 0,
+          equity: 0,
+          revenue: 0,
+          expenses: 0
         }
       });
     }

@@ -158,7 +158,7 @@ function ReconciliationSummaryCard({
               cx="20" 
               cy="20" 
               r={radius} 
-              stroke="#10b981" 
+              stroke={pct === 100 ? "#10b981" : pct > 50 ? "#f59e0b" : "#ef4444"} 
               strokeWidth="3.5" 
               strokeDasharray={circ} 
               strokeDashoffset={strokeDashoffset} 
@@ -195,7 +195,7 @@ function ReconciliationSummaryCard({
             <span>{pct}% Reconciled</span>
           </div>
           <div className="h-1.5 w-full bg-slate-50 border border-slate-100/50 rounded-full overflow-hidden">
-            <div className="h-full rounded-full bg-emerald-500" style={{ width: `${pct}%` }} />
+            <div className={cn("h-full rounded-full", pct === 100 ? "bg-emerald-500" : pct > 50 ? "bg-amber-500" : "bg-rose-500")} style={{ width: `${pct}%` }} />
           </div>
         </div>
       </div>
@@ -648,7 +648,7 @@ function MultiCurrencyCard({
 // ==================================================
 // MAIN ROW CONTAINER COMPONENT
 // ==================================================
-export function OverviewMoreCardsRow() {
+export function OverviewMoreCardsRow({ connected = false, loading = false }: { connected?: boolean; loading?: boolean }) {
   const [reconData, setReconData] = useState<ReconciliationData | null>(null);
   const [reconLoading, setReconLoading] = useState(true);
   const [reconError, setReconError] = useState(false);
@@ -741,18 +741,73 @@ export function OverviewMoreCardsRow() {
   };
 
   useEffect(() => {
-    loadAll();
+    if (connected) {
+      loadAll();
+    }
 
     // Re-fetch on custom sync events
     const handleSyncComplete = () => {
-      loadAll();
+      if (connected) {
+        loadAll();
+      }
     };
 
     window.addEventListener('xero-sync-complete', handleSyncComplete);
     return () => {
       window.removeEventListener('xero-sync-complete', handleSyncComplete);
     };
-  }, []);
+  }, [connected]);
+
+  if (loading) {
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <div key={index} className="flex flex-col bg-white p-5 rounded-lg border border-slate-200/80 shadow-2xs h-[290px] relative overflow-hidden select-none">
+            <div className="border-b border-slate-100 pb-3 mb-4 flex items-center justify-between shrink-0">
+              <div className="h-4 w-32 bg-slate-100 rounded animate-pulse" />
+              <div className="h-4 w-4 bg-slate-100 rounded animate-pulse" />
+            </div>
+            <div className="flex-1 flex flex-col justify-center gap-4 py-2">
+              <div className="space-y-2">
+                <div className="h-3.5 w-1/2 bg-slate-100 rounded animate-pulse" />
+                <div className="h-6 w-3/4 bg-slate-200/60 rounded animate-pulse" />
+              </div>
+              <div className="space-y-2">
+                <div className="h-3 w-1/3 bg-slate-100 rounded animate-pulse" />
+                <div className="h-2 w-full bg-slate-100 rounded animate-pulse" />
+              </div>
+            </div>
+            <div className="border-t border-slate-100 pt-2.5 mt-auto">
+              <div className="h-3.5 w-full bg-slate-100 rounded animate-pulse" />
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (!connected) {
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+        <CardEmptyState 
+          title="Xero Disconnected" 
+          desc="Please connect your Xero organization to view bank reconciliation status." 
+        />
+        <CardEmptyState 
+          title="Xero Disconnected" 
+          desc="Please connect your Xero organization to view your account distributions." 
+        />
+        <CardEmptyState 
+          title="Xero Disconnected" 
+          desc="Please connect your Xero organization to view tracking categories." 
+        />
+        <CardEmptyState 
+          title="Xero Disconnected" 
+          desc="Please connect your Xero organization to view base and transaction currencies." 
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">

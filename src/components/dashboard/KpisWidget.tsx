@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils';
 // ==================================================
 // TOOLTIP COMPONENT
 // ==================================================
-export function Tooltip({ text }: { text: string }) {
+export function Tooltip({ text, position = 'top' }: { text: string; position?: 'top' | 'bottom' }) {
   const [visible, setVisible] = useState(false);
   return (
     <div className="relative inline-flex items-center ml-1">
@@ -23,9 +23,15 @@ export function Tooltip({ text }: { text: string }) {
         onMouseLeave={() => setVisible(false)}
       />
       {visible && (
-        <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-48 bg-slate-900 text-white text-[9.5px] p-2 rounded shadow-md z-50 pointer-events-none text-center leading-normal">
+        <div className={cn(
+          "absolute left-1/2 transform -translate-x-1/2 w-48 bg-slate-900 text-white text-[9.5px] p-2 rounded shadow-md z-50 pointer-events-none text-center leading-normal",
+          position === 'top' ? "bottom-full mb-2" : "top-full mt-1.5"
+        )}>
           {text}
-          <div className="absolute top-full left-1/2 transform -translate-x-1/2 -mt-1 border-4 border-transparent border-t-slate-900" />
+          <div className={cn(
+            "absolute left-1/2 transform -translate-x-1/2 border-4 border-transparent",
+            position === 'top' ? "top-full -mt-1 border-t-slate-900" : "bottom-full -mb-1 border-b-slate-900"
+          )} />
         </div>
       )}
     </div>

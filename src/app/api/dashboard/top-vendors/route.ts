@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getTenantIdFromSession } from '@/lib/auth';
 
+import { getXeroAccessToken } from '@/lib/xero';
+
 function parseXeroDate(val: any): Date | null {
   if (!val) return null;
   if (val instanceof Date) return val;
@@ -21,24 +23,28 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    const tokenInfo = await getXeroAccessToken(tenantId);
+    if (!tokenInfo) {
+      return NextResponse.json({ vendors: [] });
+    }
     const invoices = await db.getInvoices(tenantId);
     
-    // Determine the current month and year
+    // Use the last 6 months window to match the dashboard header date range
     const now = new Date();
-    const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth(); // 0-indexed
+    const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 6, 1);
 
-    // Filter ACCPAY (Bills), PAID in the current month
-    const currentMonthBills = invoices.filter(inv => {
-      if (inv.Type !== 'ACCPAY' || inv.Status !== 'PAID') return false;
+    // Filter ACCPAY (Bills), PAID or AUTHORISED in the last 6 months
+    const recentBills = invoices.filter(inv => {
+      if (inv.Type !== 'ACCPAY') return false;
+      if (inv.Status !== 'PAID' && inv.Status !== 'AUTHORISED') return false;
       const date = parseXeroDate(inv.Date);
       if (!date) return false;
-      return date.getFullYear() === currentYear && date.getMonth() === currentMonth;
+      return date >= sixMonthsAgo && date <= now;
     });
 
     // Group by contact name
     const vendorMap: Record<string, number> = {};
-    for (const inv of currentMonthBills) {
+    for (const inv of recentBills) {
       const contactName = inv.ContactName || inv.Contact?.Name || 'Unknown Vendor';
       const total = inv.Total || 0;
       vendorMap[contactName] = (vendorMap[contactName] || 0) + total;
@@ -54,16 +60,9 @@ export async function GET(req: NextRequest) {
       .sort((a, b) => b.amount - a.amount)
       .slice(0, 5);
 
-    // If database is empty, return a nice mock set so the dashboard isn't completely blank
+    // If database is empty, return empty list (no fake data)
     if (sortedVendors.length === 0) {
-      const demoVendors = [
-        { name: 'Office Supplies Ltd', amount: 3800, avatar: 'OS' },
-        { name: 'Power & Gas Utility', amount: 2900, avatar: 'PG' },
-        { name: 'Central IT Solutions', amount: 2400, avatar: 'CI' },
-        { name: 'Telecom Telecom', amount: 1550, avatar: 'TT' },
-        { name: 'Property Management Inc', amount: 950, avatar: 'PM' }
-      ];
-      return NextResponse.json({ vendors: demoVendors });
+      return NextResponse.json({ vendors: [] });
     }
 
     return NextResponse.json({ vendors: sortedVendors });

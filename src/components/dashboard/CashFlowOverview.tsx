@@ -130,8 +130,17 @@ function savePrefs(prefs: CashFlowPrefs) {
 // ════════════════════════════════════════════════════════════════
 // HELPERS
 // ════════════════════════════════════════════════════════════════
-function fmt(amount: number): string {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(amount);
+function fmt(amount: number, currencyCode: string = 'USD'): string {
+  try {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: currencyCode || 'USD',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0
+    }).format(amount);
+  } catch {
+    return `${currencyCode || '$'}${amount.toLocaleString()}`;
+  }
 }
 
 function fmtPct(val: number): string {
@@ -316,7 +325,7 @@ function MethodologyPanel({ data, onClose }: { data: CashFlowData; onClose: () =
 // ════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ════════════════════════════════════════════════════════════════
-export function CashFlowOverview() {
+export function CashFlowOverview({ currency = 'USD' }: { currency?: string }) {
   const [data, setData] = useState<CashFlowData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -436,7 +445,7 @@ export function CashFlowOverview() {
       items.push(`${reconciliation.reconciledPercentage}% of cash transactions have been verified by bank reconciliation.`);
     }
     if (reconciliation.pendingAmount > 0) {
-      items.push(`${fmt(reconciliation.pendingAmount)} remains unreconciled and pending review.`);
+      items.push(`${fmt(reconciliation.pendingAmount, currency)} remains unreconciled and pending review.`);
     }
     if (summary.cashIn > 0 && breakdown.cashInFromPayments > 0) {
       const pct = Math.round((breakdown.cashInFromPayments / summary.cashIn) * 100);
@@ -454,6 +463,21 @@ export function CashFlowOverview() {
 
   if (loading) return <SkeletonChart />;
   if (error) return <ErrorState onRetry={fetchCashFlow} />;
+  
+  if (data && (data as any).connected === false) {
+    return (
+      <div className="bg-white rounded-xl border border-slate-200/80 p-8 shadow-sm flex flex-col items-center justify-center text-center select-none min-h-[400px]">
+        <div className="h-12 w-12 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-450 mb-4">
+          <TrendingUp className="h-6 w-6 stroke-[1.5]" />
+        </div>
+        <h4 className="text-sm font-semibold text-slate-800 mb-1">Xero Disconnected</h4>
+        <p className="text-xs text-slate-400 max-w-[260px] leading-relaxed">
+          Please connect your Xero organization to view your Cash Flow dashboard.
+        </p>
+      </div>
+    );
+  }
+
   if (!data || data.history.length === 0) return <SkeletonChart />;
 
   const { summary, reconciliation, dataQuality, meta, breakdown, sources } = data;
@@ -477,9 +501,9 @@ export function CashFlowOverview() {
         const modeLabel = prefs.calcMode === 'verified' ? 'Verified' : prefs.calcMode === 'accounting' ? 'Accounting' : 'Hybrid';
         return `<div style="font-family:Inter,system-ui,sans-serif;padding:4px 2px;min-width:220px">
           <div style="font-weight:700;margin-bottom:8px;color:#94a3b8;font-size:10px;text-transform:uppercase;letter-spacing:0.5px">${label}</div>
-          <div style="display:flex;justify-content:space-between;margin-bottom:5px"><span style="color:#34d399">● Cash In</span><span style="font-weight:600">${fmt(cIn)}</span></div>
-          <div style="display:flex;justify-content:space-between;margin-bottom:5px"><span style="color:#f87171">● Cash Out</span><span style="font-weight:600">${fmt(cOut)}</span></div>
-          <div style="display:flex;justify-content:space-between;margin-bottom:8px;padding-top:4px;border-top:1px solid #334155"><span style="color:#60a5fa">● Net Flow</span><span style="font-weight:700;color:${net >= 0 ? '#34d399' : '#f87171'}">${fmt(net)}</span></div>
+          <div style="display:flex;justify-content:space-between;margin-bottom:5px"><span style="color:#34d399">● Cash In</span><span style="font-weight:600">${fmt(cIn, currency)}</span></div>
+          <div style="display:flex;justify-content:space-between;margin-bottom:5px"><span style="color:#f87171">● Cash Out</span><span style="font-weight:600">${fmt(cOut, currency)}</span></div>
+          <div style="display:flex;justify-content:space-between;margin-bottom:8px;padding-top:4px;border-top:1px solid #334155"><span style="color:#60a5fa">● Net Flow</span><span style="font-weight:700;color:${net >= 0 ? '#34d399' : '#f87171'}">${fmt(net, currency)}</span></div>
           <div style="border-top:1px solid #334155;padding-top:6px;font-size:10px;color:#64748b">
             <div>Mode: ${modeLabel} · Reconciled: ${reconciliation.reconciledPercentage}%</div>
             <div>Sources: ${meta.dataSourcesUsed.length} · Confidence: ${confidence}%</div>
@@ -669,7 +693,7 @@ export function CashFlowOverview() {
                 </span>
                 <div>
                   <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">Cash In</span>
-                  <span className="text-xl font-bold text-slate-800 tracking-tight block">{fmt(filteredCashIn)}</span>
+                  <span className="text-xl font-bold text-slate-800 tracking-tight block">{fmt(filteredCashIn, currency)}</span>
                   <span className="text-[9.5px] font-medium text-slate-400">{summary.incomingPaymentsCount ?? 0} transactions</span>
                 </div>
               </div>
@@ -681,7 +705,7 @@ export function CashFlowOverview() {
                 </span>
                 <div>
                   <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">Cash Out</span>
-                  <span className="text-xl font-bold text-slate-800 tracking-tight block">{fmt(filteredCashOut)}</span>
+                  <span className="text-xl font-bold text-slate-800 tracking-tight block">{fmt(filteredCashOut, currency)}</span>
                   <span className="text-[9.5px] font-medium text-slate-400">{summary.outgoingPaymentsCount ?? 0} transactions</span>
                 </div>
               </div>
@@ -694,7 +718,7 @@ export function CashFlowOverview() {
                 <div>
                   <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">Net Cash Flow</span>
                   <span className={cn("text-xl font-bold tracking-tight block", filteredNet >= 0 ? "text-emerald-600" : "text-red-500")}>
-                    {filteredNet >= 0 ? '+' : ''}{fmt(filteredNet)}
+                    {filteredNet >= 0 ? '+' : ''}{fmt(filteredNet, currency)}
                   </span>
                   <span className="text-[9.5px] font-medium text-slate-400">{filteredNet >= 0 ? 'Positive' : 'Negative'} Cash Flow</span>
                 </div>

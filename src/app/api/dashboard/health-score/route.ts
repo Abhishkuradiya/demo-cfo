@@ -24,6 +24,31 @@ export async function GET(req: NextRequest) {
 
   try {
     const tokenInfo = await getXeroAccessToken(tenantId);
+    if (!tokenInfo) {
+      return NextResponse.json({
+        connected: false,
+        overallScore: 0,
+        label: "N/A",
+        description: "Please connect Xero to view your health score.",
+        metrics: [
+          { name: 'Profitability', score: 0, color: '#10b981' },
+          { name: 'Liquidity', score: 0, color: '#0064eb' },
+          { name: 'Efficiency', score: 0, color: '#f59e0b' },
+          { name: 'Solvency', score: 0, color: '#ef4444' },
+          { name: 'Growth', score: 0, color: '#10b981' },
+        ],
+        details: {
+          profitMargin: 0,
+          currentRatio: 0,
+          collectionRate: 0,
+          workingCapital: 0,
+          revenueGrowth: 0,
+          totalCash: 0,
+          totalReceivable: 0,
+          totalPayable: 0
+        }
+      });
+    }
     const cachedInvoices = await db.getInvoices(tenantId);
 
     // ========================================

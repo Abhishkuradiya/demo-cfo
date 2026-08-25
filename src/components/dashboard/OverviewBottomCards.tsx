@@ -84,6 +84,25 @@ function CardEmptyState({ title, desc }: { title: string; desc: string }) {
 }
 
 // ==================================================
+// DISCONNECTED STATE
+// ==================================================
+function CardDisconnectedState({ title, desc }: { title: string; desc: string }) {
+  return (
+    <div className="bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs flex flex-col items-center justify-center text-center select-none min-h-[395px]">
+      <div className="h-10 w-10 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-400 mb-3">
+        <svg className="h-4.5 w-4.5 text-slate-450" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <circle cx="12" cy="12" r="10" />
+          <line x1="2" y1="12" x2="22" y2="12" />
+          <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+        </svg>
+      </div>
+      <h4 className="text-[12px] font-bold text-slate-700 mb-0.5">{title}</h4>
+      <p className="text-[9.5px] text-slate-400 max-w-[185px] leading-normal">{desc}</p>
+    </div>
+  );
+}
+
+// ==================================================
 // HELPER FOR CURRENCY FORMATTING
 // ==================================================
 function formatCurrency(amount: number, currency: string = 'USD'): string {
@@ -217,13 +236,15 @@ function PendingApprovalsCard({
   loading, 
   error, 
   onRetry,
-  onNavigate 
+  onNavigate,
+  currency = 'USD'
 }: { 
   data: ApprovalsData | null; 
   loading: boolean; 
   error: boolean; 
   onRetry: () => void;
   onNavigate: () => void;
+  currency?: string;
 }) {
   if (loading) return <CardSkeleton />;
   if (error) return <CardErrorState title="Failed to Load Approvals" desc="We couldn't retrieve pending approvals." onRetry={onRetry} />;
@@ -260,7 +281,7 @@ function PendingApprovalsCard({
               </div>
             </div>
             <div className="text-right shrink-0">
-              <span className="font-extrabold text-slate-700 block">{formatCurrency(sec.amount)}</span>
+              <span className="font-extrabold text-slate-700 block">{formatCurrency(sec.amount, currency)}</span>
             </div>
           </div>
         ))}
@@ -290,13 +311,15 @@ function TopCustomersCard({
   loading, 
   error, 
   onRetry,
-  onNavigate 
+  onNavigate,
+  currency = 'USD'
 }: { 
   customers: CustomerItem[]; 
   loading: boolean; 
   error: boolean; 
   onRetry: () => void;
   onNavigate: () => void;
+  currency?: string;
 }) {
   if (loading) return <CardSkeleton />;
   if (error) return <CardErrorState title="Failed to Load Customers" desc="We couldn't retrieve top customers." onRetry={onRetry} />;
@@ -320,7 +343,7 @@ function TopCustomersCard({
               </div>
               <span className="font-extrabold text-slate-700 truncate">{c.name}</span>
             </div>
-            <span className="font-extrabold text-emerald-600 shrink-0">{formatCurrency(c.revenue)}</span>
+            <span className="font-extrabold text-emerald-600 shrink-0">{formatCurrency(c.revenue, currency)}</span>
           </div>
         ))}
       </div>
@@ -349,13 +372,15 @@ function TopVendorsCard({
   loading, 
   error, 
   onRetry,
-  onNavigate 
+  onNavigate,
+  currency = 'USD'
 }: { 
   vendors: VendorItem[]; 
   loading: boolean; 
   error: boolean; 
   onRetry: () => void;
   onNavigate: () => void;
+  currency?: string;
 }) {
   if (loading) return <CardSkeleton />;
   if (error) return <CardErrorState title="Failed to Load Vendors" desc="We couldn't retrieve top vendors." onRetry={onRetry} />;
@@ -379,7 +404,7 @@ function TopVendorsCard({
               </div>
               <span className="font-extrabold text-slate-700 truncate">{v.name}</span>
             </div>
-            <span className="font-extrabold text-slate-700 shrink-0">{formatCurrency(v.amount)}</span>
+            <span className="font-extrabold text-slate-700 shrink-0">{formatCurrency(v.amount, currency)}</span>
           </div>
         ))}
       </div>
@@ -397,7 +422,8 @@ function TopVendorsCard({
 // ==================================================
 // MAIN ROW CONTAINER COMPONENT
 // ==================================================
-export function OverviewBottomCardsRow() {
+export function OverviewBottomCardsRow({ currency, connected = false, loading = false }: { currency?: string; connected?: boolean; loading?: boolean }) {
+  const activeCurrency = currency || 'USD';
   const [actData, setActData] = useState<ActivityItem[]>([]);
   const [actLoading, setActLoading] = useState(true);
   const [actError, setActError] = useState(false);
@@ -493,18 +519,56 @@ export function OverviewBottomCardsRow() {
   };
 
   useEffect(() => {
-    loadAll();
+    if (connected) {
+      loadAll();
+    }
 
     // Re-fetch on custom sync events
     const handleSyncComplete = () => {
-      loadAll();
+      if (connected) {
+        loadAll();
+      }
     };
 
     window.addEventListener('xero-sync-complete', handleSyncComplete);
     return () => {
       window.removeEventListener('xero-sync-complete', handleSyncComplete);
     };
-  }, []);
+  }, [connected]);
+
+  if (loading) {
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+        <CardSkeleton />
+        <CardSkeleton />
+        <CardSkeleton />
+        <CardSkeleton />
+      </div>
+    );
+  }
+
+  if (!connected) {
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+        <CardDisconnectedState 
+          title="Xero Disconnected" 
+          desc="Please connect your Xero organization to view recent activity feed." 
+        />
+        <CardDisconnectedState 
+          title="Xero Disconnected" 
+          desc="Please connect your Xero organization to view pending approvals." 
+        />
+        <CardDisconnectedState 
+          title="Xero Disconnected" 
+          desc="Please connect your Xero organization to view top customers." 
+        />
+        <CardDisconnectedState 
+          title="Xero Disconnected" 
+          desc="Please connect your Xero organization to view top vendors." 
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
@@ -521,6 +585,7 @@ export function OverviewBottomCardsRow() {
         error={appError}
         onRetry={fetchApprovals}
         onNavigate={() => window.location.href = '/reports'}
+        currency={activeCurrency}
       />
       <TopCustomersCard 
         customers={custData}
@@ -528,6 +593,7 @@ export function OverviewBottomCardsRow() {
         error={custError}
         onRetry={fetchCustomers}
         onNavigate={() => window.location.href = '/invoices'}
+        currency={activeCurrency}
       />
       <TopVendorsCard 
         vendors={vendData}
@@ -535,6 +601,7 @@ export function OverviewBottomCardsRow() {
         error={vendError}
         onRetry={fetchVendors}
         onNavigate={() => window.location.href = '/purchases'}
+        currency={activeCurrency}
       />
     </div>
   );

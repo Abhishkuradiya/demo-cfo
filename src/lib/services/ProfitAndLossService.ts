@@ -5,6 +5,8 @@ export interface ProfitAndLossSummary {
   cogs: number;
   grossProfit: number;
   operatingExpenses: number;
+  otherIncome: number;
+  otherExpenses: number;
   netProfit: number;
 }
  
@@ -19,6 +21,8 @@ export class ProfitAndLossService {
       cogs: 0,
       grossProfit: 0,
       operatingExpenses: 0,
+      otherIncome: 0,
+      otherExpenses: 0,
       netProfit: 0
     };
  
@@ -57,14 +61,28 @@ export class ProfitAndLossService {
       'operating expenses'
     ]);
     result.operatingExpenses = expensesVal !== null ? expensesVal : 0;
+
+    // 5. Extract Other Income
+    const otherIncomeVal = XeroReportParser.findRowValue(rows, [
+      'total other income',
+      'other income'
+    ]);
+    result.otherIncome = otherIncomeVal !== null ? otherIncomeVal : 0;
+
+    // 6. Extract Other Expenses
+    const otherExpensesVal = XeroReportParser.findRowValue(rows, [
+      'total other expenses',
+      'other expenses'
+    ]);
+    result.otherExpenses = otherExpensesVal !== null ? otherExpensesVal : 0;
  
-    // 5. Extract Net Profit
+    // 7. Extract Net Profit
     const npVal = XeroReportParser.findRowValue(rows, [
       'net profit',
       'net profit / loss',
       'net income'
     ]);
-    result.netProfit = npVal !== null ? npVal : (result.grossProfit - result.operatingExpenses);
+    result.netProfit = npVal !== null ? npVal : ((result.grossProfit + result.otherIncome) - (result.operatingExpenses + result.otherExpenses));
  
     return result;
   }

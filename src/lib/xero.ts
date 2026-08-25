@@ -18,6 +18,11 @@ export async function refreshXeroToken(tenantId: number, credentials: any): Prom
  
   if (!response.ok) {
     const errText = await response.text();
+    try {
+      await db.clearXeroTokens(tenantId);
+    } catch (clearErr) {
+      console.error('Failed to auto-clear invalid Xero tokens:', clearErr);
+    }
     throw new Error(`Failed to refresh credentials with Xero Token Server: ${errText}`);
   }
  

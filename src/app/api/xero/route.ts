@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { fetchXeroResource, fetchXeroReport, refreshXeroToken } from '@/lib/xero';
 import { getTenantIdFromSession } from '@/lib/auth';
+import { XeroFixedAssetsService } from '@/lib/fixedAssetsService';
+import { XeroGeneralLedgerService } from '@/lib/generalLedgerService';
  
 // GET retrieves Xero connection status and dynamic record counts for a tenant
 export async function GET(req: NextRequest) {
@@ -23,11 +25,44 @@ export async function GET(req: NextRequest) {
       const activeTenant = tenantsList.find(t => t.id === tenantId);
       const orgName = activeTenant ? activeTenant.name : 'Connected Organization';
  
+      // Fetch all connected organisations from Xero
+      let connections: any[] = [];
+      try {
+        let accessToken = credentials.access_token;
+        if (new Date(credentials.expires_at) <= new Date()) {
+          accessToken = await refreshXeroToken(tenantId, credentials);
+        }
+        
+        const connectionsRes = await fetch('https://api.xero.com/connections', {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Accept': 'application/json'
+          }
+        });
+        if (connectionsRes.ok) {
+          const allConns = await connectionsRes.json();
+          connections = allConns
+            .filter((c: any) => c.tenantType === 'ORGANISATION')
+            .map((c: any) => ({
+              xeroTenantId: c.tenantId,
+              name: c.tenantName
+            }));
+        }
+      } catch (err) {
+        console.error('Failed to fetch Xero connections for switcher:', err);
+      }
+
+      if (connections.length === 0) {
+        connections = [{ xeroTenantId: credentials.tenant_identifier, name: orgName }];
+      }
+
       return NextResponse.json({
         connected: true,
         organisation: orgName,
         records: totalRecords,
         lastSyncedAt: credentials.last_synced_at || null,
+        connections,
+        activeXeroTenantId: credentials.tenant_identifier,
         ...counts
       });
     }
@@ -59,6 +94,28 @@ export async function POST(req: NextRequest) {
         client_secret: body.clientSecret
       });
       return NextResponse.json({ success: true, message: 'Xero configuration saved.' });
+    }
+
+    // CASE C: SWITCH ACTIVE ORGANISATION
+    if (body && body.switchXeroTenantId && body.organisationName) {
+      const newXeroTenantId = body.switchXeroTenantId;
+      const orgName = body.organisationName;
+
+      // 1. Save new active Xero tenant ID in credentials (which clears cache automatically if changed)
+      await db.saveCredentials(tenantId, 'xero', {
+        tenant_identifier: newXeroTenantId
+      });
+
+      // 2. Update the local tenant company name to match the switched organisation
+      await db.updateTenantName(tenantId, orgName);
+
+      // 3. Force clean cache database records for this tenant
+      await db.clearCachedRecords(tenantId);
+
+      return NextResponse.json({
+        success: true,
+        message: `Successfully switched to organisation: ${orgName}. Database cache has been cleared, sync required.`
+      });
     }
  
     // CASE B: START ACTIVE SYNC FROM XERO API
@@ -123,11 +180,59 @@ export async function POST(req: NextRequest) {
       console.error('Failed to sync Xero Items:', e);
     }
 
-    // Sync detailed Invoice Line Items for inventory sales history (page=1,2 contains line items)
+    // Sync Fixed Assets
     try {
-      const invoicesWithLinesPage1 = await fetchXeroResource(accessToken, xeroTenantId, 'Invoices', 'page=1');
-      const invoicesWithLinesPage2 = await fetchXeroResource(accessToken, xeroTenantId, 'Invoices', 'page=2').catch(() => []);
-      const allInvoicesWithLines = [...(invoicesWithLinesPage1 || []), ...(invoicesWithLinesPage2 || [])];
+      await XeroFixedAssetsService.syncFixedAssets(tenantId);
+      // Clear fixed assets dashboard summary cache to force reload
+      await db.saveFixedAssetsCache(tenantId, 'FixedAssetsDashboardSummary', null, 0);
+    } catch (e) {
+      console.error('Failed to sync Fixed Assets:', e);
+    }
+
+    // Sync General Ledger
+    try {
+      await XeroGeneralLedgerService.syncGeneralLedger(tenantId);
+      // Clear general ledger dashboard cache
+      await db.saveGlCache(tenantId, 'GeneralLedgerDashboardSummary', null, 0);
+    } catch (e) {
+      console.error('Failed to sync General Ledger:', e);
+    }
+
+    // Sync detailed Invoice Line Items for inventory sales history and tax calculations (fully paginated)
+    try {
+      const allInvoicesWithLines: any[] = [];
+      let page = 1;
+      let hasMore = true;
+      while (hasMore && page <= 100) { // Limit to 100 pages max to prevent infinite loop
+        try {
+          const pageData = await fetchXeroResource(
+            accessToken, 
+            xeroTenantId, 
+            'Invoices', 
+            `page=${page}&where=Status=="PAID" OR Status=="AUTHORISED" OR Status=="DRAFT"`
+          );
+          if (pageData && pageData.length > 0) {
+            allInvoicesWithLines.push(...pageData);
+            if (pageData.length < 100) {
+              hasMore = false;
+            } else {
+              page++;
+            }
+          } else {
+            hasMore = false;
+          }
+        } catch (err) {
+          console.error(`Error fetching Invoice page ${page}:`, err);
+          hasMore = false;
+        }
+      }
+
+      // Overwrite raw caches and reports with detailed line-item invoices
+      if (allInvoicesWithLines.length > 0) {
+        await db.saveCachedRecords(tenantId, 'invoices', allInvoicesWithLines);
+        await db.saveReport(tenantId, 'Invoices', allInvoicesWithLines);
+        counts.invoices = allInvoicesWithLines.length;
+      }
 
       const sales: any[] = [];
       const parseXeroDate = (dateStr: string) => {
@@ -156,6 +261,50 @@ export async function POST(req: NextRequest) {
       await db.saveSalesHistory(tenantId, sales);
     } catch(e) {
       console.error('Failed to sync Invoice Line Items for inventory:', e);
+    }
+
+    // Sync CreditNotes for tax adjustments
+    try {
+      const allCreditNotes: any[] = [];
+      let page = 1;
+      let hasMore = true;
+      while (hasMore && page <= 10) {
+        try {
+          const pageData = await fetchXeroResource(accessToken, xeroTenantId, 'CreditNotes', `page=${page}`);
+          if (pageData && pageData.length > 0) {
+            allCreditNotes.push(...pageData);
+            if (pageData.length < 100) {
+              hasMore = false;
+            } else {
+              page++;
+            }
+          } else {
+            hasMore = false;
+          }
+        } catch (err) {
+          console.error(`Error fetching CreditNotes page ${page}:`, err);
+          hasMore = false;
+        }
+      }
+      await db.saveReport(tenantId, 'CreditNotes', allCreditNotes);
+    } catch (e) {
+      console.error('Failed to sync CreditNotes:', e);
+    }
+
+    // Sync TaxRates master data
+    try {
+      const taxRates = await fetchXeroResource(accessToken, xeroTenantId, 'TaxRates');
+      await db.saveReport(tenantId, 'TaxRates', taxRates || []);
+    } catch (e) {
+      console.error('Failed to sync TaxRates:', e);
+    }
+
+    // Trigger normalization/sync of tax transactions
+    try {
+      const { TaxSyncService } = require('@/lib/services/TaxSyncService');
+      await TaxSyncService.syncTaxTransactions(tenantId);
+    } catch (e) {
+      console.error('Failed to process TaxSyncService:', e);
     }
 
     // ── Cash Flow Sources ─────────────────────────────────────────
@@ -208,6 +357,13 @@ export async function POST(req: NextRequest) {
       console.error('Failed to sync ProfitAndLoss report:', e);
     }
  
+    // Clear derived dashboard page caches so that fresh sync data is calculated and displayed
+    try {
+      await db.clearDerivedCaches(tenantId);
+    } catch (e) {
+      console.error('Failed to clear derived caches on sync:', e);
+    }
+
     // Save last sync time in credentials database
     await db.saveCredentials(tenantId, 'xero', {
       last_synced_at: new Date().toISOString()

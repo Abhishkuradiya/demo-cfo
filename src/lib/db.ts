@@ -3,8 +3,13 @@ import fs from 'fs';
 import path from 'path';
  
 // PostgreSQL Connection Pool Config
-export function parseXeroDate(dateStr: string | null | undefined): Date | null {
+export function parseXeroDate(dateStr: any): Date | null {
   if (!dateStr) return null;
+  if (dateStr instanceof Date) return dateStr;
+  if (typeof dateStr !== 'string') {
+    const parsed = new Date(dateStr);
+    return isNaN(parsed.getTime()) ? null : parsed;
+  }
   const match = dateStr.match(/Date\((\d+)(?:[+-]\d+)?\)/);
   if (match) {
     return new Date(parseInt(match[1]));
@@ -22,7 +27,7 @@ const pgPool = new Pool({
   connectionTimeoutMillis: 2000 // Quick timeout to fall back to JSON database if pg is offline
 });
  
-let isPgConnected = false;
+let isPgConnected = true;
  
 // Initialize PostgreSQL tables if online
 const initPgTables = async () => {
@@ -198,6 +203,100 @@ const initPgTables = async () => {
       );
     `);
 
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS fixed_assets (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        external_id VARCHAR(255) NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        asset_number VARCHAR(255),
+        status VARCHAR(50) NOT NULL,
+        purchase_date TIMESTAMP,
+        purchase_price DECIMAL DEFAULT 0.0000,
+        accumulated_depreciation DECIMAL DEFAULT 0.0000,
+        book_value DECIMAL DEFAULT 0.0000,
+        raw_data JSONB,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, external_id)
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS fixed_assets_cache (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        cache_key VARCHAR(255) NOT NULL,
+        cache_value JSONB NOT NULL,
+        expires_at TIMESTAMP NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, cache_key)
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS budgets_cache (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        cache_key VARCHAR(255) NOT NULL,
+        cache_value JSONB NOT NULL,
+        expires_at TIMESTAMP NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, cache_key)
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS tax_cache (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        cache_key VARCHAR(255) NOT NULL,
+        cache_value JSONB NOT NULL,
+        expires_at TIMESTAMP NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, cache_key)
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS gl_cache (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        cache_key VARCHAR(255) NOT NULL,
+        cache_value JSONB NOT NULL,
+        expires_at TIMESTAMP NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, cache_key)
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS tax_transactions (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        xero_transaction_id VARCHAR(255) NOT NULL,
+        transaction_type VARCHAR(50) NOT NULL,
+        source_type VARCHAR(50) NOT NULL,
+        direction VARCHAR(50) NOT NULL,
+        date TIMESTAMP NOT NULL,
+        tax_type VARCHAR(100) NOT NULL,
+        tax_rate_name VARCHAR(255),
+        tax_rate_percent DECIMAL DEFAULT 0,
+        taxable_amount DECIMAL DEFAULT 0,
+        tax_amount DECIMAL DEFAULT 0,
+        status VARCHAR(50),
+        currency VARCHAR(50),
+        contact_name VARCHAR(255),
+        account_code VARCHAR(50),
+        last_synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, xero_transaction_id, tax_type, direction)
+      );
+    `);
+
     // Alter table to add currency, invoice_date, contact_name, due_date, and last_synced_at if they don't exist
     await client.query(`
       ALTER TABLE invoices ADD COLUMN IF NOT EXISTS currency VARCHAR(50);
@@ -205,12 +304,14 @@ const initPgTables = async () => {
       ALTER TABLE invoices ADD COLUMN IF NOT EXISTS contact_name VARCHAR(255);
       ALTER TABLE invoices ADD COLUMN IF NOT EXISTS due_date TIMESTAMP;
       ALTER TABLE tenant_credentials ADD COLUMN IF NOT EXISTS last_synced_at TIMESTAMP;
+      ALTER TABLE tenant_credentials ALTER COLUMN access_token DROP NOT NULL;
+      ALTER TABLE tenant_credentials ALTER COLUMN refresh_token DROP NOT NULL;
+      ALTER TABLE tenant_credentials ALTER COLUMN expires_at DROP NOT NULL;
     `);
 
     client.release();
   } catch (err) {
-    isPgConnected = false;
-    console.warn('PostgreSQL database is offline or not created. Falling back to persistent JSON file database.');
+    console.error('CRITICAL: PostgreSQL database is offline or not created:', err);
   }
 };
  
@@ -238,6 +339,12 @@ interface JsonSchema {
   inventory_thresholds?: any[];
   inventory_sales_history?: any[];
   inventory_cache?: any[];
+  fixed_assets?: any[];
+  fixed_assets_cache?: any[];
+  budgets_cache?: any[];
+  tax_cache?: any[];
+  gl_cache?: any[];
+  tax_transactions?: any[];
 }
  
 const readJsonDb = (): JsonSchema => {
@@ -261,7 +368,13 @@ const readJsonDb = (): JsonSchema => {
       inventory_items: [],
       inventory_thresholds: [],
       inventory_sales_history: [],
-      inventory_cache: []
+      inventory_cache: [],
+      fixed_assets: [],
+      fixed_assets_cache: [],
+      budgets_cache: [],
+      tax_cache: [],
+      gl_cache: [],
+      tax_transactions: []
     };
     fs.writeFileSync(JSON_DB_PATH, JSON.stringify(initialSchema, null, 2));
     return initialSchema;
@@ -279,9 +392,15 @@ const readJsonDb = (): JsonSchema => {
     if (!parsed.inventory_thresholds) parsed.inventory_thresholds = [];
     if (!parsed.inventory_sales_history) parsed.inventory_sales_history = [];
     if (!parsed.inventory_cache) parsed.inventory_cache = [];
+    if (!parsed.fixed_assets) parsed.fixed_assets = [];
+    if (!parsed.fixed_assets_cache) parsed.fixed_assets_cache = [];
+    if (!parsed.budgets_cache) parsed.budgets_cache = [];
+    if (!parsed.tax_cache) parsed.tax_cache = [];
+    if (!parsed.gl_cache) parsed.gl_cache = [];
+    if (!parsed.tax_transactions) parsed.tax_transactions = [];
     return parsed;
   } catch (err) {
-    return { tenants: [], tenant_credentials: [], contacts: [], invoices: [], payments: [], accounts: [], reports: [], users: [], sessions: [], bank_transactions: [], prepayments: [], overpayments: [], inventory_items: [], inventory_thresholds: [], inventory_sales_history: [], inventory_cache: [] };
+    return { tenants: [], tenant_credentials: [], contacts: [], invoices: [], payments: [], accounts: [], reports: [], users: [], sessions: [], bank_transactions: [], prepayments: [], overpayments: [], inventory_items: [], inventory_thresholds: [], inventory_sales_history: [], inventory_cache: [], fixed_assets: [], fixed_assets_cache: [], budgets_cache: [], tax_cache: [], gl_cache: [], tax_transactions: [] };
   }
 };
  
@@ -304,7 +423,7 @@ export const db = {
         const { rows } = await pgPool.query('SELECT * FROM tenants ORDER BY id ASC');
         return rows;
       } catch (e) {
-        isPgConnected = false;
+        console.error("Database query failed:", e); throw e;
       }
     }
     const json = readJsonDb();
@@ -320,7 +439,7 @@ export const db = {
         );
         return rows[0];
       } catch (e) {
-        isPgConnected = false;
+        console.error("Database query failed:", e); throw e;
       }
     }
     const json = readJsonDb();
@@ -337,7 +456,7 @@ export const db = {
         await pgPool.query('UPDATE tenants SET name = $1 WHERE id = $2', [name, id]);
         return;
       } catch (e) {
-        isPgConnected = false;
+        console.error("Database query failed:", e); throw e;
       }
     }
     const json = readJsonDb();
@@ -358,7 +477,7 @@ export const db = {
         );
         return rows[0] || null;
       } catch (e) {
-        isPgConnected = false;
+        console.error("Database query failed:", e); throw e;
       }
     }
     const json = readJsonDb();
@@ -417,7 +536,8 @@ export const db = {
         );
         return;
       } catch (e) {
-        isPgConnected = false;
+        console.error('PostgreSQL saveCredentials error:', e);
+        console.error("Database query failed:", e); throw e;
       }
     }
     const json = readJsonDb();
@@ -452,7 +572,7 @@ export const db = {
         );
         return;
       } catch (e) {
-        isPgConnected = false;
+        console.error("Database query failed:", e); throw e;
       }
     }
     const json = readJsonDb();
@@ -482,7 +602,7 @@ export const db = {
           overpayments: Array.isArray(overpays) ? overpays.length : 0
         };
       } catch (e) {
-        isPgConnected = false;
+        console.error("Database query failed:", e); throw e;
       }
     }
     const json = readJsonDb();
@@ -549,7 +669,7 @@ export const db = {
         }
         return;
       } catch (e) {
-        isPgConnected = false;
+        console.error("Database query failed:", e); throw e;
       }
     }
     
@@ -563,6 +683,29 @@ export const db = {
     }
     writeJsonDb(json);
   },
+
+  clearDerivedCaches: async (tenantId: number): Promise<void> => {
+    if (isPgConnected) {
+      try {
+        await pgPool.query('DELETE FROM fixed_assets_cache WHERE tenant_id = $1', [tenantId]);
+        await pgPool.query('DELETE FROM budgets_cache WHERE tenant_id = $1', [tenantId]);
+        await pgPool.query('DELETE FROM tax_cache WHERE tenant_id = $1', [tenantId]);
+        await pgPool.query('DELETE FROM gl_cache WHERE tenant_id = $1', [tenantId]);
+        await pgPool.query('DELETE FROM inventory_cache WHERE tenant_id = $1', [tenantId]);
+        return;
+      } catch (e) {
+        console.error("Database query failed in clearDerivedCaches:", e);
+        throw e;
+      }
+    }
+    const json = readJsonDb();
+    json.fixed_assets_cache = (json.fixed_assets_cache || []).filter(x => x.tenant_id !== tenantId);
+    json.budgets_cache = (json.budgets_cache || []).filter(x => x.tenant_id !== tenantId);
+    json.tax_cache = (json.tax_cache || []).filter(x => x.tenant_id !== tenantId);
+    json.gl_cache = (json.gl_cache || []).filter(x => x.tenant_id !== tenantId);
+    json.inventory_cache = (json.inventory_cache || []).filter(x => x.tenant_id !== tenantId);
+    writeJsonDb(json);
+  },
  
   clearCachedRecords: async (tenantId: number): Promise<void> => {
     if (isPgConnected) {
@@ -572,9 +715,14 @@ export const db = {
         await pgPool.query('DELETE FROM payments WHERE tenant_id = $1', [tenantId]);
         await pgPool.query('DELETE FROM accounts WHERE tenant_id = $1', [tenantId]);
         await pgPool.query('DELETE FROM reports WHERE tenant_id = $1', [tenantId]);
+        await pgPool.query('DELETE FROM fixed_assets WHERE tenant_id = $1', [tenantId]);
+        await pgPool.query('DELETE FROM fixed_assets_cache WHERE tenant_id = $1', [tenantId]);
+        await pgPool.query('DELETE FROM budgets_cache WHERE tenant_id = $1', [tenantId]);
+        await pgPool.query('DELETE FROM tax_cache WHERE tenant_id = $1', [tenantId]);
+        await pgPool.query('DELETE FROM gl_cache WHERE tenant_id = $1', [tenantId]);
         return;
       } catch (e) {
-        isPgConnected = false;
+        console.error("Database query failed:", e); throw e;
       }
     }
     const json = readJsonDb();
@@ -586,6 +734,11 @@ export const db = {
     json.bank_transactions = (json.bank_transactions || []).filter(x => x.tenant_id !== tenantId);
     json.prepayments = (json.prepayments || []).filter(x => x.tenant_id !== tenantId);
     json.overpayments = (json.overpayments || []).filter(x => x.tenant_id !== tenantId);
+    json.fixed_assets = (json.fixed_assets || []).filter(x => x.tenant_id !== tenantId);
+    json.fixed_assets_cache = (json.fixed_assets_cache || []).filter(x => x.tenant_id !== tenantId);
+    json.budgets_cache = (json.budgets_cache || []).filter(x => x.tenant_id !== tenantId);
+    json.tax_cache = (json.tax_cache || []).filter(x => x.tenant_id !== tenantId);
+    json.gl_cache = (json.gl_cache || []).filter(x => x.tenant_id !== tenantId);
     writeJsonDb(json);
   },
  
@@ -608,7 +761,7 @@ export const db = {
           DueDate: r.due_date
         }));
       } catch (e) {
-        isPgConnected = false;
+        console.error("Database query failed:", e); throw e;
       }
     }
     const json = readJsonDb();
@@ -632,7 +785,7 @@ export const db = {
           Date: r.payment_date || r.created_at
         }));
       } catch (e) {
-        isPgConnected = false;
+        console.error("Database query failed:", e); throw e;
       }
     }
     const json = readJsonDb();
@@ -652,7 +805,7 @@ export const db = {
           Status: r.status || 'ACTIVE'
         }));
       } catch (e) {
-        isPgConnected = false;
+        console.error("Database query failed:", e); throw e;
       }
     }
     const json = readJsonDb();
@@ -673,7 +826,7 @@ export const db = {
         const data = await db.getReport(tenantId, 'BankTransactions');
         return Array.isArray(data) ? data : [];
       } catch (e) {
-        isPgConnected = false;
+        console.error("Database query failed:", e); throw e;
       }
     }
     const json = readJsonDb();
@@ -686,7 +839,7 @@ export const db = {
         const data = await db.getReport(tenantId, 'Prepayments');
         return Array.isArray(data) ? data : [];
       } catch (e) {
-        isPgConnected = false;
+        console.error("Database query failed:", e); throw e;
       }
     }
     const json = readJsonDb();
@@ -699,7 +852,7 @@ export const db = {
         const data = await db.getReport(tenantId, 'Overpayments');
         return Array.isArray(data) ? data : [];
       } catch (e) {
-        isPgConnected = false;
+        console.error("Database query failed:", e); throw e;
       }
     }
     const json = readJsonDb();
@@ -718,7 +871,7 @@ export const db = {
         );
         return;
       } catch (e) {
-        isPgConnected = false;
+        console.error("Database query failed:", e); throw e;
       }
     }
     const json = readJsonDb();
@@ -741,7 +894,7 @@ export const db = {
         );
         return rows[0] ? rows[0].raw_data : null;
       } catch (e) {
-        isPgConnected = false;
+        console.error("Database query failed:", e); throw e;
       }
     }
     const json = readJsonDb();
@@ -758,7 +911,7 @@ export const db = {
         );
         return rows[0];
       } catch (e) {
-        isPgConnected = false;
+        console.error("Database query failed:", e); throw e;
       }
     }
     const json = readJsonDb();
@@ -775,7 +928,7 @@ export const db = {
         const { rows } = await pgPool.query('SELECT * FROM users WHERE email = $1', [email]);
         return rows[0] || null;
       } catch (e) {
-        isPgConnected = false;
+        console.error("Database query failed:", e); throw e;
       }
     }
     const json = readJsonDb();
@@ -791,7 +944,7 @@ export const db = {
         );
         return rows[0];
       } catch (e) {
-        isPgConnected = false;
+        console.error("Database query failed:", e); throw e;
       }
     }
     const json = readJsonDb();
@@ -814,7 +967,7 @@ export const db = {
         );
         return rows[0] || null;
       } catch (e) {
-        isPgConnected = false;
+        console.error("Database query failed:", e); throw e;
       }
     }
     const json = readJsonDb();
@@ -844,7 +997,7 @@ export const db = {
         await pgPool.query('DELETE FROM sessions WHERE session_token = $1', [token]);
         return;
       } catch (e) {
-        isPgConnected = false;
+        console.error("Database query failed:", e); throw e;
       }
     }
     const json = readJsonDb();
@@ -875,7 +1028,7 @@ export const db = {
         }
         return;
       } catch (e) {
-        isPgConnected = false;
+        console.error("Database query failed:", e); throw e;
       }
     }
     const json = readJsonDb();
@@ -906,10 +1059,13 @@ export const db = {
           ...r,
           IsTrackedAsInventory: r.is_tracked_as_inventory,
           QuantityOnHand: r.quantity_on_hand,
-          PurchaseDetails: { UnitPrice: r.unit_price }
+          PurchaseDetails: { UnitPrice: r.unit_price },
+          ItemID: r.item_id,
+          Code: r.code,
+          Name: r.name
         }));
       } catch (e) {
-        isPgConnected = false;
+        console.error("Database query failed:", e); throw e;
       }
     }
     const json = readJsonDb();
@@ -932,7 +1088,7 @@ export const db = {
         const { rows } = await pgPool.query('SELECT * FROM inventory_thresholds WHERE tenant_id = $1', [tenantId]);
         return rows;
       } catch (e) {
-        isPgConnected = false;
+        console.error("Database query failed:", e); throw e;
       }
     }
     const json = readJsonDb();
@@ -951,7 +1107,7 @@ export const db = {
         );
         return;
       } catch (e) {
-        isPgConnected = false;
+        console.error("Database query failed:", e); throw e;
       }
     }
     const json = readJsonDb();
@@ -987,7 +1143,7 @@ export const db = {
         }
         return;
       } catch (e) {
-        isPgConnected = false;
+        console.error("Database query failed:", e); throw e;
       }
     }
     const json = readJsonDb();
@@ -1013,7 +1169,7 @@ export const db = {
         const { rows } = await pgPool.query('SELECT * FROM inventory_sales_history WHERE tenant_id = $1', [tenantId]);
         return rows;
       } catch (e) {
-        isPgConnected = false;
+        console.error("Database query failed:", e); throw e;
       }
     }
     const json = readJsonDb();
@@ -1033,7 +1189,7 @@ export const db = {
         );
         return;
       } catch (e) {
-        isPgConnected = false;
+        console.error("Database query failed:", e); throw e;
       }
     }
     const json = readJsonDb();
@@ -1067,7 +1223,7 @@ export const db = {
         );
         return rows[0] ? (typeof rows[0].cache_value === 'string' ? JSON.parse(rows[0].cache_value) : rows[0].cache_value) : null;
       } catch (e) {
-        isPgConnected = false;
+        console.error("Database query failed:", e); throw e;
       }
     }
     const json = readJsonDb();
@@ -1075,5 +1231,450 @@ export const db = {
       x => x.tenant_id === tenantId && x.cache_key === key && new Date(x.expires_at) > new Date()
     );
     return cached ? cached.cache_value : null;
+  },
+
+  saveFixedAssets: async (tenantId: number, assets: any[]): Promise<void> => {
+    if (isPgConnected) {
+      try {
+        await pgPool.query('DELETE FROM fixed_assets WHERE tenant_id = $1', [tenantId]);
+        for (const asset of assets) {
+          await pgPool.query(
+            `INSERT INTO fixed_assets (tenant_id, external_id, name, asset_number, status, purchase_date, purchase_price, accumulated_depreciation, book_value, raw_data, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())`,
+            [
+              tenantId,
+              asset.external_id,
+              asset.name,
+              asset.asset_number || null,
+              asset.status,
+              asset.purchase_date || null,
+              asset.purchase_price || 0,
+              asset.accumulated_depreciation || 0,
+              asset.book_value || 0,
+              JSON.stringify(asset.raw_data)
+            ]
+          );
+        }
+        return;
+      } catch (e) {
+        console.error("Database query failed:", e); throw e;
+      }
+    }
+    const json = readJsonDb();
+    if (!json.fixed_assets) json.fixed_assets = [];
+    json.fixed_assets = json.fixed_assets.filter(x => x.tenant_id !== tenantId);
+    for (const asset of assets) {
+      json.fixed_assets.push({
+        tenant_id: tenantId,
+        ...asset,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      });
+    }
+    writeJsonDb(json);
+  },
+
+  getFixedAssets: async (tenantId: number): Promise<any[]> => {
+    if (isPgConnected) {
+      try {
+        const { rows } = await pgPool.query('SELECT * FROM fixed_assets WHERE tenant_id = $1', [tenantId]);
+        return rows.map(r => ({
+          tenant_id: r.tenant_id,
+          external_id: r.external_id,
+          name: r.name,
+          asset_number: r.asset_number,
+          status: r.status,
+          purchase_date: r.purchase_date,
+          purchase_price: parseFloat(r.purchase_price || 0),
+          accumulated_depreciation: parseFloat(r.accumulated_depreciation || 0),
+          book_value: parseFloat(r.book_value || 0),
+          raw_data: typeof r.raw_data === 'string' ? JSON.parse(r.raw_data) : r.raw_data
+        }));
+      } catch (e) {
+        console.error("Database query failed:", e); throw e;
+      }
+    }
+    const json = readJsonDb();
+    return (json.fixed_assets || [])
+      .filter(x => x.tenant_id === tenantId)
+      .map(r => ({
+        tenant_id: r.tenant_id,
+        external_id: r.external_id,
+        name: r.name,
+        asset_number: r.asset_number,
+        status: r.status,
+        purchase_date: r.purchase_date,
+        purchase_price: parseFloat(r.purchase_price || 0),
+        accumulated_depreciation: parseFloat(r.accumulated_depreciation || 0),
+        book_value: parseFloat(r.book_value || 0),
+        raw_data: r.raw_data
+      }));
+  },
+
+  saveFixedAssetsCache: async (tenantId: number, key: string, value: any, expiresSeconds: number): Promise<void> => {
+    const expiresAt = new Date(Date.now() + expiresSeconds * 1000).toISOString();
+    if (isPgConnected) {
+      try {
+        await pgPool.query(
+          `INSERT INTO fixed_assets_cache (tenant_id, cache_key, cache_value, expires_at, updated_at)
+           VALUES ($1, $2, $3, $4, NOW())
+           ON CONFLICT (tenant_id, cache_key)
+           DO UPDATE SET cache_value = $3, expires_at = $4, updated_at = NOW()`,
+          [tenantId, key, JSON.stringify(value), expiresAt]
+        );
+        return;
+      } catch (e) {
+        console.error("Database query failed:", e); throw e;
+      }
+    }
+    const json = readJsonDb();
+    if (!json.fixed_assets_cache) json.fixed_assets_cache = [];
+    const idx = json.fixed_assets_cache.findIndex(x => x.tenant_id === tenantId && x.cache_key === key);
+    if (idx >= 0) {
+      json.fixed_assets_cache[idx].cache_value = value;
+      json.fixed_assets_cache[idx].expires_at = expiresAt;
+      json.fixed_assets_cache[idx].updated_at = new Date().toISOString();
+    } else {
+      const newId = json.fixed_assets_cache.length > 0 ? Math.max(...json.fixed_assets_cache.map(x => x.id || 0)) + 1 : 1;
+      json.fixed_assets_cache.push({
+        id: newId,
+        tenant_id: tenantId,
+        cache_key: key,
+        cache_value: value,
+        expires_at: expiresAt,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      });
+    }
+    writeJsonDb(json);
+  },
+
+  getFixedAssetsCache: async (tenantId: number, key: string): Promise<any | null> => {
+    if (isPgConnected) {
+      try {
+        const { rows } = await pgPool.query(
+          'SELECT * FROM fixed_assets_cache WHERE tenant_id = $1 AND cache_key = $2 AND expires_at > NOW()',
+          [tenantId, key]
+        );
+        return rows[0] ? (typeof rows[0].cache_value === 'string' ? JSON.parse(rows[0].cache_value) : rows[0].cache_value) : null;
+      } catch (e) {
+        console.error("Database query failed:", e); throw e;
+      }
+    }
+    const json = readJsonDb();
+    const cached = (json.fixed_assets_cache || []).find(
+      x => x.tenant_id === tenantId && x.cache_key === key && new Date(x.expires_at) > new Date()
+    );
+    return cached ? cached.cache_value : null;
+  },
+
+  saveBudgetsCache: async (tenantId: number, key: string, value: any, expiresSeconds: number): Promise<void> => {
+    const expiresAt = new Date(Date.now() + expiresSeconds * 1000).toISOString();
+    if (isPgConnected) {
+      try {
+        await pgPool.query(
+          `INSERT INTO budgets_cache (tenant_id, cache_key, cache_value, expires_at, updated_at)
+           VALUES ($1, $2, $3, $4, NOW())
+           ON CONFLICT (tenant_id, cache_key)
+           DO UPDATE SET cache_value = $3, expires_at = $4, updated_at = NOW()`,
+          [tenantId, key, JSON.stringify(value), expiresAt]
+        );
+        return;
+      } catch (e) {
+        console.error("Database query failed:", e); throw e;
+      }
+    }
+    const json = readJsonDb();
+    if (!json.budgets_cache) json.budgets_cache = [];
+    const idx = json.budgets_cache.findIndex(x => x.tenant_id === tenantId && x.cache_key === key);
+    if (idx >= 0) {
+      json.budgets_cache[idx].cache_value = value;
+      json.budgets_cache[idx].expires_at = expiresAt;
+      json.budgets_cache[idx].updated_at = new Date().toISOString();
+    } else {
+      const newId = json.budgets_cache.length > 0 ? Math.max(...json.budgets_cache.map(x => x.id || 0)) + 1 : 1;
+      json.budgets_cache.push({
+        id: newId,
+        tenant_id: tenantId,
+        cache_key: key,
+        cache_value: value,
+        expires_at: expiresAt,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      });
+    }
+    writeJsonDb(json);
+  },
+
+  getBudgetsCache: async (tenantId: number, key: string): Promise<any | null> => {
+    if (isPgConnected) {
+      try {
+        const { rows } = await pgPool.query(
+          'SELECT * FROM budgets_cache WHERE tenant_id = $1 AND cache_key = $2 AND expires_at > NOW()',
+          [tenantId, key]
+        );
+        return rows[0] ? (typeof rows[0].cache_value === 'string' ? JSON.parse(rows[0].cache_value) : rows[0].cache_value) : null;
+      } catch (e) {
+        console.error("Database query failed:", e); throw e;
+      }
+    }
+    const json = readJsonDb();
+    const cached = (json.budgets_cache || []).find(
+      x => x.tenant_id === tenantId && x.cache_key === key && new Date(x.expires_at) > new Date()
+    );
+    return cached ? cached.cache_value : null;
+  },
+
+  saveTaxCache: async (tenantId: number, key: string, value: any, expiresSeconds: number): Promise<void> => {
+    const expiresAt = new Date(Date.now() + expiresSeconds * 1000).toISOString();
+    if (isPgConnected) {
+      try {
+        await pgPool.query(
+          `INSERT INTO tax_cache (tenant_id, cache_key, cache_value, expires_at, updated_at)
+           VALUES ($1, $2, $3, $4, NOW())
+           ON CONFLICT (tenant_id, cache_key)
+           DO UPDATE SET cache_value = $3, expires_at = $4, updated_at = NOW()`,
+          [tenantId, key, JSON.stringify(value), expiresAt]
+        );
+        return;
+      } catch (e) {
+        console.error("Database query failed:", e); throw e;
+      }
+    }
+    const json = readJsonDb();
+    if (!json.tax_cache) json.tax_cache = [];
+    const idx = json.tax_cache.findIndex(x => x.tenant_id === tenantId && x.cache_key === key);
+    if (idx >= 0) {
+      json.tax_cache[idx].cache_value = value;
+      json.tax_cache[idx].expires_at = expiresAt;
+      json.tax_cache[idx].updated_at = new Date().toISOString();
+    } else {
+      const newId = json.tax_cache.length > 0 ? Math.max(...json.tax_cache.map(x => x.id || 0)) + 1 : 1;
+      json.tax_cache.push({
+        id: newId,
+        tenant_id: tenantId,
+        cache_key: key,
+        cache_value: value,
+        expires_at: expiresAt,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      });
+    }
+    writeJsonDb(json);
+  },
+
+  getTaxCache: async (tenantId: number, key: string): Promise<any | null> => {
+    if (isPgConnected) {
+      try {
+        const { rows } = await pgPool.query(
+          'SELECT * FROM tax_cache WHERE tenant_id = $1 AND cache_key = $2 AND expires_at > NOW()',
+          [tenantId, key]
+        );
+        return rows[0] ? (typeof rows[0].cache_value === 'string' ? JSON.parse(rows[0].cache_value) : rows[0].cache_value) : null;
+      } catch (e) {
+        console.error("Database query failed:", e); throw e;
+      }
+    }
+    const json = readJsonDb();
+    const cached = (json.tax_cache || []).find(
+      x => x.tenant_id === tenantId && x.cache_key === key && new Date(x.expires_at) > new Date()
+    );
+    return cached ? cached.cache_value : null;
+  },
+
+  saveGlCache: async (tenantId: number, key: string, value: any, expiresSeconds: number): Promise<void> => {
+    const expiresAt = new Date(Date.now() + expiresSeconds * 1000).toISOString();
+    if (isPgConnected) {
+      try {
+        await pgPool.query(
+          `INSERT INTO gl_cache (tenant_id, cache_key, cache_value, expires_at, updated_at)
+           VALUES ($1, $2, $3, $4, NOW())
+           ON CONFLICT (tenant_id, cache_key)
+           DO UPDATE SET cache_value = $3, expires_at = $4, updated_at = NOW()`,
+          [tenantId, key, JSON.stringify(value), expiresAt]
+        );
+        return;
+      } catch (e) {
+        console.error("Database query failed:", e); throw e;
+      }
+    }
+    const json = readJsonDb();
+    if (!json.gl_cache) json.gl_cache = [];
+    const idx = json.gl_cache.findIndex(x => x.tenant_id === tenantId && x.cache_key === key);
+    if (idx >= 0) {
+      json.gl_cache[idx].cache_value = value;
+      json.gl_cache[idx].expires_at = expiresAt;
+      json.gl_cache[idx].updated_at = new Date().toISOString();
+    } else {
+      const newId = json.gl_cache.length > 0 ? Math.max(...json.gl_cache.map(x => x.id || 0)) + 1 : 1;
+      json.gl_cache.push({
+        id: newId,
+        tenant_id: tenantId,
+        cache_key: key,
+        cache_value: value,
+        expires_at: expiresAt,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      });
+    }
+    writeJsonDb(json);
+  },
+
+  getGlCache: async (tenantId: number, key: string): Promise<any | null> => {
+    if (isPgConnected) {
+      try {
+        const { rows } = await pgPool.query(
+          'SELECT * FROM gl_cache WHERE tenant_id = $1 AND cache_key = $2 AND expires_at > NOW()',
+          [tenantId, key]
+        );
+        return rows[0] ? (typeof rows[0].cache_value === 'string' ? JSON.parse(rows[0].cache_value) : rows[0].cache_value) : null;
+      } catch (e) {
+        console.error("Database query failed:", e); throw e;
+      }
+    }
+    const json = readJsonDb();
+    const cached = (json.gl_cache || []).find(
+      x => x.tenant_id === tenantId && x.cache_key === key && new Date(x.expires_at) > new Date()
+    );
+    return cached ? cached.cache_value : null;
+  },
+
+  saveTaxTransactions: async (tenantId: number, txns: any[]): Promise<void> => {
+    if (isPgConnected) {
+      try {
+        for (const txn of txns) {
+          await pgPool.query(
+            `INSERT INTO tax_transactions (
+              tenant_id, xero_transaction_id, transaction_type, source_type, direction,
+              date, tax_type, tax_rate_name, tax_rate_percent, taxable_amount, tax_amount,
+              status, currency, contact_name, account_code, last_synced_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW())
+            ON CONFLICT (tenant_id, xero_transaction_id, tax_type, direction)
+            DO UPDATE SET
+              transaction_type = $3,
+              source_type = $4,
+              date = $6,
+              tax_rate_name = $8,
+              tax_rate_percent = $9,
+              taxable_amount = $10,
+              tax_amount = $11,
+              status = $12,
+              currency = $13,
+              contact_name = $14,
+              account_code = $15,
+              last_synced_at = NOW()`,
+            [
+              tenantId, txn.xero_transaction_id, txn.transaction_type, txn.source_type, txn.direction,
+              txn.date, txn.tax_type, txn.tax_rate_name, txn.tax_rate_percent, txn.taxable_amount, txn.tax_amount,
+              txn.status, txn.currency, txn.contact_name, txn.account_code
+            ]
+          );
+        }
+        return;
+      } catch (e) {
+        console.error("Database query failed in saveTaxTransactions:", e);
+        throw e;
+      }
+    }
+    const json = readJsonDb();
+    if (!json.tax_transactions) json.tax_transactions = [];
+    for (const txn of txns) {
+      const idx = json.tax_transactions.findIndex(
+        x => x.tenant_id === tenantId &&
+             x.xero_transaction_id === txn.xero_transaction_id &&
+             x.tax_type === txn.tax_type &&
+             x.direction === txn.direction
+      );
+      const newRecord = {
+        ...txn,
+        tenant_id: tenantId,
+        last_synced_at: new Date().toISOString()
+      };
+      if (idx >= 0) {
+        json.tax_transactions[idx] = newRecord;
+      } else {
+        json.tax_transactions.push(newRecord);
+      }
+    }
+    writeJsonDb(json);
+  },
+
+  getTaxTransactions: async (tenantId: number, startDate: Date, endDate: Date, filters?: any): Promise<any[]> => {
+    if (isPgConnected) {
+      try {
+        let query = `
+          SELECT * FROM tax_transactions 
+          WHERE tenant_id = $1 AND date >= $2 AND date <= $3
+        `;
+        const params: any[] = [tenantId, startDate, endDate];
+        let paramIdx = 4;
+
+        if (filters?.taxType && filters.taxType !== 'All Taxes') {
+          query += ` AND tax_type ILIKE $${paramIdx}`;
+          params.push(`%${filters.taxType}%`);
+          paramIdx++;
+        }
+
+        query += ` ORDER BY date DESC`;
+        const { rows } = await pgPool.query(query, params);
+        return rows;
+      } catch (e) {
+        console.error("Database query failed in getTaxTransactions:", e);
+        throw e;
+      }
+    }
+    const json = readJsonDb();
+    const list = json.tax_transactions || [];
+    return list.filter(x => {
+      if (x.tenant_id !== tenantId) return false;
+      const d = new Date(x.date);
+      if (d < startDate || d > endDate) return false;
+      if (filters?.taxType && filters.taxType !== 'All Taxes') {
+        if (!x.tax_type.toLowerCase().includes(filters.taxType.toLowerCase())) return false;
+      }
+      return true;
+    }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  },
+
+  clearTaxTransactions: async (tenantId: number): Promise<void> => {
+    if (isPgConnected) {
+      try {
+        await pgPool.query('DELETE FROM tax_transactions WHERE tenant_id = $1', [tenantId]);
+        return;
+      } catch (e) {
+        console.error("Database query failed in clearTaxTransactions:", e);
+        throw e;
+      }
+    }
+    const json = readJsonDb();
+    if (json.tax_transactions) {
+      json.tax_transactions = json.tax_transactions.filter(x => x.tenant_id !== tenantId);
+      writeJsonDb(json);
+    }
+  },
+
+  clearXeroTokens: async (tenantId: number): Promise<void> => {
+    if (isPgConnected) {
+      try {
+        await pgPool.query(
+          `UPDATE tenant_credentials 
+           SET access_token = NULL, refresh_token = NULL, expires_at = NULL, scopes = NULL 
+           WHERE tenant_id = $1 AND provider = 'xero'`,
+          [tenantId]
+        );
+      } catch (e) {
+        console.error("Database query failed in clearXeroTokens:", e);
+        throw e;
+      }
+    }
+    const json = readJsonDb();
+    const idx = (json.tenant_credentials || []).findIndex(x => x.tenant_id === tenantId && x.provider === 'xero');
+    if (idx >= 0) {
+      json.tenant_credentials[idx].access_token = null;
+      json.tenant_credentials[idx].refresh_token = null;
+      json.tenant_credentials[idx].expires_at = null;
+      json.tenant_credentials[idx].scopes = null;
+      writeJsonDb(json);
+    }
   }
 };

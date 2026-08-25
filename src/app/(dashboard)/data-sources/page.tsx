@@ -49,6 +49,7 @@ export default function DataSourcesPage() {
   const [activeTab, setActiveTab] = useState<'All' | 'Connected' | 'Available' | 'Disconnected'>('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [isSyncingAll, setIsSyncingAll] = useState(false);
+  const [xeroData, setXeroData] = useState<any>(null);
  
   // Xero Modal & Credentials Configuration States
   const [isXeroModalOpen, setIsXeroModalOpen] = useState(false);
@@ -72,18 +73,18 @@ export default function DataSourcesPage() {
         const res = await fetch('/api/xero');
         if (res.ok) {
           const data = await res.json();
+          setXeroData(data);
           if (data.connected) {
             setConnectors(prev => {
-              const xero = prev.find(c => c.id === 'xero');
-              const wasDisconnected = xero && xero.status !== 'Connected';
+              const isReconnecting = isAuthFlowActive.current;
               
               // Only show toast if user was actively authenticating (clicked Save & Authenticate)
-              if (wasDisconnected && isAuthFlowActive.current && !hasShownConnectionToast.current) {
+              if (isReconnecting && !hasShownConnectionToast.current) {
                 hasShownConnectionToast.current = true;
                 isAuthFlowActive.current = false;
                 setIsXeroModalOpen(false);
                 setOauthStep('idle');
-                toast.success(`Xero connected successfully to ${data.organisation}!`);
+                toast.success(`Xero connected/reconnected successfully to ${data.organisation}!`);
               }
               
               return prev.map(c => {
@@ -102,6 +103,7 @@ export default function DataSourcesPage() {
               });
             });
           } else {
+            setXeroData(null);
             hasShownConnectionToast.current = false; // Reset so future connections can toast
             setConnectors(prev =>
               prev.map(c => {
@@ -145,7 +147,9 @@ export default function DataSourcesPage() {
       logo: (
         <span className="font-sans text-[11px] font-light tracking-tighter text-white lowercase">xero</span>
       )
-    },
+    }
+    /*
+    ,
     {
       id: 'shopify',
       name: 'Shopify',
@@ -246,6 +250,7 @@ export default function DataSourcesPage() {
         <span className="font-bold text-[11px] text-white">G4</span>
       )
     }
+    */
   ]);
  
   // Toggle other connections, redirect Xero clicks to modal
@@ -313,6 +318,14 @@ export default function DataSourcesPage() {
     } catch (err) {
       toast.error('Error initiating Xero OAuth flow.');
     }
+  };
+
+  const quickReconnect = () => {
+    setOauthStep('redirecting');
+    isAuthFlowActive.current = true;
+    hasShownConnectionToast.current = false;
+    window.open('/api/xero/redirect', '_blank');
+    toast.info('Reconnecting with your saved Xero developer application credentials...');
   };
  
   const disconnectXero = async () => {
@@ -480,10 +493,10 @@ export default function DataSourcesPage() {
         {[
           { title: 'Total Connectors', val: stats.total, sub: 'All time', icon: <Database className="h-4.5 w-4.5 text-[#0064eb]" />, bg: 'bg-blue-50 border-blue-100/50' },
           { title: 'Connected', val: stats.connected, sub: `${stats.pct}% of total`, icon: <Link2 className="h-4.5 w-4.5 text-emerald-500" />, bg: 'bg-emerald-50 border-emerald-100/50' },
-          { title: 'Sync Successful', val: stats.connected > 0 ? '98.6%' : '0.0%', sub: 'Last 30 days', icon: <CheckCircle2 className="h-4.5 w-4.5 text-emerald-500" />, bg: 'bg-emerald-50 border-emerald-100/50' },
+          { title: 'Sync Successful', val: stats.connected > 0 ? '100.0%' : '0.0%', sub: 'Last 30 days', icon: <CheckCircle2 className="h-4.5 w-4.5 text-emerald-500" />, bg: 'bg-emerald-50 border-emerald-100/50' },
           { title: 'Failed Sync', val: stats.failed, sub: 'Last 30 days', icon: <AlertTriangle className="h-4.5 w-4.5 text-red-500" />, bg: 'bg-red-50 border-red-100/50' },
-          { title: 'Data Sources', val: stats.connected > 0 ? '12' : '0', sub: 'Across all connectors', icon: <Layers className="h-4.5 w-4.5 text-purple-500" />, bg: 'bg-purple-50 border-purple-100/50' },
-          { title: 'Last Sync', val: stats.connected > 0 ? '2 min ago' : '─', sub: 'All connectors', icon: <Clock className="h-4.5 w-4.5 text-blue-500" />, bg: 'bg-blue-50 border-blue-100/50' }
+          { title: 'Data Sources', val: stats.connected > 0 ? '4' : '0', sub: 'Across all connectors', icon: <Layers className="h-4.5 w-4.5 text-purple-500" />, bg: 'bg-purple-50 border-purple-100/50' },
+          { title: 'Last Sync', val: stats.connected > 0 ? 'Just now' : '─', sub: 'All connectors', icon: <Clock className="h-4.5 w-4.5 text-blue-500" />, bg: 'bg-blue-50 border-blue-100/50' }
         ].map((stat, idx) => (
           <div key={idx} className="flex items-center gap-3.5 bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs hover:shadow-xs transition duration-200 h-[96px]">
             <div className={cn("flex h-11 w-11 shrink-0 items-center justify-center rounded-xl shadow-3xs", stat.bg)}>
@@ -639,10 +652,10 @@ export default function DataSourcesPage() {
                   {/* Background Circle */}
                   <circle cx="18" cy="18" r="16" fill="none" className="text-slate-100" strokeWidth="3" stroke="currentColor" />
                   {/* Active Percentage Circle */}
-                  <circle cx="18" cy="18" r="16" fill="none" className={cn(stats.connected > 0 ? "text-emerald-500" : "text-slate-300")} strokeWidth="3" strokeDasharray={stats.connected > 0 ? "12, 100" : "0, 100"} strokeLinecap="round" stroke="currentColor" />
+                  <circle cx="18" cy="18" r="16" fill="none" className={cn(stats.connected > 0 ? "text-emerald-500" : "text-slate-300")} strokeWidth="3" strokeDasharray={stats.connected > 0 ? `${stats.pct}, 100` : "0, 100"} strokeLinecap="round" stroke="currentColor" />
                 </svg>
                 <div className="absolute text-center">
-                  <div className="text-[13.5px] font-extrabold text-slate-800 leading-none">{stats.connected > 0 ? '12.5%' : '0%'}</div>
+                  <div className="text-[13.5px] font-extrabold text-slate-800 leading-none">{stats.connected > 0 ? `${stats.pct}%` : '0%'}</div>
                   <div className={cn("text-[7.5px] font-bold leading-none mt-1", stats.connected > 0 ? "text-emerald-500" : "text-slate-400")}>{stats.connected > 0 ? 'Healthy' : 'Inactive'}</div>
                 </div>
               </div>
@@ -675,7 +688,7 @@ export default function DataSourcesPage() {
                     <span className="h-1.5 w-1.5 rounded-full bg-slate-400 shrink-0" />
                     <span>Disconnected</span>
                   </div>
-                  <span className="text-slate-850">{8 - stats.connected}</span>
+                  <span className="text-slate-850">{stats.total - stats.connected}</span>
                 </div>
               </div>
             </div>
@@ -693,11 +706,11 @@ export default function DataSourcesPage() {
  
             <div className="flex-1 space-y-1.5 py-2 overflow-y-auto no-scrollbar text-[9px] font-bold text-slate-500">
               {[
-                { name: 'Invoices', count: stats.connected > 0 ? '1,25,430' : '0' },
-                { name: 'Customers', count: stats.connected > 0 ? '85,430' : '0' },
-                { name: 'Products', count: stats.connected > 0 ? '45,230' : '0' },
-                { name: 'Payments', count: stats.connected > 0 ? '65,340' : '0' },
-                { name: 'Orders', count: stats.connected > 0 ? '2,45,320' : '0' }
+                { name: 'Invoices', count: xeroData?.connected ? (xeroData.invoices || 0).toLocaleString() : '0' },
+                { name: 'Customers', count: xeroData?.connected ? (xeroData.contacts || 0).toLocaleString() : '0' },
+                { name: 'Products', count: xeroData?.connected ? (xeroData.accounts || 0).toLocaleString() : '0' },
+                { name: 'Payments', count: xeroData?.connected ? (xeroData.payments || 0).toLocaleString() : '0' },
+                { name: 'Orders', count: xeroData?.connected ? ((xeroData.bankTransactions || 0) + (xeroData.prepayments || 0) + (xeroData.overpayments || 0)).toLocaleString() : '0' }
               ].map((item, idx) => (
                 <div key={idx} className="flex justify-between items-center py-0.5 border-b border-slate-50 last:border-0">
                   <span>{item.name}</span>
@@ -905,6 +918,15 @@ export default function DataSourcesPage() {
                 >
                   Save & Authenticate
                 </button>
+
+                {connectors.find(c => c.id === 'xero')?.status === 'Connected' && (
+                  <button
+                    onClick={quickReconnect}
+                    className="w-full text-center py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-[10.5px] font-bold text-white shadow-3xs cursor-pointer outline-none transition"
+                  >
+                    Quick Reconnect (Same Credentials)
+                  </button>
+                )}
  
                 {connectors.find(c => c.id === 'xero')?.status === 'Connected' && (
                   <button

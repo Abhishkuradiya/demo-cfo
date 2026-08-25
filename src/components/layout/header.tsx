@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { UserMenu } from './user-menu';
 import { useSidebarStore } from '@/store/sidebar-store';
-import { Bell, Calendar, RefreshCw, Menu, Star, Filter, ChevronDown } from 'lucide-react';
+import { Bell, Calendar, RefreshCw, Menu, Star, Filter, ChevronDown, Trash2, Building2, Check, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { DateRangePicker } from '../ui/date-range-picker';
 
@@ -14,15 +14,15 @@ function formatTimeAgo(dateStr: string | null | undefined): string {
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
   const diffMins = Math.floor(diffMs / 60000);
-  
+
   if (diffMins < 1) return "Just now";
   if (diffMins === 1) return "1 min ago";
   if (diffMins < 60) return `${diffMins} min ago`;
-  
+
   const diffHours = Math.floor(diffMins / 60);
   if (diffHours === 1) return "1 hour ago";
   if (diffHours < 24) return `${diffHours} hours ago`;
-  
+
   const diffDays = Math.floor(diffHours / 24);
   if (diffDays === 1) return "yesterday";
   return `${diffDays} days ago`;
@@ -32,25 +32,45 @@ export function Header() {
   const pathname = usePathname();
   const { setOpenMobile } = useSidebarStore();
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isClearingCache, setIsClearingCache] = useState(false);
   const [syncTime, setSyncTime] = useState("Never synced");
   const lastSyncedRef = useRef<string | null>(null);
-  
+
   const router = useRouter();
   const searchParams = useSearchParams();
   const [showDatePicker, setShowDatePicker] = useState(false);
- 
+
+  // Xero connections and organisation switcher state
+  const [connections, setConnections] = useState<{ xeroTenantId: string; name: string }[]>([]);
+  const [activeXeroTenantId, setActiveXeroTenantId] = useState<string | null>(null);
+  const [activeOrgName, setActiveOrgName] = useState<string | null>(null);
+  const [showOrgSwitcher, setShowOrgSwitcher] = useState(false);
+  const [isSwitchingOrg, setIsSwitchingOrg] = useState(false);
+  const switcherRef = useRef<HTMLDivElement>(null);
+
+  // Close switcher when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (switcherRef.current && !switcherRef.current.contains(event.target as Node)) {
+        setShowOrgSwitcher(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   const fromDate = searchParams.get('from_date');
   const toDate = searchParams.get('to_date');
- 
+
   const formatDateLabel = (dStr: string) => {
     const d = new Date(dStr);
     return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   };
- 
+
   const dateRangeLabel = (fromDate && toDate)
     ? `${formatDateLabel(fromDate)} - ${formatDateLabel(toDate)}`
     : "Last 6 Months";
- 
+
   const updateUrl = (from: Date, to: Date) => {
     const fromStr = from.toISOString().slice(0, 10);
     const toStr = to.toISOString().slice(0, 10);
@@ -73,15 +93,63 @@ export function Header() {
       const res = await fetch('/api/xero');
       if (res.ok) {
         const data = await res.json();
-        if (data.connected && data.lastSyncedAt) {
-          lastSyncedRef.current = data.lastSyncedAt;
-          setSyncTime(formatTimeAgo(data.lastSyncedAt));
+        if (data.connected) {
+          setConnections(data.connections || []);
+          setActiveXeroTenantId(data.activeXeroTenantId || null);
+          setActiveOrgName(data.organisation || null);
+          
+          if (data.lastSyncedAt) {
+            lastSyncedRef.current = data.lastSyncedAt;
+            setSyncTime(formatTimeAgo(data.lastSyncedAt));
+          } else {
+            lastSyncedRef.current = null;
+            setSyncTime("Never synced");
+          }
         } else {
+          setConnections([]);
+          setActiveXeroTenantId(null);
+          setActiveOrgName(null);
           lastSyncedRef.current = null;
           setSyncTime("Never synced");
         }
       }
-    } catch (err) {}
+    } catch (err) { }
+  };
+
+  const handleSwitchOrg = async (id: string, name: string) => {
+    if (id === activeXeroTenantId) return;
+    setIsSwitchingOrg(true);
+    setShowOrgSwitcher(false);
+    toast.loading(`Switching organization to ${name}...`, { id: "switch-toast" });
+
+    try {
+      const res = await fetch('/api/xero', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ switchXeroTenantId: id, organisationName: name })
+      });
+
+      if (res.ok) {
+        toast.success(`Switched to ${name}! Clearing cache and fetching fresh data...`, { id: "switch-toast" });
+        setActiveXeroTenantId(id);
+        setActiveOrgName(name);
+        
+        // Dispatch event so other components know connection changed
+        window.dispatchEvent(new CustomEvent('xero-sync-complete'));
+        
+        // Trigger automatic sync for the new organization
+        await handleSync();
+        
+        // Refresh router/server page data
+        router.refresh();
+      } else {
+        toast.error("Failed to switch organization.", { id: "switch-toast" });
+      }
+    } catch (err) {
+      toast.error("Error switching organization.", { id: "switch-toast" });
+    } finally {
+      setIsSwitchingOrg(false);
+    }
   };
 
   useEffect(() => {
@@ -99,14 +167,14 @@ export function Header() {
       clearInterval(interval);
     };
   }, []);
-  
+
   // Custom headers based on route path
   const getHeaderInfo = () => {
     switch (pathname) {
       case '/overview':
       case '/':
         return {
-          title: "Xero Dashboard",
+          title: "Xero Analytics",
           subtitle: "Real-time overview of your Xero organization"
         };
       case '/sales':
@@ -176,7 +244,7 @@ export function Header() {
         };
       default:
         return {
-          title: "Xero Dashboard",
+          title: "Xero Analytics",
           subtitle: "Real-time overview of your Xero organization"
         };
     }
@@ -187,7 +255,7 @@ export function Header() {
   const handleSync = async () => {
     setIsSyncing(true);
     toast.loading("Syncing latest transactions from Xero...", { id: "sync-toast" });
-    
+
     try {
       const res = await fetch('/api/xero', { method: 'POST' });
       if (res.ok) {
@@ -201,6 +269,25 @@ export function Header() {
       toast.error("Error triggering Xero sync.", { id: "sync-toast" });
     } finally {
       setIsSyncing(false);
+    }
+  };
+
+  const handleClearCache = async () => {
+    setIsClearingCache(true);
+    toast.loading("Clearing dashboard caches...", { id: "cache-toast" });
+    try {
+      const res = await fetch('/api/xero/clear-cache', { method: 'POST' });
+      if (res.ok) {
+        toast.success("Cache cleared successfully! Pulling fresh data...", { id: "cache-toast" });
+        window.dispatchEvent(new CustomEvent('xero-sync-complete'));
+        router.refresh();
+      } else {
+        toast.error("Failed to clear cache.", { id: "cache-toast" });
+      }
+    } catch (err) {
+      toast.error("Error clearing cache.", { id: "cache-toast" });
+    } finally {
+      setIsClearingCache(false);
     }
   };
 
@@ -238,26 +325,74 @@ export function Header() {
 
       <div className="flex items-center gap-4">
         {/* Date Range Picker */}
-        <div className="relative">
-          <button 
-            onClick={() => setShowDatePicker(!showDatePicker)}
-            className="flex items-center gap-2.5 px-4 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700 shadow-2xs transition cursor-pointer outline-none h-9.5"
-          >
-            <span>{dateRangeLabel}</span>
-            <Calendar className="h-4 w-4 text-slate-450" />
-          </button>
- 
-          <DateRangePicker 
-            isOpen={showDatePicker} 
-            onClose={() => setShowDatePicker(false)} 
-            onApply={(start, end) => {
-              updateUrl(start, end);
-              setShowDatePicker(false);
-            }}
-            initialStart={fromDate || undefined}
-            initialEnd={toDate || undefined}
-          />
-        </div>
+        {!pathname.startsWith('/reports') && (
+          <div className="relative">
+            <button
+              onClick={() => setShowDatePicker(!showDatePicker)}
+              className="flex items-center gap-2.5 px-4 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700 shadow-2xs transition cursor-pointer outline-none h-9.5"
+            >
+              <span>{dateRangeLabel}</span>
+              <Calendar className="h-4 w-4 text-slate-450" />
+            </button>
+
+            <DateRangePicker
+              isOpen={showDatePicker}
+              onClose={() => setShowDatePicker(false)}
+              onApply={(start, end) => {
+                updateUrl(start, end);
+                setShowDatePicker(false);
+              }}
+              initialStart={fromDate || undefined}
+              initialEnd={toDate || undefined}
+            />
+          </div>
+        )}
+
+        {/* Organisation Switcher */}
+        {connections.length > 0 && (
+          <div className="relative" ref={switcherRef}>
+            <button
+              onClick={() => !isSwitchingOrg && setShowOrgSwitcher(!showOrgSwitcher)}
+              disabled={isSwitchingOrg}
+              className="flex items-center gap-2 px-3.5 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-bold text-slate-750 shadow-2xs transition cursor-pointer outline-none h-9.5 disabled:opacity-60"
+            >
+              {isSwitchingOrg ? (
+                <Loader2 className="h-3.5 w-3.5 text-slate-500 animate-spin" />
+              ) : (
+                <Building2 className="h-3.5 w-3.5 text-slate-450" />
+              )}
+              <span className="truncate max-w-[130px] font-bold text-slate-700">{activeOrgName || "Select Company"}</span>
+              {connections.length > 1 && <ChevronDown className="h-3.5 w-3.5 text-slate-400" />}
+            </button>
+
+            {showOrgSwitcher && connections.length > 1 && (
+              <div className="absolute right-0 mt-2 w-60 origin-top-right rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl ring-1 ring-black/5 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+                <div className="px-2.5 py-1.5 text-[9.5px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100 mb-1">
+                  Switch Organisation
+                </div>
+                <div className="space-y-0.5 max-h-60 overflow-y-auto">
+                  {connections.map((conn) => {
+                    const isActive = conn.xeroTenantId === activeXeroTenantId;
+                    return (
+                      <button
+                        key={conn.xeroTenantId}
+                        onClick={() => handleSwitchOrg(conn.xeroTenantId, conn.name)}
+                        className={`flex w-full items-center justify-between px-3 py-2 text-left text-xs rounded-lg transition-colors cursor-pointer outline-none ${
+                          isActive
+                            ? "bg-slate-50 font-bold text-slate-900"
+                            : "text-slate-600 hover:bg-slate-50/80 hover:text-slate-900"
+                        }`}
+                      >
+                        <span className="truncate pr-2">{conn.name}</span>
+                        {isActive && <Check className="h-3.5 w-3.5 text-blue-600" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* 1. Comparison dropdown for Sales dashboard */}
         {isSales && (
@@ -274,14 +409,26 @@ export function Header() {
         </div>
 
         {!isSales && (
-          <button
-            onClick={handleSync}
-            disabled={isSyncing}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-primary text-xs font-bold text-primary bg-white hover:bg-primary/5 active:bg-primary/10 transition disabled:opacity-50 cursor-pointer outline-none shadow-2xs h-9.5"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-            {pathname === '/data-sources' ? 'Sync All' : 'Sync Now'}
-          </button>
+          <>
+            <button
+              onClick={handleClearCache}
+              disabled={isClearingCache}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 text-xs font-bold text-slate-655 bg-white hover:bg-slate-50 transition disabled:opacity-55 cursor-pointer outline-none shadow-2xs h-9.5"
+              title="Clear local database cache"
+            >
+              <Trash2 className={`h-3.5 w-3.5 ${isClearingCache ? 'animate-pulse text-red-500' : 'text-slate-450'}`} />
+              <span>Clear Cache</span>
+            </button>
+
+            <button
+              onClick={handleSync}
+              disabled={isSyncing}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-primary text-xs font-bold text-primary bg-white hover:bg-primary/5 active:bg-primary/10 transition disabled:opacity-50 cursor-pointer outline-none shadow-2xs h-9.5"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+              {pathname === '/data-sources' ? 'Sync All' : 'Sync Now'}
+            </button>
+          </>
         )}
 
         {/* Funnel/Filter Icon for Sales dashboard */}

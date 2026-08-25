@@ -11,6 +11,14 @@ export async function GET(req: NextRequest) {
 
   try {
     const tokenInfo = await getXeroAccessToken(tenantId);
+    if (!tokenInfo) {
+      return NextResponse.json({
+        enabled: false,
+        totalCategories: 0,
+        totalOptions: 0,
+        categories: []
+      });
+    }
     let categories: any[] = [];
     let enabled = false;
 

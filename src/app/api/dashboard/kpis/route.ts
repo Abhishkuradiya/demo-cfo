@@ -20,6 +20,16 @@ export async function GET(req: NextRequest) {
 
   try {
     const tokenInfo = await getXeroAccessToken(tenantId);
+    if (!tokenInfo) {
+      return NextResponse.json({
+        workingCapital: { value: 0, trend: 0, history: [] },
+        overdueReceivables: { value: 0, percentage: 0, history: [] },
+        outstandingBills: { value: 0, percentage: 0, history: [] },
+        collectionRate: { value: 0, trend: 0, history: [] },
+        averageCollectionDays: { value: 0, difference: 0, history: [] },
+        averagePaymentDays: { value: 0, difference: 0, history: [] }
+      });
+    }
     const cachedInvoices = await db.getInvoices(tenantId);
     const cachedPayments = await db.getPayments(tenantId);
 
@@ -262,10 +272,10 @@ export async function GET(req: NextRequest) {
     // KPI 5: Average Collection Days (DSO)
     // ==================================================
     const dsoDaysList = getPaymentDiffDaysList('ACCREC', startDate, endDate);
-    const dsoValue = getAverage(dsoDaysList) || 34; // default matching the spec
+    const dsoValue = getAverage(dsoDaysList);
 
     const compDsoDaysList = getPaymentDiffDaysList('ACCREC', compStartDate, compEndDate);
-    const compDsoValue = getAverage(compDsoDaysList) || 38;
+    const compDsoValue = getAverage(compDsoDaysList);
     const dsoDifference = dsoValue - compDsoValue;
 
     // Last 6 Months DSO History
@@ -276,17 +286,17 @@ export async function GET(req: NextRequest) {
       const startM = new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0, 0);
       const endM = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999);
       const mDsoDaysList = getPaymentDiffDaysList('ACCREC', startM, endM);
-      dsoHistory.push(getAverage(mDsoDaysList) || dsoValue);
+      dsoHistory.push(getAverage(mDsoDaysList));
     }
 
     // ==================================================
     // KPI 6: Average Payment Days (DPO)
     // ==================================================
     const dpoDaysList = getPaymentDiffDaysList('ACCPAY', startDate, endDate);
-    const dpoValue = getAverage(dpoDaysList) || 28; // default matching the spec
+    const dpoValue = getAverage(dpoDaysList);
 
     const compDpoDaysList = getPaymentDiffDaysList('ACCPAY', compStartDate, compEndDate);
-    const compDpoValue = getAverage(compDpoDaysList) || 26;
+    const compDpoValue = getAverage(compDpoDaysList);
     const dpoDifference = dpoValue - compDpoValue;
 
     // Last 6 Months DPO History
@@ -297,7 +307,7 @@ export async function GET(req: NextRequest) {
       const startM = new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0, 0);
       const endM = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999);
       const mDpoDaysList = getPaymentDiffDaysList('ACCPAY', startM, endM);
-      dpoHistory.push(getAverage(mDpoDaysList) || dpoValue);
+      dpoHistory.push(getAverage(mDpoDaysList));
     }
 
     // ==================================================

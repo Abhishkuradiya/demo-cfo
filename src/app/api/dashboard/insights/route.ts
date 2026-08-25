@@ -88,8 +88,7 @@ export async function GET(req: NextRequest) {
     }
 
     // Dynamic cash balance days calculation (using total balance / avg daily burn rate)
-    // For demo/offline, default to 47 days
-    let cashDays = 47;
+    let cashDays = 0;
     const bankReport = await db.getReport(tenantId, 'BalanceSheet');
     if (bankReport) {
       // Logic to extract bank balance if report exists, else fallback
@@ -111,7 +110,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       revenueTrendPercent,
-      overdueCount: overdueCount || 12,
+      overdueCount: overdueCount,
       cashDays,
       expenseGrowthPercent,
       taxMonth: monthName,

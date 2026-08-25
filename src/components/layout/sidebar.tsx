@@ -31,6 +31,7 @@ interface MenuItem {
   icon: React.ComponentType<any>;
   badge?: string;
   hasDropdown?: boolean;
+  subItems?: { name: string; href: string }[];
 }
 
 export function Sidebar() {
@@ -48,7 +49,13 @@ export function Sidebar() {
       audioRef.current = audio;
     }
   }, []);
- 
+
+  useEffect(() => {
+    if (pathname.startsWith('/reports/') || pathname === '/overview') {
+      setExpandedMenus(prev => ({ ...prev, 'Xero Analytics': true }));
+    }
+  }, [pathname]);
+
   const playWoosh = () => {
     if (audioRef.current) {
       try {
@@ -64,13 +71,28 @@ export function Sidebar() {
 
   const menuItems: MenuItem[] = [
     { name: 'Overview', href: '/overview', icon: LayoutDashboard },
-    { name: 'Xero Dashboard', href: '/overview', icon: LayoutGrid, badge: 'New' },
+    { 
+      name: 'Xero Analytics', 
+      href: '/overview', 
+      icon: LayoutGrid, 
+      badge: 'New', 
+      hasDropdown: true,
+      subItems: [
+        { name: 'Xero Dashboard', href: '/overview' },
+        { name: 'Balance Sheet', href: '/reports/balance-sheet' },
+        { name: 'Profit & Loss', href: '/reports/profit-and-loss' },
+        { name: 'Cash Flow', href: '/reports/cash-flow' },
+        { name: 'Trial Balance', href: '/reports/trial-balance' },
+        { name: 'Budget vs Actual', href: '/reports/budget-actual' },
+        { name: 'Tax Center', href: '/reports/tax-center' },
+        { name: 'Contacts', href: '/customers' },
+        { name: 'Inventory', href: '/products' }
+      ]
+    },
     { name: 'Sales Dashboard', href: '/sales', icon: BarChart3 },
     { name: 'Purchases', href: '/revenue', icon: ShoppingBag, hasDropdown: true },
     { name: 'Banking', href: '/cash-flow', icon: Landmark, hasDropdown: true },
     { name: 'Accounting', href: '/reports', icon: BookOpen, hasDropdown: true },
-    { name: 'Contacts', href: '/customers', icon: Users, hasDropdown: true },
-    { name: 'Inventory', href: '/products', icon: Package, hasDropdown: true },
     { name: 'Reports', href: '/reports', icon: FileText, hasDropdown: true },
     { name: 'Analytics', href: '/revenue', icon: LineChart, hasDropdown: true },
     { name: 'Connectors', href: '/data-sources', icon: Database },
@@ -120,7 +142,11 @@ export function Sidebar() {
         {menuItems.map((item) => {
           const Icon = item.icon;
           // Exact match for active styling
-          const isActive = pathname === item.href && (item.name === 'Overview' ? pathname === '/overview' : true);
+          const isActive = item.name === 'Overview' 
+            ? (pathname === '/overview' && !expandedMenus['Xero Analytics'])
+            : item.name === 'Xero Analytics'
+              ? (pathname === '/overview' || pathname.startsWith('/reports/'))
+              : pathname === item.href;
  
           if (isCollapsed) {
             return (
@@ -196,28 +222,52 @@ export function Sidebar() {
               
               {/* Dropdown Menu Sub-items mock rendering for realism */}
               {item.hasDropdown && expandedMenus[item.name] && (
-                <div className="pl-11 pr-2 py-1 space-y-1 animate-in slide-in-from-top-1 duration-200">
-                  {item.name === 'Settings' ? (
-                    <>
-                      <Link href="/settings" className="block py-1.5 text-[12px] text-sidebar-foreground/60 hover:text-white transition">Dashboard</Link>
-                      <Link href="/settings/business-health-score" className="block py-1.5 text-[12px] text-[#00b7e2] hover:text-[#00c5f2] font-semibold transition">Business Health Score</Link>
-                      <Link href="/settings" className="block py-1.5 text-[12px] text-sidebar-foreground/60 hover:text-white transition">Detailed Transactions</Link>
-                      <Link href="/settings" className="block py-1.5 text-[12px] text-sidebar-foreground/60 hover:text-white transition">Analytics & Logs</Link>
-                    </>
-                  ) : (
-                    <>
-                      <Link href={item.href} className="block py-1.5 text-[12px] text-sidebar-foreground/60 hover:text-white transition">Dashboard</Link>
-                      <Link href={item.href} className="block py-1.5 text-[12px] text-sidebar-foreground/60 hover:text-white transition">Detailed Transactions</Link>
-                      <Link href={item.href} className="block py-1.5 text-[12px] text-sidebar-foreground/60 hover:text-white transition">Analytics & Logs</Link>
-                    </>
-                  )}
-                </div>
+                item.subItems ? (
+                  <div className="relative ml-8 pl-4 space-y-0.5 my-1 border-l border-slate-750/50 animate-in slide-in-from-top-1 duration-200">
+                    {item.subItems.map((sub) => {
+                      const isSubActive = pathname === sub.href;
+                      return (
+                        <div key={sub.name} className="relative flex items-center h-8">
+                          {/* Curved branch line */}
+                          <div className="absolute -left-4 top-[14px] w-4 h-4 border-l border-b border-slate-750/50 rounded-bl-lg pointer-events-none" />
+                          <Link
+                            href={sub.href}
+                            onClick={() => setOpenMobile(false)}
+                            className={cn(
+                              "text-[12.5px] pl-2 select-none truncate hover:text-white transition duration-150 outline-none w-full",
+                              isSubActive ? "text-[#00b7e2] font-semibold" : "text-sidebar-foreground/60"
+                            )}
+                          >
+                            {sub.name}
+                          </Link>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="pl-11 pr-2 py-1 space-y-1 animate-in slide-in-from-top-1 duration-200">
+                    {item.name === 'Settings' ? (
+                      <>
+                        <Link href="/settings" className="block py-1.5 text-[12px] text-sidebar-foreground/60 hover:text-white transition">Dashboard</Link>
+                        <Link href="/settings/business-health-score" className="block py-1.5 text-[12px] text-[#00b7e2] hover:text-[#00c5f2] font-semibold transition">Business Health Score</Link>
+                        <Link href="/settings" className="block py-1.5 text-[12px] text-sidebar-foreground/60 hover:text-white transition">Detailed Transactions</Link>
+                        <Link href="/settings" className="block py-1.5 text-[12px] text-sidebar-foreground/60 hover:text-white transition">Analytics & Logs</Link>
+                      </>
+                    ) : (
+                      <>
+                        <Link href={item.href} className="block py-1.5 text-[12px] text-sidebar-foreground/60 hover:text-white transition">Dashboard</Link>
+                        <Link href={item.href} className="block py-1.5 text-[12px] text-sidebar-foreground/60 hover:text-white transition">Detailed Transactions</Link>
+                        <Link href={item.href} className="block py-1.5 text-[12px] text-sidebar-foreground/60 hover:text-white transition">Analytics & Logs</Link>
+                      </>
+                    )}
+                  </div>
+                )
               )}
             </div>
           );
         })}
       </nav>
-
+ 
       {/* Footer Blocks (Connected, Plan & Support) */}
       {!isCollapsed && (
         <div className="p-4 space-y-3.5 border-t border-sidebar-border/30 bg-black/10 shrink-0">
@@ -231,7 +281,7 @@ export function Sidebar() {
               Manage Subscription
             </button>
           </div>
-
+ 
           {/* Help Block */}
           <Link href="/support" className="flex items-center gap-2.5 text-[12px] text-sidebar-foreground/70 hover:text-white transition py-1">
             <HelpCircle className="h-4 w-4 shrink-0 text-sidebar-foreground/50" />
@@ -239,7 +289,7 @@ export function Sidebar() {
           </Link>
         </div>
       )}
- 
+  
       {/* Dynamic Keyframe Injection */}
       <style dangerouslySetInnerHTML={{ __html: `
         @keyframes tooltipSwipe {
@@ -268,7 +318,7 @@ export function Sidebar() {
       )}>
         {sidebarContent}
       </aside>
-
+ 
       {/* Mobile Drawer */}
       {isOpenMobile ? (
         <div className="fixed inset-0 z-40 flex md:hidden">
