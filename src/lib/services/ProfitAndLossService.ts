@@ -32,11 +32,13 @@ export class ProfitAndLossService {
  
     // 1. Extract Revenue (Total Trading Income or Sales summary rows)
     const revenueVal = XeroReportParser.findRowValue(rows, [
+      'total turnover',
+      'turnover',
       'total trading income',
-      'total income',
-      'sales',
       'total revenue',
-      'revenue'
+      'sales',
+      'revenue',
+      'total income'
     ]);
     result.revenue = revenueVal !== null ? revenueVal : 0;
  

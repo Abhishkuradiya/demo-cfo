@@ -175,7 +175,7 @@ export async function GET(req: NextRequest) {
     // Direct Cost of Sales (COGS)
     const cogsSum = parsed.cogs.reduce((sum, item) => sum + item.value, 0);
 
-    const grossProfit = totalIncome - cogsSum;
+    const grossProfit = operatingIncomeSum - cogsSum;
 
     const operatingExpensesSum = parsed.expenses.operating.reduce((sum, item) => sum + item.value, 0);
     const otherExpensesSum = parsed.expenses.other.reduce((sum, item) => sum + item.value, 0);
@@ -184,7 +184,7 @@ export async function GET(req: NextRequest) {
     const netProfit = (grossProfit + otherIncomeSum) - totalExpenses;
 
     const profitMargin = totalIncome > 0 ? (netProfit / totalIncome) * 100 : 0;
-    const grossProfitMargin = totalIncome > 0 ? (grossProfit / totalIncome) * 100 : 0;
+    const grossProfitMargin = operatingIncomeSum > 0 ? (grossProfit / operatingIncomeSum) * 100 : 0;
 
     // Generate monthly trend
     const trends = [];
