@@ -93,39 +93,68 @@ function Sparkline({ dataPoints, color = "#0064eb" }: { dataPoints: number[], co
 function FormattedAmount({
   amount,
   currencyCode,
+  compact = false,
   className = "text-[20px] font-extrabold text-slate-800 leading-tight tracking-tight truncate select-all"
 }: {
   amount: number,
   currencyCode: string,
+  compact?: boolean,
   className?: string
 }) {
-  let formatted = "";
-  if (!currencyCode) {
-    formatted = new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
-  } else if (currencyCode === 'INR') {
-    formatted = '₹' + new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
-  } else if (currencyCode === 'USD') {
-    formatted = '$' + new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
-  } else if (currencyCode === 'GBP') {
-    formatted = '£' + new Intl.NumberFormat('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
-  } else if (currencyCode === 'EUR') {
-    formatted = '€' + new Intl.NumberFormat('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
+  const getSymbol = (code: string) => {
+    if (code === 'INR') return '₹';
+    if (code === 'USD') return '$';
+    if (code === 'GBP') return '£';
+    if (code === 'EUR') return '€';
+    return code ? code + ' ' : '';
+  };
+
+  const symbol = getSymbol(currencyCode);
+  const isNegative = amount < 0;
+  const absAmount = Math.abs(amount);
+
+  let mainPart = "";
+  let decimalPart = "";
+
+  if (compact && absAmount >= 1000) {
+    if (absAmount >= 1000000) {
+      const val = absAmount / 1000000;
+      const valStr = val.toFixed(2);
+      const parts = valStr.split('.');
+      mainPart = (isNegative ? '-' : '') + symbol + parts[0];
+      decimalPart = '.' + parts[1] + 'M';
+    } else {
+      const val = absAmount / 1000;
+      const valStr = val.toFixed(1);
+      const parts = valStr.split('.');
+      mainPart = (isNegative ? '-' : '') + symbol + parts[0];
+      decimalPart = '.' + parts[1] + 'K';
+    }
   } else {
-    formatted = currencyCode + ' ' + new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
+    let formattedNum = "";
+    if (currencyCode === 'INR') {
+      formattedNum = new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(absAmount);
+    } else if (currencyCode === 'EUR') {
+      formattedNum = new Intl.NumberFormat('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(absAmount);
+    } else {
+      formattedNum = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(absAmount);
+    }
+    const dotIndex = formattedNum.lastIndexOf('.');
+    if (dotIndex === -1) {
+      mainPart = (isNegative ? '-' : '') + symbol + formattedNum;
+      decimalPart = "";
+    } else {
+      mainPart = (isNegative ? '-' : '') + symbol + formattedNum.substring(0, dotIndex);
+      decimalPart = formattedNum.substring(dotIndex);
+    }
   }
-
-  const dotIndex = formatted.lastIndexOf('.');
-  if (dotIndex === -1) {
-    return <span className={className}>{formatted}</span>;
-  }
-
-  const mainPart = formatted.substring(0, dotIndex);
-  const decimalPart = formatted.substring(dotIndex);
 
   return (
     <span className={className}>
       <span>{mainPart}</span>
-      <span className="text-[0.75em] font-bold text-slate-400/70 tracking-normal">{decimalPart}</span>
+      {decimalPart && (
+        <span className="text-[0.75em] font-bold text-slate-400/70 tracking-normal">{decimalPart}</span>
+      )}
     </span>
   );
 }
@@ -837,7 +866,7 @@ export default function OverviewPage() {
                         </div>
 
                         <div className="flex-1 flex flex-col justify-center z-10 -mt-1">
-                          <FormattedAmount amount={data.revenueMTD || 0} currencyCode={data.currency} />
+                          <FormattedAmount amount={data.revenueMTD || 0} currencyCode={data.currency} compact={true} />
                           <p className="text-[11px] font-semibold mt-1 leading-none whitespace-nowrap">
                             <span className={card.changeClass}>{percentPart}</span>
                             <span className="text-slate-400">{labelPart}</span>
@@ -875,7 +904,7 @@ export default function OverviewPage() {
                         </div>
 
                         <div className="flex-1 flex flex-col justify-center z-10 -mt-1">
-                          <FormattedAmount amount={data.invoiceRevenueMTD || 0} currencyCode={data.currency} />
+                          <FormattedAmount amount={data.invoiceRevenueMTD || 0} currencyCode={data.currency} compact={true} />
                           <p className="text-[11px] font-semibold mt-1 leading-none whitespace-nowrap">
                             <span className={getGrowthDetails(data.invoiceGrowthPercent).className}>
                               {getGrowthDetails(data.invoiceGrowthPercent).text}
@@ -914,7 +943,7 @@ export default function OverviewPage() {
                   </div>
 
                   <div className="flex-1 flex flex-col justify-center z-10 -mt-1">
-                    <FormattedAmount amount={card.amount} currencyCode={card.currency} />
+                    <FormattedAmount amount={card.amount} currencyCode={card.currency} compact={true} />
                     <p className="text-[11px] font-semibold mt-1 leading-none whitespace-nowrap">
                       <span className={card.changeClass}>{percentPart}</span>
                       <span className="text-slate-400">{labelPart}</span>
