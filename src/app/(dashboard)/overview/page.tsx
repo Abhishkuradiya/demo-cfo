@@ -355,15 +355,6 @@ export default function OverviewPage() {
       if (res.ok) {
         const result = await res.json();
         setData(result);
-
-        // Auto-update browser URL with calculated fallback dates if no date parameter exists.
-        // This forces the date picker in the header to display the exact date range of the active data.
-        if (!fromDate && !toDate && result.startDate && result.endDate) {
-          const params = new URLSearchParams(window.location.search);
-          params.set('from_date', result.startDate);
-          params.set('to_date', result.endDate);
-          router.replace(`${window.location.pathname}?${params.toString()}`);
-        }
       }
     } catch (err) {
       console.error('Failed to fetch dashboard data:', err);
@@ -411,7 +402,8 @@ export default function OverviewPage() {
     return () => {
       window.removeEventListener('xero-sync-complete', handleSyncComplete);
     };
-  }, [searchParams]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Refs for ECharts initialization
   const revenueChartRef = useRef<HTMLDivElement>(null);
@@ -722,61 +714,82 @@ export default function OverviewPage() {
   // 3. Initialize Business Health Score Gauge (dynamic)
   useEffect(() => {
     if (!healthGaugeRef.current) return;
-    const chartInstance = echarts.init(healthGaugeRef.current);
 
-    const scoreValue = healthScore?.overallScore ?? 92;
-    const gaugeColor = scoreValue >= 85 ? '#22c55e' : scoreValue >= 70 ? '#f59e0b' : scoreValue >= 55 ? '#f97316' : '#ef4444';
+    // Delay init until DOM layout is fully stable (prevents 0-width canvas)
+    let disposed = false;
+    const timer = setTimeout(() => {
+      if (disposed || !healthGaugeRef.current) return;
 
-    const option = {
-      series: [
-        {
-          type: 'gauge',
-          startAngle: 180,
-          endAngle: 0,
-          min: 0,
-          max: 100,
-          radius: '85%',
-          center: ['50%', '85%'],
-          progress: {
-            show: true,
-            width: 9,
-            itemStyle: {
-              color: gaugeColor
-            }
-          },
-          axisLine: {
-            lineStyle: {
+      const chartInstance = echarts.init(healthGaugeRef.current);
+
+      const scoreValue = healthScore?.overallScore ?? 0;
+      const gaugeColor = scoreValue >= 85 ? '#22c55e' : scoreValue >= 70 ? '#f59e0b' : scoreValue >= 55 ? '#f97316' : '#ef4444';
+
+      const option = {
+        series: [
+          {
+            type: 'gauge',
+            startAngle: 180,
+            endAngle: 0,
+            min: 0,
+            max: 100,
+            radius: '85%',
+            center: ['50%', '85%'],
+            progress: {
+              show: true,
               width: 9,
-              color: [[1, '#f1f5f9']]
-            }
-          },
-          axisTick: { show: false },
-          splitLine: { show: false },
-          axisLabel: { show: false },
-          pointer: { show: false },
-          title: { show: false },
-          detail: {
-            valueAnimation: true,
-            offsetCenter: [0, -10],
-            fontSize: 32,
-            fontWeight: '850',
-            formatter: '{value}/100',
-            color: '#0f172a',
-            fontFamily: 'var(--font-sans), sans-serif'
-          },
-          data: [{ value: scoreValue }]
-        }
-      ]
-    };
+              itemStyle: {
+                color: gaugeColor
+              }
+            },
+            axisLine: {
+              lineStyle: {
+                width: 9,
+                color: [[1, '#f1f5f9']]
+              }
+            },
+            axisTick: { show: false },
+            splitLine: { show: false },
+            axisLabel: { show: false },
+            pointer: { show: false },
+            title: { show: false },
+            detail: {
+              valueAnimation: true,
+              offsetCenter: [0, -10],
+              fontSize: 32,
+              fontWeight: '850',
+              formatter: '{value}/100',
+              color: '#0f172a',
+              fontFamily: 'var(--font-sans), sans-serif'
+            },
+            data: [{ value: scoreValue }]
+          }
+        ]
+      };
 
-    chartInstance.setOption(option);
+      chartInstance.setOption(option);
 
-    const handleResize = () => chartInstance.resize();
-    window.addEventListener('resize', handleResize);
+      const handleResize = () => chartInstance.resize();
+      window.addEventListener('resize', handleResize);
+
+      // ResizeObserver ensures chart resizes when container dimensions change
+      const ro = new ResizeObserver(() => chartInstance.resize());
+      ro.observe(healthGaugeRef.current!);
+
+      // Store cleanup in outer scope
+      cleanupFn = () => {
+        window.removeEventListener('resize', handleResize);
+        ro.disconnect();
+        chartInstance.dispose();
+      };
+    }, 150);
+
+    let cleanupFn: (() => void) | null = null;
 
     return () => {
-      window.removeEventListener('resize', handleResize);
-      chartInstance.dispose();
+      disposed = true;
+      clearTimeout(timer);
+      cleanupFn?.();
     };
   }, [healthScore]);
 
