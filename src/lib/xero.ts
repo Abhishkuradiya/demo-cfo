@@ -73,7 +73,7 @@ export async function fetchXeroResource(accessToken: string, xeroTenantId: strin
  
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`Failed to fetch Xero resource [${resource}]: ${errText}`);
+    throw new Error(`Failed to fetch Xero resource [${resource}] (Status ${res.status}): ${errText}`);
   }
  
   const data = await res.json();
@@ -92,7 +92,7 @@ export async function fetchXeroReport(accessToken: string, xeroTenantId: string,
  
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`Failed to fetch Xero report [${reportPath}]: ${errText}`);
+    throw new Error(`Failed to fetch Xero report [${reportPath}] (Status ${res.status}): ${errText}`);
   }
  
   const data = await res.json();
