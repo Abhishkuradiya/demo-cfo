@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
       // Fetch active tenant name to display organisation
       const tenantsList = await db.getTenants();
       const activeTenant = tenantsList.find(t => t.id === tenantId);
-      const orgName = activeTenant ? activeTenant.name : 'Connected Organization';
+      let orgName = activeTenant ? activeTenant.name : 'Connected Organization';
  
       // Fetch all connected organisations from Xero
       let connections: any[] = [];
@@ -48,6 +48,15 @@ export async function GET(req: NextRequest) {
               xeroTenantId: c.tenantId,
               name: c.tenantName
             }));
+            
+          const matchedConn = connections.find(c => c.xeroTenantId === credentials.tenant_identifier);
+          if (matchedConn) {
+            orgName = matchedConn.name;
+            // Update PostgreSQL/JSON database tenant name to sync it if it currently differs
+            if (activeTenant && activeTenant.name !== orgName) {
+              await db.updateTenantName(tenantId, orgName);
+            }
+          }
         }
       } catch (err) {
         console.error('Failed to fetch Xero connections for switcher:', err);
@@ -57,6 +66,43 @@ export async function GET(req: NextRequest) {
         connections = [{ xeroTenantId: credentials.tenant_identifier, name: orgName }];
       }
 
+      const parseXeroDate = (dateVal: any) => {
+        if (!dateVal) return null;
+        if (dateVal instanceof Date) return dateVal;
+        if (typeof dateVal !== 'string') return new Date(dateVal);
+        const match = dateVal.match(/Date\((\d+)/);
+        return match ? new Date(parseInt(match[1])) : new Date(dateVal);
+      };
+
+      // Compute default start/end dates from invoices cache
+      const cachedInvoices = await db.getInvoices(tenantId);
+      let latestInvoiceDate: Date | null = null;
+      for (const inv of cachedInvoices) {
+        if (inv.Type !== 'ACCREC' || (inv.Status !== 'AUTHORISED' && inv.Status !== 'PAID')) continue;
+        const invDate = parseXeroDate(inv.Date);
+        if (invDate && (!latestInvoiceDate || invDate > latestInvoiceDate)) {
+          latestInvoiceDate = invDate;
+        }
+      }
+
+      let startDateStr = "";
+      let endDateStr = "";
+
+      if (latestInvoiceDate) {
+        const endYear = latestInvoiceDate.getFullYear();
+        const endMonth = latestInvoiceDate.getMonth();
+        const endDate = new Date(endYear, endMonth + 1, 0);
+        const startDate = new Date(endYear, endMonth - 5, 1);
+        startDateStr = startDate.toISOString().slice(0, 10);
+        endDateStr = endDate.toISOString().slice(0, 10);
+      } else {
+        const now = new Date();
+        const endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        const startDate = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+        startDateStr = startDate.toISOString().slice(0, 10);
+        endDateStr = endDate.toISOString().slice(0, 10);
+      }
+
       return NextResponse.json({
         connected: true,
         organisation: orgName,
@@ -64,6 +110,8 @@ export async function GET(req: NextRequest) {
         lastSyncedAt: credentials.last_synced_at || null,
         connections,
         activeXeroTenantId: credentials.tenant_identifier,
+        startDate: startDateStr,
+        endDate: endDateStr,
         ...counts
       });
     }

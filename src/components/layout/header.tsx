@@ -48,6 +48,10 @@ export function Header() {
   const [isSwitchingOrg, setIsSwitchingOrg] = useState(false);
   const switcherRef = useRef<HTMLDivElement>(null);
 
+  // Default computed date ranges from API fallback
+  const [defaultStart, setDefaultStart] = useState<string | null>(null);
+  const [defaultEnd, setDefaultEnd] = useState<string | null>(null);
+
   // Close switcher when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -67,8 +71,11 @@ export function Header() {
     return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   };
 
-  const dateRangeLabel = (fromDate && toDate)
-    ? `${formatDateLabel(fromDate)} - ${formatDateLabel(toDate)}`
+  const activeStart = fromDate || defaultStart;
+  const activeEnd = toDate || defaultEnd;
+
+  const dateRangeLabel = (activeStart && activeEnd)
+    ? `${formatDateLabel(activeStart)} - ${formatDateLabel(activeEnd)}`
     : "Last 6 Months";
 
   const updateUrl = (from: Date, to: Date) => {
@@ -98,6 +105,9 @@ export function Header() {
           setActiveXeroTenantId(data.activeXeroTenantId || null);
           setActiveOrgName(data.organisation || null);
           
+          setDefaultStart(data.startDate || null);
+          setDefaultEnd(data.endDate || null);
+          
           if (data.lastSyncedAt) {
             lastSyncedRef.current = data.lastSyncedAt;
             setSyncTime(formatTimeAgo(data.lastSyncedAt));
@@ -109,6 +119,8 @@ export function Header() {
           setConnections([]);
           setActiveXeroTenantId(null);
           setActiveOrgName(null);
+          setDefaultStart(null);
+          setDefaultEnd(null);
           lastSyncedRef.current = null;
           setSyncTime("Never synced");
         }
@@ -342,8 +354,8 @@ export function Header() {
                 updateUrl(start, end);
                 setShowDatePicker(false);
               }}
-              initialStart={fromDate || undefined}
-              initialEnd={toDate || undefined}
+              initialStart={fromDate || defaultStart || undefined}
+              initialEnd={toDate || defaultEnd || undefined}
             />
           </div>
         )}
