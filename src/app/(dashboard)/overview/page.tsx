@@ -1193,56 +1193,58 @@ export default function OverviewPage() {
                 <button className="text-slate-400 hover:text-slate-700 outline-none"><MoreVertical className="h-4 w-4" /></button>
               </div>
 
-              {healthScore ? (
-                <>
-                  <div className="relative flex flex-col items-center justify-center flex-1 min-h-[125px]">
-                    <div ref={healthGaugeRef} className="w-full h-28" />
-                    <div className="text-center mt-1">
-                      <span className={cn(
-                        "text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider border",
-                        healthScore.label === 'EXCELLENT' || healthScore.label === 'GOOD' ? 'bg-emerald-50 border-emerald-100 text-emerald-600' :
-                        healthScore.label === 'FAIR' ? 'bg-amber-50 border-amber-100 text-amber-600' :
-                        healthScore.label === 'WARNING' ? 'bg-orange-50 border-orange-100 text-orange-600' :
-                        healthScore.label === 'OFFLINE' || healthScore.label === 'DISCONNECTED' ? 'bg-slate-55 border-slate-200 text-slate-500' :
-                        'bg-red-50 border-red-100 text-red-600'
-                      )}>{healthScore.label}</span>
-                      <p className="text-[11px] text-slate-500 font-medium mt-1.5 leading-normal">{healthScore.description}</p>
-                    </div>
+              <div className="relative flex flex-col items-center justify-center flex-1 min-h-[125px]">
+                {/* Single stable gauge canvas node to prevent DOM swapping and rendering size glitches */}
+                <div ref={healthGaugeRef} className={cn("w-full h-28", !healthScore && "opacity-30")} />
+                
+                {healthScore ? (
+                  <div className="text-center mt-1">
+                    <span className={cn(
+                      "text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider border",
+                      healthScore.label === 'EXCELLENT' || healthScore.label === 'GOOD' ? 'bg-emerald-50 border-emerald-100 text-emerald-600' :
+                      healthScore.label === 'FAIR' ? 'bg-amber-50 border-amber-100 text-amber-600' :
+                      healthScore.label === 'WARNING' ? 'bg-orange-50 border-orange-100 text-orange-600' :
+                      healthScore.label === 'OFFLINE' || healthScore.label === 'DISCONNECTED' ? 'bg-slate-55 border-slate-200 text-slate-500' :
+                      'bg-red-50 border-red-100 text-red-600'
+                    )}>{healthScore.label}</span>
+                    <p className="text-[11px] text-slate-500 font-medium mt-1.5 leading-normal">{healthScore.description}</p>
                   </div>
+                ) : (
+                  <div className="text-center mt-1">
+                    <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider border bg-slate-50 border-slate-200 text-slate-400">Loading</span>
+                    <p className="text-[11px] text-slate-400 font-medium mt-1.5 leading-normal">Calculating health score...</p>
+                  </div>
+                )}
+              </div>
 
-                  {/* KPI progress bars - Dynamic from API */}
-                  <div className="space-y-2 mt-3 pt-3 border-t border-slate-50 shrink-0">
-                    {healthScore.metrics.map((kpi, index) => (
-                      <div key={index} className="space-y-1">
-                        <div className="flex items-center justify-between text-[10.5px] font-semibold text-slate-500">
-                          <span>{kpi.name}</span>
-                          <span className="text-slate-700 font-bold">{kpi.score}/100</span>
-                        </div>
-                        <div className="h-1.5 w-full bg-slate-50 rounded-full overflow-hidden border border-slate-100">
-                          <div className="h-full rounded-full transition-all duration-700 ease-out" style={{ width: `${kpi.score}%`, backgroundColor: kpi.color }} />
-                        </div>
+              {/* KPI progress bars */}
+              <div className="space-y-2 mt-3 pt-3 border-t border-slate-50 shrink-0">
+                {healthScore ? (
+                  healthScore.metrics.map((kpi, index) => (
+                    <div key={index} className="space-y-1">
+                      <div className="flex items-center justify-between text-[10.5px] font-semibold text-slate-500">
+                        <span>{kpi.name}</span>
+                        <span className="text-slate-700 font-bold">{kpi.score}/100</span>
                       </div>
-                    ))}
-                  </div>
-                </>
-              ) : (
-                <div className="flex-1 flex flex-col items-center justify-center min-h-[125px] py-4">
-                  <div ref={healthGaugeRef} className="w-full h-28 opacity-30" />
-                  <div className="space-y-2 mt-6 w-full pt-3 border-t border-slate-50">
-                    {['Profitability', 'Liquidity', 'Efficiency', 'Solvency', 'Growth'].map((name) => (
-                      <div key={name} className="space-y-1">
-                        <div className="flex items-center justify-between text-[10.5px] font-semibold text-slate-500">
-                          <span>{name}</span>
-                          <span className="text-slate-300 font-bold">—</span>
-                        </div>
-                        <div className="h-1.5 w-full bg-slate-50 rounded-full overflow-hidden border border-slate-100">
-                          <div className="h-full rounded-full bg-slate-100 animate-pulse" style={{ width: '30%' }} />
-                        </div>
+                      <div className="h-1.5 w-full bg-slate-50 rounded-full overflow-hidden border border-slate-100">
+                        <div className="h-full rounded-full transition-all duration-700 ease-out" style={{ width: `${kpi.score}%`, backgroundColor: kpi.color }} />
                       </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+                    </div>
+                  ))
+                ) : (
+                  ['Profitability', 'Liquidity', 'Efficiency', 'Solvency', 'Growth'].map((name) => (
+                    <div key={name} className="space-y-1">
+                      <div className="flex items-center justify-between text-[10.5px] font-semibold text-slate-500">
+                        <span>{name}</span>
+                        <span className="text-slate-300 font-bold">—</span>
+                      </div>
+                      <div className="h-1.5 w-full bg-slate-50 rounded-full overflow-hidden border border-slate-100">
+                        <div className="h-full rounded-full bg-slate-100 animate-pulse" style={{ width: '30%' }} />
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
 
             {/* Alerts & Notifications with structured rows */}
