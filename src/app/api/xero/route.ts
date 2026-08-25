@@ -4,6 +4,7 @@ import { fetchXeroResource, fetchXeroReport, refreshXeroToken } from '@/lib/xero
 import { getTenantIdFromSession } from '@/lib/auth';
 import { XeroFixedAssetsService } from '@/lib/fixedAssetsService';
 import { XeroGeneralLedgerService } from '@/lib/generalLedgerService';
+import { TaxSyncService } from '@/lib/services/TaxSyncService';
  
 // GET retrieves Xero connection status and dynamic record counts for a tenant
 export async function GET(req: NextRequest) {
@@ -205,6 +206,8 @@ export async function POST(req: NextRequest) {
       let hasMore = true;
       while (hasMore && page <= 100) { // Limit to 100 pages max to prevent infinite loop
         try {
+          // Pause 250ms to stay within Xero's 5 requests/sec rate limits
+          await new Promise(resolve => setTimeout(resolve, 250));
           const pageData = await fetchXeroResource(
             accessToken, 
             xeroTenantId, 
@@ -270,6 +273,8 @@ export async function POST(req: NextRequest) {
       let hasMore = true;
       while (hasMore && page <= 10) {
         try {
+          // Pause 250ms to stay within Xero's 5 requests/sec rate limits
+          await new Promise(resolve => setTimeout(resolve, 250));
           const pageData = await fetchXeroResource(accessToken, xeroTenantId, 'CreditNotes', `page=${page}`);
           if (pageData && pageData.length > 0) {
             allCreditNotes.push(...pageData);
@@ -301,7 +306,6 @@ export async function POST(req: NextRequest) {
 
     // Trigger normalization/sync of tax transactions
     try {
-      const { TaxSyncService } = require('@/lib/services/TaxSyncService');
       await TaxSyncService.syncTaxTransactions(tenantId);
     } catch (e) {
       console.error('Failed to process TaxSyncService:', e);

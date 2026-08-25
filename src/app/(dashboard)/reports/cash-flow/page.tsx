@@ -47,8 +47,17 @@ interface CFData {
   connected: boolean;
   summary: {
     operating: number;
+    operatingChange: number;
+    operatingReceipts: number;
+    operatingPayments: number;
     investing: number;
+    investingChange: number;
+    investingReceipts: number;
+    investingPayments: number;
     financing: number;
+    financingChange: number;
+    financingReceipts: number;
+    financingPayments: number;
     cashIn: number;
     cashOut: number;
     cashInCount: number;
@@ -59,24 +68,31 @@ interface CFData {
     changePercentage: number;
   };
   history: CFHistoryItem[];
+  bankAccounts?: {
+    name: string;
+    opening: number;
+    cashIn: number;
+    cashOut: number;
+    closing: number;
+  }[];
   meta: {
     currency: string;
     calculatedAt: string;
   };
 }
 
-function Tooltip({ text }: { text: string }) {
+function Tooltip({ text }: { text: React.ReactNode }) {
   const [visible, setVisible] = useState(false);
   return (
     <div className="relative inline-flex items-center ml-1 select-none">
       <HelpCircle
-        className="h-3.5 w-3.5 text-slate-400 hover:text-slate-600 cursor-help transition-colors"
+        className="h-3.5 w-3.5 text-slate-450 hover:text-slate-600 cursor-help transition-colors"
         onMouseEnter={() => setVisible(true)}
         onMouseLeave={() => setVisible(false)}
       />
       {visible && (
-        <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-48 bg-slate-900 text-white text-[9px] p-2 rounded shadow-md z-50 pointer-events-none text-center leading-normal font-sans font-bold normal-case tracking-normal">
-          {text}
+        <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2.5 w-64 bg-slate-900 text-white text-[10px] p-3 rounded-lg shadow-xl z-50 pointer-events-none text-left leading-normal font-sans font-medium normal-case tracking-normal border border-slate-850">
+          <div className="space-y-1">{text}</div>
           <div className="absolute top-full left-1/2 transform -translate-x-1/2 -mt-1 border-4 border-transparent border-t-slate-900" />
         </div>
       )}
@@ -391,16 +407,50 @@ export default function CashFlowPage() {
         <>
           {/* Key Metric Cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 select-none">
-            <div className="bg-white rounded-xl border border-slate-200 p-4.5 shadow-sm flex items-center justify-between">
+            <div className="bg-white rounded-xl border border-slate-200 p-4.5 shadow-sm flex items-center justify-between hover:shadow-md hover:-translate-y-1 transition-all duration-300">
               <div className="space-y-2.5">
                 <div className="flex items-center gap-1">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Operating Cash Flow</span>
-                  <Tooltip text="Operating: Receipts from customers ($14,385.29) minus supplier and operational payments ($14,625.61)." />
+                  <Tooltip text={
+                    <div className="space-y-1.5 font-sans">
+                      <div className="font-bold border-b border-slate-700 pb-1 mb-1.5 text-[10.5px]">Xero Bank Accounts Flow</div>
+                      {data.bankAccounts && data.bankAccounts.length > 0 ? (
+                        <>
+                          <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Cash Received:</div>
+                          <div className="space-y-0.5 border-b border-slate-800 pb-1.5 mb-1.5">
+                            {data.bankAccounts.map((acc, index) => (
+                              <div key={`in-${index}`} className="flex justify-between gap-4">
+                                <span className="text-slate-300 truncate max-w-[130px]">{acc.name}</span>
+                                <span className="font-bold text-emerald-450">{currencySymbol}{acc.cashIn.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Cash Spent:</div>
+                          <div className="space-y-0.5">
+                            {data.bankAccounts.map((acc, index) => (
+                              <div key={`out-${index}`} className="flex justify-between gap-4">
+                                <span className="text-slate-300 truncate max-w-[130px]">{acc.name}</span>
+                                <span className="font-bold text-red-450">{currencySymbol}{acc.cashOut.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </>
+                      ) : (
+                        <div>Operating: Receipts from customers minus supplier and operational payments.</div>
+                      )}
+                    </div>
+                  } />
                 </div>
                 <h3 className="text-xl font-extrabold text-slate-805 tracking-tight">{formatAmount(data.summary.operating)}</h3>
-                <span className="text-[9.5px] font-bold text-emerald-600 flex items-center gap-1">
-                  <TrendingUp className="h-3 w-3" />
-                  <span>32.5% vs previous period</span>
+                <span className={cn(
+                  "text-[9.5px] font-bold flex items-center gap-1",
+                  data.summary.operatingChange >= 0 ? "text-emerald-600" : "text-red-500"
+                )}>
+                  {data.summary.operatingChange >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+                  <span>
+                    {data.summary.operatingChange >= 0 ? '+' : ''}
+                    {data.summary.operatingChange.toFixed(1)}% vs previous period
+                  </span>
                 </span>
               </div>
               <div className="h-10 w-10 rounded-xl bg-emerald-50 text-emerald-500 border border-emerald-100/50 flex items-center justify-center">
@@ -408,16 +458,22 @@ export default function CashFlowPage() {
               </div>
             </div>
 
-            <div className="bg-white rounded-xl border border-slate-200 p-4.5 shadow-sm flex items-center justify-between">
+            <div className="bg-white rounded-xl border border-slate-200 p-4.5 shadow-sm flex items-center justify-between hover:shadow-md hover:-translate-y-1 transition-all duration-300">
               <div className="space-y-2.5">
                 <div className="flex items-center gap-1">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Investing Cash Flow</span>
-                  <Tooltip text="Investing: Asset purchases (like equipment from PC Complete or ABC Furniture, totaling -$2,953.37)." />
+                  <Tooltip text={`Investing: Asset purchases (${formatAmount(data.summary.investingPayments)}) and asset sales/receipts (${formatAmount(data.summary.investingReceipts)}).`} />
                 </div>
                 <h3 className="text-xl font-extrabold text-slate-805 tracking-tight">{formatAmount(data.summary.investing)}</h3>
-                <span className="text-[9.5px] font-bold text-red-500 flex items-center gap-1">
-                  <TrendingDown className="h-3 w-3" />
-                  <span>-12.4% vs previous period</span>
+                <span className={cn(
+                  "text-[9.5px] font-bold flex items-center gap-1",
+                  data.summary.investingChange >= 0 ? "text-emerald-600" : "text-red-500"
+                )}>
+                  {data.summary.investingChange >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+                  <span>
+                    {data.summary.investingChange >= 0 ? '+' : ''}
+                    {data.summary.investingChange.toFixed(1)}% vs previous period
+                  </span>
                 </span>
               </div>
               <div className="h-10 w-10 rounded-xl bg-purple-50 text-purple-500 border border-purple-100/50 flex items-center justify-center">
@@ -425,16 +481,22 @@ export default function CashFlowPage() {
               </div>
             </div>
 
-            <div className="bg-white rounded-xl border border-slate-200 p-4.5 shadow-sm flex items-center justify-between">
+            <div className="bg-white rounded-xl border border-slate-200 p-4.5 shadow-sm flex items-center justify-between hover:shadow-md hover:-translate-y-1 transition-all duration-300">
               <div className="space-y-2.5">
                 <div className="flex items-center gap-1">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Financing Cash Flow</span>
-                  <Tooltip text="Financing: Capital borrowings (Bank West loan $1,299.00) minus vehicle/liability payments (Gateway Motors -$411.35)." />
+                  <Tooltip text={`Financing: Capital borrowings (${formatAmount(data.summary.financingReceipts)}) minus vehicle/liability payments (${formatAmount(data.summary.financingPayments)}).`} />
                 </div>
                 <h3 className="text-xl font-extrabold text-slate-855 tracking-tight">{formatAmount(data.summary.financing)}</h3>
-                <span className="text-[9.5px] font-bold text-red-500 flex items-center gap-1">
-                  <TrendingDown className="h-3 w-3" />
-                  <span>-8.7% vs previous period</span>
+                <span className={cn(
+                  "text-[9.5px] font-bold flex items-center gap-1",
+                  data.summary.financingChange >= 0 ? "text-emerald-600" : "text-red-500"
+                )}>
+                  {data.summary.financingChange >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+                  <span>
+                    {data.summary.financingChange >= 0 ? '+' : ''}
+                    {data.summary.financingChange.toFixed(1)}% vs previous period
+                  </span>
                 </span>
               </div>
               <div className="h-10 w-10 rounded-xl bg-red-50 text-red-500 border border-red-100/50 flex items-center justify-center">

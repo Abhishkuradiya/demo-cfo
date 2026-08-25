@@ -31,6 +31,25 @@ import {
   ArrowUpRight,
   ArrowDownRight
 } from 'lucide-react';
+
+function Tooltip({ text }: { text: string }) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <div className="relative inline-flex items-center ml-1 select-none">
+      <HelpCircle
+        className="h-3.5 w-3.5 text-slate-400 hover:text-slate-600 cursor-help transition-colors"
+        onMouseEnter={() => setVisible(true)}
+        onMouseLeave={() => setVisible(false)}
+      />
+      {visible && (
+        <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-48 bg-slate-900 text-white text-[9px] p-2 rounded shadow-md z-50 pointer-events-none text-center leading-normal font-sans font-bold normal-case tracking-normal">
+          {text}
+          <div className="absolute top-full left-1/2 transform -translate-x-1/2 -mt-1 border-4 border-transparent border-t-slate-900" />
+        </div>
+      )}
+    </div>
+  );
+}
 import { cn } from '@/lib/utils';
 import { PageContainer } from '@/components/common/page-container';
 
@@ -392,10 +411,13 @@ export default function ContactsPage() {
         <>
           {/* Cards metrics Row */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 select-none">
-            <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-sm space-y-3.5 hover:shadow-md transition">
+            <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-sm space-y-3.5 hover:shadow-md hover:-translate-y-1 transition-all duration-300">
               <div className="flex items-center justify-between">
                 <div className="space-y-1">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Customers</span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Customers</span>
+                    <Tooltip text="Total contacts flagged as Customers in Xero with active invoices or receivable balances." />
+                  </div>
                   <h3 className="text-xl font-extrabold text-slate-800 tracking-tight">{data.summary.customers}</h3>
                   <span className="text-[9.5px] font-semibold text-slate-450">Active customers</span>
                 </div>
@@ -413,10 +435,13 @@ export default function ContactsPage() {
               </div>
             </div>
 
-            <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-sm space-y-3.5 hover:shadow-md transition">
+            <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-sm space-y-3.5 hover:shadow-md hover:-translate-y-1 transition-all duration-300">
               <div className="flex items-center justify-between">
                 <div className="space-y-1">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Suppliers</span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Suppliers</span>
+                    <Tooltip text="Total contacts flagged as Suppliers in Xero with active bills or payable balances." />
+                  </div>
                   <h3 className="text-xl font-extrabold text-slate-800 tracking-tight">{data.summary.suppliers}</h3>
                   <span className="text-[9.5px] font-semibold text-slate-450">Active suppliers</span>
                 </div>
@@ -434,10 +459,13 @@ export default function ContactsPage() {
               </div>
             </div>
 
-            <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-sm space-y-3.5 hover:shadow-md transition">
+            <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-sm space-y-3.5 hover:shadow-md hover:-translate-y-1 transition-all duration-300">
               <div className="flex items-center justify-between">
                 <div className="space-y-1">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Outstanding</span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Outstanding</span>
+                    <Tooltip text="Combined outstanding volume: Accounts Receivable (owed by customers) + Accounts Payable (owed to suppliers). This shows total pending invoice/bill activity." />
+                  </div>
                   <h3 className="text-xl font-extrabold text-slate-800 tracking-tight">{formatAmount(data.summary.totalOutstanding)}</h3>
                   <span className="text-[9.5px] font-semibold text-slate-450">Across all customers & suppliers</span>
                 </div>
@@ -529,8 +557,11 @@ export default function ContactsPage() {
                         </td>
                         <td className="py-3.5 px-3 text-slate-500 font-medium truncate max-w-[140px]">{c.email}</td>
                         <td className="py-3.5 px-3 text-slate-500 font-medium font-mono">{c.phone}</td>
-                        <td className={cn("py-3.5 px-3 text-right font-bold font-mono", c.outstanding >= 0 ? "text-purple-600" : "text-red-550")}>
-                          {formatAmount(c.outstanding)}
+                        <td className={cn(
+                          "py-3.5 px-3 text-right font-bold font-mono", 
+                          c.type === 'Customer' ? "text-purple-600" : "text-red-550"
+                        )}>
+                          {formatAmount(Math.abs(c.outstanding))}
                         </td>
                         <td className="py-3.5 px-3 text-center text-slate-400 hover:text-slate-600 transition cursor-pointer">
                           <MoreVertical className="h-4 w-4 mx-auto" />
@@ -661,7 +692,7 @@ export default function ContactsPage() {
                     <div key={idx} className="space-y-1.5">
                       <div className="flex justify-between items-center">
                         <div className="flex items-center gap-2"><span className="h-5 w-5 rounded-full bg-slate-100 font-extrabold text-[10px] text-slate-500 flex items-center justify-center">{idx + 1}</span><span className="text-slate-805 font-bold truncate max-w-[120px]">{c.name}</span></div>
-                        <span className="text-red-550 font-bold font-mono">{formatAmount(c.outstanding)}</span>
+                        <span className="text-red-550 font-bold font-mono">{formatAmount(Math.abs(c.outstanding))}</span>
                       </div>
                       <div className="h-1 bg-slate-100 rounded-full overflow-hidden">
                         <div className="h-full bg-red-550 rounded-full" style={{ width: `${Math.min(100, Math.round((Math.abs(c.outstanding) / data.summary.apTotal) * 100))}%` }} />

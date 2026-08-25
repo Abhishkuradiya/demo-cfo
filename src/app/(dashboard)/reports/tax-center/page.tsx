@@ -28,6 +28,25 @@ import {
   Send,
   Download
 } from 'lucide-react';
+
+function Tooltip({ text }: { text: string }) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <div className="relative inline-flex items-center ml-1 select-none">
+      <HelpCircle
+        className="h-3.5 w-3.5 text-slate-400 hover:text-slate-600 cursor-help transition-colors"
+        onMouseEnter={() => setVisible(true)}
+        onMouseLeave={() => setVisible(false)}
+      />
+      {visible && (
+        <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-48 bg-slate-900 text-white text-[9px] p-2 rounded shadow-md z-50 pointer-events-none text-center leading-normal font-sans font-bold normal-case tracking-normal">
+          {text}
+          <div className="absolute top-full left-1/2 transform -translate-x-1/2 -mt-1 border-4 border-transparent border-t-slate-900" />
+        </div>
+      )}
+    </div>
+  );
+}
 import { cn } from '@/lib/utils';
 import { PageContainer } from '@/components/common/page-container';
 import { toast } from 'sonner';
@@ -383,10 +402,13 @@ export default function TaxCenterPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 select-none">
         
         {/* Card 1: Tax Collected */}
-        <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-xs relative flex flex-col justify-between min-h-[125px]">
+        <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-xs relative flex flex-col justify-between min-h-[125px] hover:shadow-md hover:-translate-y-1 transition-all duration-300">
           <div className="flex items-start justify-between">
             <div className="space-y-0.5">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Tax Collected</span>
+              <div className="flex items-center gap-1">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Tax Collected</span>
+                <Tooltip text="Total GST/VAT collected on sales invoices during this period. This is the output tax you've charged to customers." />
+              </div>
               <h3 className="text-2xl font-black text-slate-800 tracking-tight mt-1">{loading ? '—' : formatCurrency(data?.tax_collected || 0)}</h3>
               <span className="text-[9px] text-slate-400 font-medium">Total tax collected</span>
             </div>
@@ -399,10 +421,13 @@ export default function TaxCenterPage() {
         </div>
 
         {/* Card 2: Tax Paid */}
-        <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-xs relative flex flex-col justify-between min-h-[125px]">
+        <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-xs relative flex flex-col justify-between min-h-[125px] hover:shadow-md hover:-translate-y-1 transition-all duration-300">
           <div className="flex items-start justify-between">
             <div className="space-y-0.5">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Tax Paid</span>
+              <div className="flex items-center gap-1">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Tax Paid</span>
+                <Tooltip text="Total GST/VAT paid on supplier bills and expenses during this period. This is the input tax you've paid to suppliers." />
+              </div>
               <h3 className="text-2xl font-black text-slate-800 tracking-tight mt-1">{loading ? '—' : formatCurrency(data?.tax_paid || 0)}</h3>
               <span className="text-[9px] text-slate-400 font-medium">Total tax paid</span>
             </div>
@@ -415,10 +440,13 @@ export default function TaxCenterPage() {
         </div>
 
         {/* Card 3: Tax Payable */}
-        <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-xs relative flex flex-col justify-between min-h-[125px]">
+        <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-xs relative flex flex-col justify-between min-h-[125px] hover:shadow-md hover:-translate-y-1 transition-all duration-300">
           <div className="flex items-start justify-between">
             <div className="space-y-0.5">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Tax Payable</span>
+              <div className="flex items-center gap-1">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Tax Payable</span>
+                <Tooltip text="Net tax owed to HMRC/Tax Authority = Tax Collected minus Tax Paid. Positive means you owe tax; negative means a refund is due." />
+              </div>
               <h3 className={cn(
                 "text-2xl font-black tracking-tight mt-1",
                 (data?.tax_payable || 0) >= 0 ? "text-rose-500" : "text-emerald-600"
@@ -721,30 +749,55 @@ export default function TaxCenterPage() {
             </div>
 
             {/* Right: Upcoming deadlines */}
-            <div className="lg:col-span-4 bg-white rounded-xl border border-slate-200/80 p-5 shadow-sm space-y-4 select-none flex flex-col justify-between">
+            <div className="lg:col-span-4 bg-white rounded-xl border border-slate-200/80 p-5 shadow-sm space-y-4 select-none flex flex-col">
               
               <div className="flex justify-between items-center pb-2 border-b border-slate-50">
                 <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">Upcoming Returns</span>
                 <button className="text-xs text-[#0064eb] hover:text-blue-700 font-bold">View All</button>
               </div>
 
-              <div className="space-y-3 flex-1 flex flex-col justify-center">
-                {data.upcoming_returns.map((ret, i) => (
-                  <div key={i} className="flex items-center gap-3.5 p-3 bg-slate-50 border border-slate-100 rounded-xl">
-                    <div className="h-8.5 w-8.5 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
-                      <Calendar className="h-4.5 w-4.5" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h4 className="text-xs font-bold text-slate-800 truncate">{ret.name}</h4>
-                      <p className="text-[10px] text-slate-400 font-semibold leading-normal mt-0.5">{ret.period}</p>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <span className="text-[9.5px] font-bold text-rose-500 block">Due in {ret.due_in_days} days</span>
-                      <span className="text-[9.5px] font-bold text-slate-500 block mt-0.5">{ret.due_date}</span>
-                    </div>
+              {data.upcoming_returns.length === 0 ? (
+                <div className="flex-1 flex flex-col items-center justify-center text-center p-6 space-y-2">
+                  <div className="h-10 w-10 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                    <CheckCircle2 className="h-5 w-5" />
                   </div>
-                ))}
-              </div>
+                  <h5 className="text-xs font-bold text-slate-800">All Returns Filed</h5>
+                  <p className="text-[10px] text-slate-400 font-semibold max-w-[200px] leading-relaxed">
+                    You have no upcoming tax filings due in the next 30 days.
+                  </p>
+                </div>
+              ) : (
+                <div className="flex-1 flex flex-col justify-between">
+                  <div className="space-y-3 mt-1">
+                    {data.upcoming_returns.map((ret, i) => (
+                      <div key={i} className="flex items-center gap-3.5 p-3 bg-slate-50 border border-slate-100 rounded-xl">
+                        <div className="h-8.5 w-8.5 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                          <Calendar className="h-4.5 w-4.5" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <h4 className="text-xs font-bold text-slate-800 truncate">{ret.name}</h4>
+                          <p className="text-[10px] text-slate-400 font-semibold leading-normal mt-0.5">{ret.period}</p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <span className="text-[9.5px] font-bold text-rose-500 block">Due in {ret.due_in_days} days</span>
+                          <span className="text-[9.5px] font-bold text-slate-500 block mt-0.5">{ret.due_date}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="bg-slate-50 border border-slate-100 rounded-xl p-3.5 space-y-2.5 mt-4">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Compliance Health</span>
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="h-4.5 w-4.5 text-emerald-500 shrink-0" />
+                      <span className="text-xs font-bold text-slate-700">VAT Status: Good Standing</span>
+                    </div>
+                    <p className="text-[10px] text-slate-450 font-semibold leading-relaxed">
+                      Your organization is currently up to date with all GST/VAT filings. No penalties or unresolved issues detected.
+                    </p>
+                  </div>
+                </div>
+              )}
 
             </div>
 

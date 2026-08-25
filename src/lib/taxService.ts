@@ -72,7 +72,49 @@ export const XeroTaxService = {
     }
 
     // 1. Get raw normalized tax transactions from db.getTaxTransactions
-    const taxTxns = await db.getTaxTransactions(tenantId, startDate, endDate, filters);
+    let taxTxns = await db.getTaxTransactions(tenantId, startDate, endDate, filters);
+
+    // Dynamic Self-Healing Auto-Hydration fallback if table is empty
+    if (taxTxns.length === 0) {
+      try {
+        const tokenInfo = await getXeroAccessToken(tenantId);
+        if (tokenInfo) {
+          const { fetchXeroResource } = require('./xero');
+          console.log(`[Tax AutoSync] Tax transactions empty for tenant ${tenantId}. Checking and hydrating...`);
+          
+          let taxRates = await db.getReport(tenantId, 'TaxRates');
+          if (!taxRates || taxRates.length === 0) {
+            taxRates = await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'TaxRates');
+            if (taxRates) await db.saveReport(tenantId, 'TaxRates', taxRates);
+          }
+
+          let invoices = await db.getReport(tenantId, 'Invoices');
+          if (!invoices || invoices.length === 0) {
+            invoices = await fetchXeroResource(
+              tokenInfo.accessToken,
+              tokenInfo.xeroTenantId,
+              'Invoices',
+              'where=Status=="PAID" OR Status=="AUTHORISED" OR Status=="DRAFT"'
+            );
+            if (invoices) await db.saveReport(tenantId, 'Invoices', invoices);
+          }
+
+          let creditNotes = await db.getReport(tenantId, 'CreditNotes');
+          if (!creditNotes || creditNotes.length === 0) {
+            creditNotes = await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'CreditNotes');
+            if (creditNotes) await db.saveReport(tenantId, 'CreditNotes', creditNotes);
+          }
+
+          const { TaxSyncService } = require('./services/TaxSyncService');
+          await TaxSyncService.syncTaxTransactions(tenantId);
+          
+          taxTxns = await db.getTaxTransactions(tenantId, startDate, endDate, filters);
+          console.log(`[Tax AutoSync] Hydration complete. Synced ${taxTxns.length} tax transactions.`);
+        }
+      } catch (err: any) {
+        console.error('[Tax AutoSync] Fallback hydration failed:', err.message);
+      }
+    }
 
     // 2. Aggregate counts & amounts
     let taxCollected = 0;

@@ -438,7 +438,7 @@ export default function TrialBalancePage() {
         <>
           {/* Summary widgets cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 select-none">
-            <div className="bg-white rounded-xl border border-slate-200 p-4 flex items-center justify-between shadow-sm">
+            <div className="bg-white rounded-xl border border-slate-200 p-4 flex items-center justify-between shadow-sm hover:shadow-md hover:-translate-y-1 transition-all duration-300">
               <div className="space-y-1">
                 <div className="flex items-center gap-1">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Debit</span>
@@ -452,7 +452,7 @@ export default function TrialBalancePage() {
               </div>
             </div>
 
-            <div className="bg-white rounded-xl border border-slate-200/80 p-4 flex items-center justify-between shadow-sm">
+            <div className="bg-white rounded-xl border border-slate-200/80 p-4 flex items-center justify-between shadow-sm hover:shadow-md hover:-translate-y-1 transition-all duration-300">
               <div className="space-y-1">
                 <div className="flex items-center gap-1">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Credit</span>
@@ -466,7 +466,7 @@ export default function TrialBalancePage() {
               </div>
             </div>
 
-            <div className="bg-white rounded-xl border border-slate-200/80 p-4 flex items-center justify-between shadow-sm">
+            <div className="bg-white rounded-xl border border-slate-200/80 p-4 flex items-center justify-between shadow-sm hover:shadow-md hover:-translate-y-1 transition-all duration-300">
               <div className="space-y-1">
                 <div className="flex items-center gap-1">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Difference</span>

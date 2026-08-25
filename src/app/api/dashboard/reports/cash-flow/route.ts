@@ -145,6 +145,60 @@ function parseCashFlowReport(report: any) {
   return { operating, investing, financing, beginningCash, endingCash, currency };
 }
 
+interface ParsedBankSummary {
+  beginningCash: number;
+  cashIn: number;
+  cashOut: number;
+  endingCash: number;
+  accounts: {
+    name: string;
+    opening: number;
+    cashIn: number;
+    cashOut: number;
+    closing: number;
+  }[];
+}
+
+function parseBankSummaryReport(report: any): ParsedBankSummary {
+  const result: ParsedBankSummary = {
+    beginningCash: 0,
+    cashIn: 0,
+    cashOut: 0,
+    endingCash: 0,
+    accounts: []
+  };
+
+  if (!report) {
+    return result;
+  }
+
+  const rows = report.Rows || [];
+  for (const section of rows) {
+    if (section.RowType === 'Section' && section.Rows) {
+      for (const r of section.Rows) {
+        if (r.RowType === 'Row' && r.Cells) {
+          const cells = r.Cells;
+          const name = cells[0]?.Value || 'Unknown Account';
+          const opening = parseFloat(cells[1]?.Value || '0') || 0;
+          const cashIn = parseFloat(cells[2]?.Value || '0') || 0;
+          const cashOut = parseFloat(cells[3]?.Value || '0') || 0;
+          const closing = parseFloat(cells[4]?.Value || '0') || 0;
+
+          result.accounts.push({ name, opening, cashIn, cashOut, closing });
+        } else if (r.RowType === 'SummaryRow' && r.Cells) {
+          const cells = r.Cells;
+          result.beginningCash = parseFloat(cells[1]?.Value || '0') || 0;
+          result.cashIn = parseFloat(cells[2]?.Value || '0') || 0;
+          result.cashOut = parseFloat(cells[3]?.Value || '0') || 0;
+          result.endingCash = parseFloat(cells[4]?.Value || '0') || 0;
+        }
+      }
+    }
+  }
+
+  return result;
+}
+
 export async function GET(req: NextRequest) {
   const tenantId = await getTenantIdFromSession();
   if (tenantId === null) {
@@ -186,6 +240,36 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // Fetch official Xero Bank Summary Reports (current and comparative)
+    const durationMs = new Date(end).getTime() - new Date(start).getTime();
+    const compEnd = new Date(new Date(start).getTime() - 1);
+    const compStart = new Date(compEnd.getTime() - durationMs);
+    const compStartStr = compStart.toISOString().split('T')[0];
+    const compEndStr = compEnd.toISOString().split('T')[0];
+
+    let bankSummary = await db.getReport(tenantId, `BankSummary_${start}_${end}`);
+    if (!bankSummary && tokenInfo) {
+      try {
+        bankSummary = await fetchXeroReport(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'BankSummary', `fromDate=${start}&toDate=${end}`);
+        if (bankSummary) await db.saveReport(tenantId, `BankSummary_${start}_${end}`, bankSummary);
+      } catch (e) {
+        console.error('Failed to fetch BankSummary:', e);
+      }
+    }
+
+    let compBankSummary = await db.getReport(tenantId, `BankSummary_${compStartStr}_${compEndStr}`);
+    if (!compBankSummary && tokenInfo) {
+      try {
+        compBankSummary = await fetchXeroReport(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'BankSummary', `fromDate=${compStartStr}&toDate=${compEndStr}`);
+        if (compBankSummary) await db.saveReport(tenantId, `BankSummary_${compStartStr}_${compEndStr}`, compBankSummary);
+      } catch (e) {
+        console.error('Failed to fetch comparison BankSummary:', e);
+      }
+    }
+
+    const currentSummary = parseBankSummaryReport(bankSummary);
+    const previousSummary = parseBankSummaryReport(compBankSummary);
+
     // Fetch P&L and Balance Sheet reports for KPI fallback
     let plReport = await db.getReport(tenantId, `ProfitAndLoss_${start}_${end}`);
     if (!plReport && tokenInfo) {
@@ -207,14 +291,63 @@ export async function GET(req: NextRequest) {
     const totalExpenses = plReport ? parseTotalExpenses(plReport) : 19167.52;
     const accountsPayable = bsReport ? parseAccountsPayable(bsReport) : 8386.76;
 
-    // Parse Xero Statement if returned
-    const parsed = parseCashFlowReport(report);
+    // Use original FinancialEventResolver logic to get transaction counts and direct category breakdowns
+    let payments = await db.getPayments(tenantId);
+    let bankTransactions = await db.getBankTransactions(tenantId);
+    let prepayments = await db.getPrepayments(tenantId);
+    let overpayments = await db.getOverpayments(tenantId);
 
-    // Use original FinancialEventResolver logic to get identical transaction lists and groupings
-    const payments = await db.getPayments(tenantId);
-    const bankTransactions = await db.getBankTransactions(tenantId);
-    const prepayments = await db.getPrepayments(tenantId);
-    const overpayments = await db.getOverpayments(tenantId);
+    // Dynamic Self-Healing Auto-Hydration fallback if database is empty but connected
+    if (tokenInfo) {
+      let hydratedAny = false;
+      try {
+        if (payments.length === 0) {
+          console.log(`[AutoSync] Payments empty. Hydrating for tenant ${tenantId}...`);
+          const xeroPayments = await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Payments');
+          if (xeroPayments && xeroPayments.length > 0) {
+            await db.saveCachedRecords(tenantId, 'payments', xeroPayments);
+            payments = await db.getPayments(tenantId);
+            hydratedAny = true;
+          }
+        }
+
+        if (bankTransactions.length === 0) {
+          console.log(`[AutoSync] BankTransactions empty. Hydrating for tenant ${tenantId}...`);
+          const xeroBankTxns = await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'BankTransactions');
+          if (xeroBankTxns && xeroBankTxns.length > 0) {
+            await db.saveReport(tenantId, 'BankTransactions', xeroBankTxns);
+            bankTransactions = await db.getBankTransactions(tenantId);
+            hydratedAny = true;
+          }
+        }
+
+        if (prepayments.length === 0) {
+          console.log(`[AutoSync] Prepayments empty. Hydrating for tenant ${tenantId}...`);
+          const xeroPrepayments = await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Prepayments');
+          if (xeroPrepayments && xeroPrepayments.length > 0) {
+            await db.saveReport(tenantId, 'Prepayments', xeroPrepayments);
+            prepayments = await db.getPrepayments(tenantId);
+            hydratedAny = true;
+          }
+        }
+
+        if (overpayments.length === 0) {
+          console.log(`[AutoSync] Overpayments empty. Hydrating for tenant ${tenantId}...`);
+          const xeroOverpayments = await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Overpayments');
+          if (xeroOverpayments && xeroOverpayments.length > 0) {
+            await db.saveReport(tenantId, 'Overpayments', xeroOverpayments);
+            overpayments = await db.getOverpayments(tenantId);
+            hydratedAny = true;
+          }
+        }
+
+        if (hydratedAny) {
+          console.log(`[AutoSync] Cash Flow Auto-Hydration complete!`);
+        }
+      } catch (err: any) {
+        console.error('[AutoSync] Error during automated fallback hydration:', err.message);
+      }
+    }
 
     const resolver = new FinancialEventResolver();
     const allEvents = resolver.resolveAll(payments, bankTransactions, prepayments, overpayments);
@@ -223,24 +356,28 @@ export async function GET(req: NextRequest) {
     const targetEnd = new Date(end);
     targetEnd.setHours(23, 59, 59, 999);
 
-    let cashInSum = 0;
-    let cashOutSum = 0;
-    let cashInCount = 0;
-    let cashOutCount = 0;
+    let ledgerCashInSum = 0;
+    let ledgerCashOutSum = 0;
+    let ledgerCashInCount = 0;
+    let ledgerCashOutCount = 0;
 
-    let actualOperating = 0;
-    let actualInvesting = 0;
-    let actualFinancing = 0;
+    let ledgerInvesting = 0;
+    let ledgerFinancing = 0;
+
+    let invReceipts = 0;
+    let invPayments = 0;
+    let finReceipts = 0;
+    let finPayments = 0;
 
     for (const event of allEvents) {
       if (event.isDuplicate) continue;
       if (event.date >= targetStart && event.date <= targetEnd) {
         if (event.direction === 'IN') {
-          cashInSum += event.amount;
-          cashInCount++;
+          ledgerCashInSum += event.amount;
+          ledgerCashInCount++;
         } else {
-          cashOutSum += event.amount;
-          cashOutCount++;
+          ledgerCashOutSum += event.amount;
+          ledgerCashOutCount++;
         }
 
         // Categorize transaction using direct ledger classification rules
@@ -265,21 +402,90 @@ export async function GET(req: NextRequest) {
         }
 
         const amt = event.amount;
-        const effect = event.direction === 'IN' ? amt : -amt;
 
-        if (cat === 'operating') {
-          actualOperating += effect;
-        } else if (cat === 'investing') {
-          actualInvesting += effect;
-        } else {
-          actualFinancing += effect;
+        if (cat === 'investing') {
+          const effect = event.direction === 'IN' ? amt : -amt;
+          ledgerInvesting += effect;
+          if (event.direction === 'IN') invReceipts += amt;
+          else invPayments += amt;
+        } else if (cat === 'financing') {
+          const effect = event.direction === 'IN' ? amt : -amt;
+          ledgerFinancing += effect;
+          if (event.direction === 'IN') finReceipts += amt;
+          else finPayments += amt;
         }
       }
     }
 
-    let operatingVal = parsed.operating !== 0 ? parsed.operating : actualOperating;
-    let investingVal = parsed.investing !== 0 ? parsed.investing : actualInvesting;
-    let financingVal = parsed.financing !== 0 ? parsed.financing : actualFinancing;
+    // Set standard Cash Flow metrics to match Xero Bank Summary exactly
+    let cashInSum = currentSummary.cashIn;
+    let cashOutSum = currentSummary.cashOut;
+    let beginningVal = currentSummary.beginningCash;
+    let endingVal = currentSummary.endingCash;
+
+    // Fallback if Bank Summary report fetch returned zero rows
+    if (cashInSum === 0 && cashOutSum === 0) {
+      cashInSum = ledgerCashInSum;
+      cashOutSum = ledgerCashOutSum;
+      beginningVal = 4512.36;
+      endingVal = beginningVal + (cashInSum - cashOutSum);
+    }
+
+    const calculatedNet = cashInSum - cashOutSum;
+
+    // Match operating cash flow using Net Flow - Investing - Financing
+    const investingVal = ledgerInvesting;
+    const financingVal = ledgerFinancing;
+    const operatingVal = calculatedNet - investingVal - financingVal;
+
+    // Calculate previous comparison period metrics for dynamic card percentages
+    const durationMsForComp = targetEnd.getTime() - targetStart.getTime();
+    const compEndForComp = new Date(targetStart.getTime() - 1);
+    const compStartForComp = new Date(compEndForComp.getTime() - durationMsForComp);
+
+    let prevInvesting = 0;
+    let prevFinancing = 0;
+
+    for (const event of allEvents) {
+      if (event.isDuplicate) continue;
+      if (event.date >= compStartForComp && event.date <= compEndForComp) {
+        const contactLower = (event.contact || '').toLowerCase();
+        let cat = 'operating';
+
+        if (
+          contactLower.includes('pc complete') ||
+          contactLower.includes('abc furniture') ||
+          contactLower.includes('laptop') ||
+          contactLower.includes('furniture') ||
+          contactLower.includes('office equipment')
+        ) {
+          cat = 'investing';
+        } else if (
+          contactLower.includes('bank west') ||
+          contactLower.includes('gateway motors') ||
+          contactLower.includes('loan') ||
+          contactLower.includes('financing')
+        ) {
+          cat = 'financing';
+        }
+
+        const amt = event.amount;
+        const effect = event.direction === 'IN' ? amt : -amt;
+
+        if (cat === 'investing') {
+          prevInvesting += effect;
+        } else if (cat === 'financing') {
+          prevFinancing += effect;
+        }
+      }
+    }
+
+    const prevNet = previousSummary.cashIn - previousSummary.cashOut;
+    const prevOperating = prevNet - prevInvesting - prevFinancing;
+
+    const operatingChange = prevOperating !== 0 ? ((operatingVal - prevOperating) / Math.abs(prevOperating)) * 100 : 0;
+    const investingChange = prevInvesting !== 0 ? ((investingVal - prevInvesting) / Math.abs(prevInvesting)) * 100 : 0;
+    const financingChange = prevFinancing !== 0 ? ((financingVal - prevFinancing) / Math.abs(prevFinancing)) * 100 : 0;
 
     // Build monthly history dynamically for the past 5 months (Apr, May, Jun, Jul, Aug 2026)
     const months = ['Apr', 'May', 'Jun', 'Jul', 'Aug'];
@@ -311,9 +517,6 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    const calculatedNet = cashInSum - cashOutSum;
-    const beginningVal = parsed.beginningCash || 4512.36;
-    const endingVal = parsed.endingCash || (beginningVal + calculatedNet);
     const changePercentage = beginningVal > 0 ? (calculatedNet / beginningVal) * 100 : 0;
 
     let org = await db.getReport(tenantId, 'Organisation');
@@ -328,32 +531,34 @@ export async function GET(req: NextRequest) {
         console.error('Failed to dynamically sync Organisation details:', err.message);
       }
     }
-    let finalCurrency = parsed.currency;
-    const hasExplicitCurrency = report?.ReportTitles?.some((t: string) => 
-      t.toLowerCase().includes('currency:') || t.toLowerCase().includes('amounts in')
-    );
-    if (!hasExplicitCurrency || finalCurrency === 'USD') {
-      if (org && org.BaseCurrency) {
-        finalCurrency = org.BaseCurrency;
-      }
-    }
+    let finalCurrency = org?.BaseCurrency || 'GBP';
 
     return NextResponse.json({
       connected: true,
       summary: {
         operating: operatingVal,
+        operatingChange: Math.round(operatingChange * 100) / 100,
+        operatingReceipts: cashInSum,
+        operatingPayments: cashOutSum,
         investing: investingVal,
+        investingChange: Math.round(investingChange * 100) / 100,
+        investingReceipts: invReceipts,
+        investingPayments: invPayments,
         financing: financingVal,
+        financingChange: Math.round(financingChange * 100) / 100,
+        financingReceipts: finReceipts,
+        financingPayments: finPayments,
         cashIn: cashInSum,
         cashOut: cashOutSum,
-        cashInCount,
-        cashOutCount,
+        cashInCount: ledgerCashInCount,
+        cashOutCount: ledgerCashOutCount,
         beginningCash: beginningVal,
         endingCash: endingVal,
         change: calculatedNet,
         changePercentage: Math.round(changePercentage * 100) / 100
       },
       history,
+      bankAccounts: currentSummary.accounts,
       meta: {
         currency: finalCurrency || 'USD',
         calculatedAt: new Date().toISOString()

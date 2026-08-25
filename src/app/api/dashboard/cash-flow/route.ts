@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getTenantIdFromSession } from '@/lib/auth';
-import { getXeroAccessToken } from '@/lib/xero';
+import { getXeroAccessToken, fetchXeroResource } from '@/lib/xero';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -443,10 +443,62 @@ export async function GET(req: NextRequest) {
     const calculatedAt = new Date().toISOString();
 
     // 1. Fetch raw API data from warehouse
-    const payments = await db.getPayments(tenantId);
-    const bankTransactions = await db.getBankTransactions(tenantId);
-    const prepayments = await db.getPrepayments(tenantId);
-    const overpayments = await db.getOverpayments(tenantId);
+    let payments = await db.getPayments(tenantId);
+    let bankTransactions = await db.getBankTransactions(tenantId);
+    let prepayments = await db.getPrepayments(tenantId);
+    let overpayments = await db.getOverpayments(tenantId);
+
+    // Dynamic Self-Healing Auto-Hydration fallback if database is empty but connected
+    if (tokenInfo) {
+      let hydratedAny = false;
+      try {
+        if (payments.length === 0) {
+          console.log(`[Widget AutoSync] Payments empty. Hydrating for tenant ${tenantId}...`);
+          const xeroPayments = await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Payments');
+          if (xeroPayments && xeroPayments.length > 0) {
+            await db.saveCachedRecords(tenantId, 'payments', xeroPayments);
+            payments = await db.getPayments(tenantId);
+            hydratedAny = true;
+          }
+        }
+
+        if (bankTransactions.length === 0) {
+          console.log(`[Widget AutoSync] BankTransactions empty. Hydrating for tenant ${tenantId}...`);
+          const xeroBankTxns = await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'BankTransactions');
+          if (xeroBankTxns && xeroBankTxns.length > 0) {
+            await db.saveReport(tenantId, 'BankTransactions', xeroBankTxns);
+            bankTransactions = await db.getBankTransactions(tenantId);
+            hydratedAny = true;
+          }
+        }
+
+        if (prepayments.length === 0) {
+          console.log(`[Widget AutoSync] Prepayments empty. Hydrating for tenant ${tenantId}...`);
+          const xeroPrepayments = await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Prepayments');
+          if (xeroPrepayments && xeroPrepayments.length > 0) {
+            await db.saveReport(tenantId, 'Prepayments', xeroPrepayments);
+            prepayments = await db.getPrepayments(tenantId);
+            hydratedAny = true;
+          }
+        }
+
+        if (overpayments.length === 0) {
+          console.log(`[Widget AutoSync] Overpayments empty. Hydrating for tenant ${tenantId}...`);
+          const xeroOverpayments = await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Overpayments');
+          if (xeroOverpayments && xeroOverpayments.length > 0) {
+            await db.saveReport(tenantId, 'Overpayments', xeroOverpayments);
+            overpayments = await db.getOverpayments(tenantId);
+            hydratedAny = true;
+          }
+        }
+
+        if (hydratedAny) {
+          console.log(`[Widget AutoSync] Hydration complete!`);
+        }
+      } catch (err: any) {
+        console.error('[Widget AutoSync] Error during automated fallback hydration:', err.message);
+      }
+    }
 
     // 2. Resolve raw items into Unified Cash Events with duplicate checks and precedence rules
     const resolver = new FinancialEventResolver();

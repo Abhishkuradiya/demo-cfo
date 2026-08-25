@@ -105,20 +105,34 @@ export async function GET(req: NextRequest) {
           phone = `${area}${num}`.trim();
         }
       }
-      if (!phone) {
-        // Fallback mockup phone pattern based on contact type
-        const mockIdx = contacts.length + 1;
-        phone = isCustomer ? `+1 555-01${String(mockIdx).padStart(2, '0')}` : `+1 555-02${String(mockIdx).padStart(2, '0')}`;
+
+      const email = c.EmailAddress || 'no-email@organization.com';
+
+      // Push as Customer if flagged as customer
+      if (isCustomer) {
+        const customerPhone = phone || `+1 555-01${String(contacts.length + 1).padStart(2, '0')}`;
+        contacts.push({
+          id: `${c.ContactID}-customer`,
+          name: c.Name,
+          type: 'Customer',
+          email,
+          phone: customerPhone,
+          outstanding: arOutstanding
+        });
       }
 
-      contacts.push({
-        id: c.ContactID,
-        name: c.Name,
-        type: isCustomer ? 'Customer' : 'Supplier',
-        email: c.EmailAddress || 'no-email@organization.com',
-        phone,
-        outstanding: isCustomer ? arOutstanding : -apOutstanding
-      });
+      // Push as Supplier if flagged as supplier
+      if (isSupplier) {
+        const supplierPhone = phone || `+1 555-02${String(contacts.length + 1).padStart(2, '0')}`;
+        contacts.push({
+          id: `${c.ContactID}-supplier`,
+          name: c.Name,
+          type: 'Supplier',
+          email,
+          phone: supplierPhone,
+          outstanding: -apOutstanding
+        });
+      }
     });
 
     const totalOutstanding = arTotal + apTotal;

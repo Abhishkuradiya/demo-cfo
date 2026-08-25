@@ -417,7 +417,7 @@ export default function BudgetActualPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 select-none">
         
         {/* Card 1: Budget */}
-        <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-xs relative flex flex-col justify-between min-h-[110px]">
+        <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-xs relative flex flex-col justify-between min-h-[110px] hover:shadow-md hover:-translate-y-1 transition-all duration-300">
           {loading ? (
             <div className="space-y-3 animate-pulse">
               <div className="h-3 bg-slate-200 rounded w-1/3" />
@@ -443,7 +443,7 @@ export default function BudgetActualPage() {
         </div>
 
         {/* Card 2: Actual */}
-        <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-xs relative flex flex-col justify-between min-h-[110px]">
+        <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-xs relative flex flex-col justify-between min-h-[110px] hover:shadow-md hover:-translate-y-1 transition-all duration-300">
           {loading ? (
             <div className="space-y-3 animate-pulse">
               <div className="h-3 bg-slate-200 rounded w-1/3" />
@@ -469,7 +469,7 @@ export default function BudgetActualPage() {
         </div>
 
         {/* Card 3: Variance */}
-        <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-xs relative flex flex-col justify-between min-h-[110px]">
+        <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-xs relative flex flex-col justify-between min-h-[110px] hover:shadow-md hover:-translate-y-1 transition-all duration-300">
           {loading ? (
             <div className="space-y-3 animate-pulse">
               <div className="h-3 bg-slate-200 rounded w-1/3" />
@@ -508,7 +508,7 @@ export default function BudgetActualPage() {
         </div>
 
         {/* Card 4: Variance % */}
-        <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-xs relative flex flex-col justify-between min-h-[110px]">
+        <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-xs relative flex flex-col justify-between min-h-[110px] hover:shadow-md hover:-translate-y-1 transition-all duration-300">
           {loading ? (
             <div className="space-y-3 animate-pulse">
               <div className="h-3 bg-slate-200 rounded w-1/3" />

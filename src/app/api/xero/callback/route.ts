@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
+import { fetchXeroResource } from '@/lib/xero';
  
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -77,7 +78,80 @@ export async function GET(req: NextRequest) {
  
     // 4. Update the local tenant company name to match the authorized Xero organization name!
     await db.updateTenantName(tenantId, orgName);
- 
+
+    // Trigger dynamic non-blocking background sync of cash flow and main resources
+    (async () => {
+      try {
+        console.log(`[BackgroundSync] Starting initial sync for tenant ${tenantId}...`);
+        
+        // Contacts
+        try {
+          const contacts = await fetchXeroResource(tokenData.access_token, xeroTenantId, 'Contacts');
+          await db.saveCachedRecords(tenantId, 'contacts', contacts || []);
+          await db.saveReport(tenantId, 'Contacts', contacts || []);
+        } catch (e: any) {
+          console.error('[BackgroundSync] Contacts sync failed:', e.message);
+        }
+
+        // Invoices
+        try {
+          const invoices = await fetchXeroResource(tokenData.access_token, xeroTenantId, 'Invoices');
+          await db.saveCachedRecords(tenantId, 'invoices', invoices || []);
+        } catch (e: any) {
+          console.error('[BackgroundSync] Invoices sync failed:', e.message);
+        }
+
+        // Payments
+        try {
+          const payments = await fetchXeroResource(tokenData.access_token, xeroTenantId, 'Payments');
+          await db.saveCachedRecords(tenantId, 'payments', payments || []);
+        } catch (e: any) {
+          console.error('[BackgroundSync] Payments sync failed:', e.message);
+        }
+
+        // Accounts
+        try {
+          const accounts = await fetchXeroResource(tokenData.access_token, xeroTenantId, 'Accounts');
+          await db.saveCachedRecords(tenantId, 'accounts', accounts || []);
+        } catch (e: any) {
+          console.error('[BackgroundSync] Accounts sync failed:', e.message);
+        }
+
+        // BankTransactions
+        try {
+          const bankTxns = await fetchXeroResource(tokenData.access_token, xeroTenantId, 'BankTransactions');
+          await db.saveReport(tenantId, 'BankTransactions', bankTxns || []);
+        } catch (e: any) {
+          console.error('[BackgroundSync] BankTransactions sync failed:', e.message);
+        }
+
+        // Prepayments
+        try {
+          const prepayments = await fetchXeroResource(tokenData.access_token, xeroTenantId, 'Prepayments');
+          await db.saveReport(tenantId, 'Prepayments', prepayments || []);
+        } catch (e: any) {
+          console.error('[BackgroundSync] Prepayments sync failed:', e.message);
+        }
+
+        // Overpayments
+        try {
+          const overpayments = await fetchXeroResource(tokenData.access_token, xeroTenantId, 'Overpayments');
+          await db.saveReport(tenantId, 'Overpayments', overpayments || []);
+        } catch (e: any) {
+          console.error('[BackgroundSync] Overpayments sync failed:', e.message);
+        }
+
+        // Save last sync time in credentials database
+        await db.saveCredentials(tenantId, 'xero', {
+          last_synced_at: new Date().toISOString()
+        });
+
+        console.log(`[BackgroundSync] Initial sync completed for tenant ${tenantId}!`);
+      } catch (err: any) {
+        console.error('[BackgroundSync] Failed during background initial sync:', err.message);
+      }
+    })();
+
     // 5. Render a premium HTML success page
     const html = `
       <!DOCTYPE html>

@@ -252,7 +252,12 @@ export const XeroBudgetService = {
     for (const key of catKeys) {
       const budget = parseFloat((categoryBudgets[key] || 0).toFixed(2));
       const actual = parseFloat((actualMap[key] || 0).toFixed(2));
-      const variance = parseFloat((budget - actual).toFixed(2));
+      
+      // Standard accounting variance: Income is actual - budget, Expenses are budget - actual
+      const isIncome = key === 'Income' || key === 'Other Income';
+      const variance = isIncome 
+        ? parseFloat((actual - budget).toFixed(2)) 
+        : parseFloat((budget - actual).toFixed(2));
       
       let variance_pct = 0;
       if (budget !== 0) {
@@ -270,7 +275,7 @@ export const XeroBudgetService = {
       });
 
       // Sum totals
-      if (key === 'Income' || key === 'Other Income') {
+      if (isIncome) {
         totalBudget += budget;
         totalActual += actual;
       } else {
@@ -280,7 +285,8 @@ export const XeroBudgetService = {
     }
 
     // Add Total category row
-    const totalVariance = parseFloat((totalBudget - totalActual).toFixed(2));
+    // Net profit/loss: favorable variance when actual is higher than budget
+    const totalVariance = parseFloat((totalActual - totalBudget).toFixed(2));
     let totalVariancePct = 0;
     if (totalBudget !== 0) {
       totalVariancePct = parseFloat(((totalVariance / totalBudget) * 100).toFixed(2));
@@ -288,8 +294,6 @@ export const XeroBudgetService = {
       totalVariancePct = 0.00;
     }
 
-    // Force Total actual to match main display card's actual if it is Income-only based,
-    // or let it match Net Profit. Standard Xero Profit & Loss Total row is Net Profit.
     categories.push({
       category: 'Total',
       budget: parseFloat(totalBudget.toFixed(2)),
@@ -309,7 +313,8 @@ export const XeroBudgetService = {
     for (let i = 0; i < months.length; i++) {
       const budget = mockBudgets[i];
       const actual = mockActuals[i];
-      const variance = parseFloat((budget - actual).toFixed(2));
+      // Monthly chart variance is based on revenue/income (actual - budget)
+      const variance = parseFloat((actual - budget).toFixed(2));
       monthly_trends.push({
         month: months[i],
         budget,
@@ -323,9 +328,10 @@ export const XeroBudgetService = {
       ? new Date(credentials.last_synced_at).toISOString().replace('T', ' ').substring(0, 16)
       : new Date().toISOString().replace('T', ' ').substring(0, 16);
 
-    const overallBudgetYtd = 0.00;
+    const overallBudgetYtd = parseFloat((categoryBudgets['Income'] + categoryBudgets['Other Income']).toFixed(2));
     const overallActualYtd = plSummary.revenue;
-    const overallVariance = parseFloat((overallBudgetYtd - overallActualYtd).toFixed(2));
+    // Favorable income variance is actual - budget
+    const overallVariance = parseFloat((overallActualYtd - overallBudgetYtd).toFixed(2));
     let overallVariancePct = 0;
 
     if (overallBudgetYtd !== 0) {
