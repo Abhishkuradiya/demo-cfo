@@ -81,7 +81,11 @@ function Tooltip({ text }: { text: string }) {
 export default function BalanceSheetPage() {
   const [selectedDate, setSelectedDate] = useState<string>(() => {
     const today = new Date();
-    return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const currentYear = today.getFullYear();
+    const currentMonth = today.getMonth(); // 0 = Jan, 11 = Dec
+    // Last financial year ended on March 31st of previous year if current month is Jan-Mar, else current year
+    const lastFYYear = currentMonth < 3 ? currentYear - 1 : currentYear;
+    return `${lastFYYear}-03-31`;
   });
   const [data, setData] = useState<BSData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
