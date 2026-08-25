@@ -144,7 +144,28 @@ export async function POST(req: NextRequest) {
  
     const xeroTenantId = credentials.tenant_identifier;
     const counts: Record<string, number> = { contacts: 0, invoices: 0, payments: 0, accounts: 0, bankTransactions: 0, prepayments: 0, overpayments: 0, items: 0 };
- 
+
+    // Verify token validity by calling Xero Organisations API first
+    try {
+      await fetchXeroResource(accessToken, xeroTenantId, 'Organisations');
+    } catch (err: any) {
+      if (err.message.includes('401') || err.message.includes('Unauthorized') || err.message.includes('TokenExpired')) {
+        console.log('[Sync] Cached token is expired or invalid on Xero API. Attempting forced refresh...');
+        try {
+          accessToken = await refreshXeroToken(tenantId, credentials);
+          console.log('[Sync] Force token refresh succeeded.');
+        } catch (refreshErr: any) {
+          console.error('[Sync] Force token refresh failed:', refreshErr.message);
+          return NextResponse.json({
+            success: false,
+            message: 'Xero session expired or unauthorized. Please disconnect and reconnect your Xero account in Data Sources.'
+          }, { status: 401 });
+        }
+      } else {
+        console.error('[Sync] Connection check error:', err.message);
+      }
+    }
+
     // Execute live fetches from Xero APIs in parallel and write cache
     try {
       const contacts = await fetchXeroResource(accessToken, xeroTenantId, 'Contacts');

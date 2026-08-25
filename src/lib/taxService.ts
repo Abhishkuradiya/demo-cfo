@@ -1,5 +1,6 @@
 import { db } from './db';
-import { getXeroAccessToken } from './xero';
+import { getXeroAccessToken, fetchXeroResource } from './xero';
+import { TaxSyncService } from './services/TaxSyncService';
 
 export interface TaxBreakdownItem {
   tax_type: string;
@@ -79,7 +80,6 @@ export const XeroTaxService = {
       try {
         const tokenInfo = await getXeroAccessToken(tenantId);
         if (tokenInfo) {
-          const { fetchXeroResource } = require('./xero');
           console.log(`[Tax AutoSync] Tax transactions empty for tenant ${tenantId}. Checking and hydrating...`);
           
           let taxRates = await db.getReport(tenantId, 'TaxRates');
@@ -105,7 +105,6 @@ export const XeroTaxService = {
             if (creditNotes) await db.saveReport(tenantId, 'CreditNotes', creditNotes);
           }
 
-          const { TaxSyncService } = require('./services/TaxSyncService');
           await TaxSyncService.syncTaxTransactions(tenantId);
           
           taxTxns = await db.getTaxTransactions(tenantId, startDate, endDate, filters);
