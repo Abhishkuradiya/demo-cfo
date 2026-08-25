@@ -385,11 +385,11 @@ export default function BalanceSheetPage() {
         <>
           {/* Summary Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 select-none">
-            <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-sm hover:shadow-md transition-all duration-200">
+            <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs hover:shadow-xs transition-all duration-350 ease-out hover:translate-y-2 relative z-10 hover:z-20">
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-1">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total Assets</span>
-                  <Tooltip text="Everything your business owns: cash, accounts receivable, inventory, and physical equipment/property." />
+                  <Tooltip text="Total assets owned by the business, including cash at bank, accounts receivable (debtors), inventory (finished goods), loans, and fixed machinery/equipment - VAT Included." />
                 </div>
                 <div className="h-6 w-6 rounded-lg bg-blue-50 text-blue-500 flex items-center justify-center border border-blue-100/50"><Scale className="h-3.5 w-3.5" /></div>
               </div>
@@ -397,11 +397,11 @@ export default function BalanceSheetPage() {
               <span className="text-[9.5px] font-bold text-slate-400 block mt-1">100% of total assets</span>
             </div>
 
-            <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-sm hover:shadow-md transition-all duration-200">
+            <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs hover:shadow-xs transition-all duration-350 ease-out hover:translate-y-2 relative z-10 hover:z-20">
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-1">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total Liabilities</span>
-                  <Tooltip text="What your business owes to external parties: accounts payable, wages/taxes payable, and outstanding bank loans." />
+                  <Tooltip text="Total obligations owed to external parties, including accounts payable (creditors), corporation tax, director loans, wages, VAT payable, and accruals - VAT Included." />
                 </div>
                 <div className="h-6 w-6 rounded-lg bg-amber-50 text-amber-500 flex items-center justify-center border border-amber-100/50"><Scale className="h-3.5 w-3.5 rotate-180" /></div>
               </div>
@@ -411,11 +411,11 @@ export default function BalanceSheetPage() {
               </span>
             </div>
 
-            <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-sm hover:shadow-md transition-all duration-200">
+            <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs hover:shadow-xs transition-all duration-350 ease-out hover:translate-y-2 relative z-10 hover:z-20">
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-1">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total Equity</span>
-                  <Tooltip text="The net worth of the business owned by shareholders (retained earnings, owner drawings, and capital)." />
+                  <Tooltip text="Total net worth belonging to shareholders, including Current Year Earnings, Share Capital, and Retained Earnings." />
                 </div>
                 <div className="h-6 w-6 rounded-lg bg-emerald-50 text-emerald-500 flex items-center justify-center border border-emerald-100/50"><TrendingUp className="h-3.5 w-3.5" /></div>
               </div>
@@ -425,18 +425,18 @@ export default function BalanceSheetPage() {
               </span>
             </div>
 
-            <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-sm hover:shadow-md transition-all duration-200">
+            <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs hover:shadow-xs transition-all duration-350 ease-out hover:translate-y-2 relative z-10 hover:z-20">
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-1">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Balance Status</span>
-                  <Tooltip text="Verifies the accounting equation: Total Assets must equal Total Liabilities + Total Equity." />
+                  <Tooltip text="Verifies that Net Assets (Assets - Liabilities) equals Total Capital & Reserves (Equity) to ensure a perfectly balanced ledger." />
                 </div>
-                <div className="h-6 w-6 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100/50"><ShieldCheck className="h-3.5 w-3.5" /></div>
+                <div className="h-6 w-6 rounded-lg bg-emerald-50 text-emerald-605 flex items-center justify-center border border-emerald-100/50"><ShieldCheck className="h-3.5 w-3.5" /></div>
               </div>
               <h3 className={cn("text-xl font-extrabold tracking-tight", data.summary.isBalanced ? "text-emerald-600" : "text-amber-500")}>
                 {data.summary.isBalanced ? 'Balanced' : 'Unbalanced'}
               </h3>
-              <span className="text-[9.5px] font-bold text-slate-400 block mt-1">Assets = Liabilities + Equity</span>
+              <span className="text-[9.5px] font-bold text-slate-400 block mt-1">Net Assets = Total Equity</span>
             </div>
           </div>
 
