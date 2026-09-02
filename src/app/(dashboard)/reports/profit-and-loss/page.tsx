@@ -4,6 +4,8 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 
+import { FormattedDatePicker } from '@/components/ui/formatted-date-picker';
+
 const ReactECharts = dynamic(() => import('echarts-for-react'), { ssr: false });
 import { 
   FileText, 
@@ -405,21 +407,10 @@ export default function ProfitAndLossPage() {
               </button>
             </div>
 
-            <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-1.5 shadow-2xs">
-              <Calendar className="h-4 w-4 text-blue-600" />
-              <input
-                type="date"
-                value={fromDate}
-                onChange={(e) => setFromDate(e.target.value)}
-                className="text-[11.5px] font-semibold text-slate-700 outline-none bg-transparent"
-              />
-              <span className="text-slate-400 text-xs">-</span>
-              <input
-                type="date"
-                value={toDate}
-                onChange={(e) => setToDate(e.target.value)}
-                className="text-[11.5px] font-semibold text-slate-700 outline-none bg-transparent"
-              />
+            <div className="flex items-center gap-1.5">
+              <FormattedDatePicker value={fromDate} onChange={setFromDate} label="From:" />
+              <span className="text-slate-400 text-xs font-bold">-</span>
+              <FormattedDatePicker value={toDate} onChange={setToDate} label="To:" />
             </div>
 
             <button

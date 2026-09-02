@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageContainer } from '@/components/common/page-container';
+import { FormattedDatePicker } from '@/components/ui/formatted-date-picker';
 
 const ReactECharts = dynamic(() => import('echarts-for-react'), { ssr: false });
 
@@ -320,16 +321,12 @@ export default function TrialBalancePage() {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap text-xs">
-          {/* As at Date Selector */}
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-200 bg-white shadow-2xs hover:bg-slate-50/85 transition">
-            <span className="text-xs font-semibold text-slate-500">As at:</span>
-            <input 
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="text-xs font-bold text-slate-700 bg-transparent outline-none cursor-pointer"
-            />
-          </div>
+          {/* As at Date Selector (Formatted DD/MM/YYYY) */}
+          <FormattedDatePicker
+            value={date}
+            onChange={setDate}
+            label="As at:"
+          />
 
           <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-200 bg-white hover:bg-red-50/20 text-xs font-bold text-red-600 transition cursor-pointer">
             <FileText className="h-3.5 w-3.5" />

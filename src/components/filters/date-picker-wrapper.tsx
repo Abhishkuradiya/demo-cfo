@@ -6,6 +6,8 @@ import { Calendar, ChevronDown } from 'lucide-react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { format, subDays, startOfMonth, endOfMonth, startOfQuarter, startOfYear } from 'date-fns';
 
+import { FormattedDatePicker } from '@/components/ui/formatted-date-picker';
+
 const PRESETS = [
   { label: 'Today', key: 'today' as const },
   { label: 'Yesterday', key: 'yesterday' as const },
@@ -29,6 +31,7 @@ export function DatePickerWrapper() {
     switch (key) {
       case 'today':
         startDate = today;
+        endDate = today;
         break;
       case 'yesterday':
         startDate = subDays(today, 1);
@@ -36,12 +39,15 @@ export function DatePickerWrapper() {
         break;
       case 'last_7_days':
         startDate = subDays(today, 6);
+        endDate = today;
         break;
       case 'last_30_days':
         startDate = subDays(today, 29);
+        endDate = today;
         break;
       case 'this_month':
         startDate = startOfMonth(today);
+        endDate = endOfMonth(today);
         break;
       case 'last_month':
         const lastMonth = subDays(startOfMonth(today), 1);
@@ -50,42 +56,34 @@ export function DatePickerWrapper() {
         break;
       case 'this_quarter':
         startDate = startOfQuarter(today);
+        endDate = today;
         break;
       case 'this_year':
         startDate = startOfYear(today);
+        endDate = today;
         break;
       case 'custom':
-        return; // handle manually
+        setDateRange({ preset: 'custom' });
+        return;
     }
 
     setDateRange({
+      startDate: format(startDate, 'yyyy-MM-dd'),
+      endDate: format(endDate, 'yyyy-MM-dd'),
       preset: key,
-      startDate: startDate.toISOString().split('T')[0],
-      endDate: endDate.toISOString().split('T')[0],
     });
   };
 
   const getLabel = () => {
-    const preset = PRESETS.find((p) => p.key === dateRange.preset);
-    if (dateRange.preset !== 'custom' && preset) {
-      return preset.label;
-    }
-    
-    // Formatting custom display label
-    try {
-      const start = format(new Date(dateRange.startDate), 'MMM dd, yyyy');
-      const end = format(new Date(dateRange.endDate), 'MMM dd, yyyy');
-      return `${start} - ${end}`;
-    } catch {
-      return 'Select dates';
-    }
+    const found = PRESETS.find((p) => p.key === dateRange.preset);
+    return found ? found.label : 'Select Date Range';
   };
 
   return (
     <div className="flex items-center gap-2">
       <DropdownMenu.Root>
         <DropdownMenu.Trigger asChild>
-          <button className="flex h-9 items-center gap-2 rounded-md border bg-background px-3 py-1.5 text-xs font-semibold hover:bg-muted outline-none cursor-pointer transition select-none">
+          <button className="flex h-9 items-center gap-2 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary cursor-pointer text-foreground">
             <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
             <span>{getLabel()}</span>
             <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
@@ -110,19 +108,15 @@ export function DatePickerWrapper() {
       </DropdownMenu.Root>
 
       {dateRange.preset === 'custom' ? (
-        <div className="flex items-center gap-1">
-          <input
-            type="date"
+        <div className="flex items-center gap-1.5">
+          <FormattedDatePicker
             value={dateRange.startDate}
-            onChange={(e) => setDateRange({ startDate: e.target.value })}
-            className="h-9 rounded-md border bg-background px-2 py-1 text-xs outline-none focus-visible:ring-1 focus-visible:ring-primary"
+            onChange={(val) => setDateRange({ startDate: val })}
           />
-          <span className="text-xs text-muted-foreground">to</span>
-          <input
-            type="date"
+          <span className="text-xs text-muted-foreground font-semibold">to</span>
+          <FormattedDatePicker
             value={dateRange.endDate}
-            onChange={(e) => setDateRange({ endDate: e.target.value })}
-            className="h-9 rounded-md border bg-background px-2 py-1 text-xs outline-none focus-visible:ring-1 focus-visible:ring-primary"
+            onChange={(val) => setDateRange({ endDate: val })}
           />
         </div>
       ) : null}

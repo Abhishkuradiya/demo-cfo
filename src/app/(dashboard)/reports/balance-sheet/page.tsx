@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import ReactECharts from 'echarts-for-react';
+import { FormattedDatePicker } from '@/components/ui/formatted-date-picker';
 import { 
   FileText, 
   FileSpreadsheet, 
@@ -284,16 +285,12 @@ export default function BalanceSheetPage() {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {/* As At Date picker */}
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-200 bg-white shadow-2xs hover:bg-slate-50/85 transition">
-            <span className="text-xs font-semibold text-slate-500">As at:</span>
-            <input 
-              type="date"
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-              className="text-xs font-bold text-slate-700 bg-transparent outline-none cursor-pointer"
-            />
-          </div>
+          {/* As At Date picker (Formatted DD/MM/YYYY) */}
+          <FormattedDatePicker
+            value={selectedDate}
+            onChange={setSelectedDate}
+            label="As at:"
+          />
 
           <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-200 bg-white hover:bg-red-50/20 text-xs font-bold text-red-600 transition cursor-pointer">
             <FileText className="h-3.5 w-3.5" />

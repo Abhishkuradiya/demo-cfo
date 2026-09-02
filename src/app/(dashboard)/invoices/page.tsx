@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { FormattedDatePicker, formatToDDMMYYYY } from '@/components/ui/formatted-date-picker';
 
 const ReactECharts = dynamic(() => import('echarts-for-react'), { ssr: false });
 
@@ -365,17 +366,12 @@ export default function ConsistentAccountReceivablePage() {
 
         {/* Right: Action Controls */}
         <div className="flex items-center gap-2.5 pb-3">
-          {/* As On Date Selector */}
-          <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 shadow-2xs">
-            <Calendar className="h-3.5 w-3.5 text-blue-600" />
-            <span className="text-slate-400 text-[11px]">As On:</span>
-            <input
-              type="date"
-              value={asOnDate}
-              onChange={(e) => setAsOnDate(e.target.value)}
-              className="bg-transparent text-slate-900 font-extrabold outline-none cursor-pointer text-xs"
-            />
-          </div>
+          {/* As On Date Selector (Formatted DD/MM/YYYY) */}
+          <FormattedDatePicker
+            value={asOnDate}
+            onChange={setAsOnDate}
+            label="As On:"
+          />
 
           {/* Refresh Button */}
           <button
@@ -922,8 +918,8 @@ export default function ConsistentAccountReceivablePage() {
                                     <div key={inv.id} className="p-2.5 bg-white hover:bg-slate-50/80 transition flex items-center justify-between">
                                       <div className="flex items-center gap-3">
                                         <span className="font-extrabold text-blue-600">{inv.invoiceNumber}</span>
-                                        <span className="text-slate-500">Date: {inv.date ? inv.date.split('T')[0] : '—'}</span>
-                                        <span className="text-slate-500">Due: {inv.dueDate ? inv.dueDate.split('T')[0] : '—'}</span>
+                                        <span className="text-slate-500">Date: {inv.date ? formatToDDMMYYYY(inv.date) : '—'}</span>
+                                        <span className="text-slate-500">Due: {inv.dueDate ? formatToDDMMYYYY(inv.dueDate) : '—'}</span>
                                       </div>
                                       <div className="flex items-center gap-3">
                                         <span className={cn(
@@ -1013,7 +1009,7 @@ export default function ConsistentAccountReceivablePage() {
                   <tr key={inv.id} className="hover:bg-slate-50 transition">
                     <td className="py-2.5 px-3 font-extrabold text-blue-600">{inv.invoiceNumber}</td>
                     <td className="py-2.5 px-3 font-bold text-slate-800">{inv.contactName}</td>
-                    <td className="py-2.5 px-3 text-slate-600">{inv.dueDate ? inv.dueDate.split('T')[0] : '—'}</td>
+                    <td className="py-2.5 px-3 text-slate-600">{inv.dueDate ? formatToDDMMYYYY(inv.dueDate) : '—'}</td>
                     <td className="py-2.5 px-3 text-right font-medium text-slate-700">{formatAmount(inv.total)}</td>
                     <td className="py-2.5 px-3 text-right font-black text-red-600">{formatAmount(inv.amountDue)}</td>
                     <td className="py-2.5 px-3 text-center">
@@ -1084,8 +1080,8 @@ export default function ConsistentAccountReceivablePage() {
                     <tr key={inv.id} className="hover:bg-slate-50 transition">
                       <td className="py-2.5 px-3 font-extrabold text-blue-600">{inv.invoiceNumber}</td>
                       <td className="py-2.5 px-3 font-bold text-slate-800">{inv.contactName}</td>
-                      <td className="py-2.5 px-3 text-slate-600">{inv.date ? inv.date.split('T')[0] : '—'}</td>
-                      <td className="py-2.5 px-3 text-slate-600">{inv.dueDate ? inv.dueDate.split('T')[0] : '—'}</td>
+                      <td className="py-2.5 px-3 text-slate-600">{inv.date ? formatToDDMMYYYY(inv.date) : '—'}</td>
+                      <td className="py-2.5 px-3 text-slate-600">{inv.dueDate ? formatToDDMMYYYY(inv.dueDate) : '—'}</td>
                       <td className="py-2.5 px-3 text-right font-medium text-slate-700">{formatAmount(inv.total)}</td>
                       <td className="py-2.5 px-3 text-right font-bold text-slate-900">{formatAmount(inv.amountDue)}</td>
                       <td className="py-2.5 px-3 text-center font-bold text-slate-700">{inv.daysOverdue} days</td>

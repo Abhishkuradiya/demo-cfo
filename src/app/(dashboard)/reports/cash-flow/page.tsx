@@ -5,6 +5,7 @@ import Link from 'next/link';
 import dynamic from 'next/dynamic';
 
 const ReactECharts = dynamic(() => import('echarts-for-react'), { ssr: false });
+import { FormattedDatePicker } from '@/components/ui/formatted-date-picker';
 import { 
   FileText, 
   FileSpreadsheet, 
@@ -308,22 +309,10 @@ export default function CashFlowPage() {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Date range inputs */}
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-200 bg-white shadow-2xs hover:bg-slate-50/85 transition">
-            <span className="text-xs font-semibold text-slate-500">Range:</span>
-            <input 
-              type="date"
-              value={fromDate}
-              onChange={(e) => setFromDate(e.target.value)}
-              className="text-xs font-bold text-slate-700 bg-transparent outline-none cursor-pointer"
-            />
-            <span className="text-slate-350 font-bold text-xs">-</span>
-            <input 
-              type="date"
-              value={toDate}
-              onChange={(e) => setToDate(e.target.value)}
-              className="text-xs font-bold text-slate-700 bg-transparent outline-none cursor-pointer"
-            />
+          <div className="flex items-center gap-1.5">
+            <FormattedDatePicker value={fromDate} onChange={setFromDate} label="From:" />
+            <span className="text-slate-400 text-xs font-bold">-</span>
+            <FormattedDatePicker value={toDate} onChange={setToDate} label="To:" />
           </div>
 
           <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-200 bg-white hover:bg-red-50/20 text-xs font-bold text-red-600 transition cursor-pointer">

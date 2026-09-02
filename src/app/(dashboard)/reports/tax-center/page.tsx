@@ -49,6 +49,7 @@ function Tooltip({ text }: { text: string }) {
 }
 import { cn } from '@/lib/utils';
 import { PageContainer } from '@/components/common/page-container';
+import { FormattedDatePicker } from '@/components/ui/formatted-date-picker';
 import { toast } from 'sonner';
 
 const ReactECharts = dynamic(() => import('echarts-for-react'), { ssr: false });
@@ -363,22 +364,10 @@ export default function TaxCenterPage() {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap text-xs">
-          {/* Custom Date Range Picker */}
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-200 bg-white shadow-2xs">
-            <span className="text-xs font-semibold text-slate-500">Period:</span>
-            <input 
-              type="date"
-              value={fromDate}
-              onChange={(e) => setFromDate(e.target.value)}
-              className="text-xs font-bold text-slate-700 bg-transparent outline-none cursor-pointer"
-            />
-            <span className="text-slate-300">—</span>
-            <input 
-              type="date"
-              value={toDate}
-              onChange={(e) => setToDate(e.target.value)}
-              className="text-xs font-bold text-slate-700 bg-transparent outline-none cursor-pointer"
-            />
+          <div className="flex items-center gap-1.5">
+            <FormattedDatePicker value={fromDate} onChange={setFromDate} label="From:" />
+            <span className="text-slate-400 text-xs font-bold">-</span>
+            <FormattedDatePicker value={toDate} onChange={setToDate} label="To:" />
           </div>
 
           <button 
