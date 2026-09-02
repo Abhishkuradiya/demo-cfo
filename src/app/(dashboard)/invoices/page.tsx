@@ -39,24 +39,25 @@ const ReactECharts = dynamic(() => import('echarts-for-react'), { ssr: false });
 function StripeSparkline({ color, height = 36 }: { color: string; height?: number }) {
   const cleanColor = color.replace('#', '');
   return (
-    <div className="w-full overflow-hidden relative pt-1" style={{ height }}>
-      <svg viewBox="0 0 160 40" className="w-full h-full" preserveAspectRatio="none">
+    <div className="w-full overflow-hidden relative rounded-b-xl" style={{ height }}>
+      <svg viewBox="0 0 160 40" className="w-full h-full block" preserveAspectRatio="none">
         <defs>
           <linearGradient id={`grad-app-${cleanColor}`} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={color} stopOpacity="0.25" />
+            <stop offset="0%" stopColor={color} stopOpacity="0.30" />
             <stop offset="100%" stopColor={color} stopOpacity="0.0" />
           </linearGradient>
         </defs>
         <path
-          d="M 0 30 C 25 34, 45 22, 75 22 C 105 22, 125 10, 150 14 L 150 40 L 0 40 Z"
+          d="M 0 32 C 30 30, 55 33, 80 28 C 105 24, 120 14, 140 15 C 150 16, 156 19, 160 22 L 160 40 L 0 40 Z"
           fill={`url(#grad-app-${cleanColor})`}
         />
         <path
-          d="M 0 30 C 25 34, 45 22, 75 22 C 105 22, 125 10, 150 14"
+          d="M 0 32 C 30 30, 55 33, 80 28 C 105 24, 120 14, 140 15 C 150 16, 156 19, 160 22"
           fill="none"
           stroke={color}
           strokeWidth="2.2"
           strokeLinecap="round"
+          strokeLinejoin="round"
         />
       </svg>
     </div>

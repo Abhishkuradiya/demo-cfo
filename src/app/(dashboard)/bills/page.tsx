@@ -78,24 +78,25 @@ const StripeAvatar = ({ name }: { name: string }) => {
 
 // SVG Sparkline Component
 const StripeSparkline = ({ color = '#2563eb' }: { color?: string }) => (
-  <div className="w-full h-8 overflow-hidden rounded-b-xl">
-    <svg className="w-full h-full block" viewBox="0 0 100 25" preserveAspectRatio="none">
+  <div className="w-full h-9 overflow-hidden rounded-b-xl">
+    <svg className="w-full h-full block" viewBox="0 0 100 35" preserveAspectRatio="none">
       <defs>
         <linearGradient id={`grad-${color.replace('#', '')}`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity="0.25" />
+          <stop offset="0%" stopColor={color} stopOpacity="0.30" />
           <stop offset="100%" stopColor={color} stopOpacity="0.0" />
         </linearGradient>
       </defs>
       <path
-        d="M 0,22 Q 15,18 30,12 T 60,15 T 80,5 T 98,10 L 98,25 L 0,25 Z"
+        d="M 0,30 C 20,28 35,31 50,27 C 65,23 75,13 86,14 C 94,15 98,18 100,21 L 100,35 L 0,35 Z"
         fill={`url(#grad-${color.replace('#', '')})`}
       />
       <path
-        d="M 0,22 Q 15,18 30,12 T 60,15 T 80,5 T 98,10"
+        d="M 0,30 C 20,28 35,31 50,27 C 65,23 75,13 86,14 C 94,15 98,18 100,21"
         fill="none"
         stroke={color}
-        strokeWidth="2"
+        strokeWidth="2.2"
         strokeLinecap="round"
+        strokeLinejoin="round"
       />
     </svg>
   </div>
