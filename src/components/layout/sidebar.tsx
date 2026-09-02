@@ -92,6 +92,8 @@ export function Sidebar() {
         { name: 'Invoice Status Summary', href: '/invoices' },
         { name: 'Top Overdue Invoices', href: '/invoices/overdue' },
         { name: 'Bill Status Summary', href: '/bills' },
+        { name: 'Account Receivable', href: '/reports/account-receivable' },
+        { name: 'Aged Receivables', href: '/reports/aged-receivables' },
         { name: 'Bank Accounts', href: '/banking/accounts' },
         { name: 'Balance Sheet', href: '/reports/balance-sheet' },
         { name: 'Profit & Loss', href: '/reports/profit-and-loss' },
