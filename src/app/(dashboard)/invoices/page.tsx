@@ -720,38 +720,45 @@ export default function ConsistentAccountReceivablePage() {
                             setActiveTab('customers');
                             toast.info(`Drilled down to customer: ${cust.customerName}`);
                           }}
-                          className="p-2.5 rounded-lg border border-slate-100 hover:border-slate-300 hover:bg-slate-50 transition cursor-pointer space-y-1.5"
+                          className="relative overflow-hidden p-2.5 rounded-lg border border-slate-200/80 hover:border-slate-300 transition cursor-pointer flex items-center justify-between gap-2 group bg-white shadow-2xs"
                         >
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <StripeAvatar name={cust.customerName} />
-                              <div className="min-w-0">
-                                <div className="text-[11px] font-bold text-slate-900 truncate">{cust.customerName}</div>
-                                <div className="text-[9.5px] text-slate-500 truncate">
-                                  {cust.totalInvoices} {cust.totalInvoices === 1 ? 'Invoice' : 'Invoices'} • {cust.overdueCount > 0 ? <span className="font-bold text-red-600">{formatAmount(cust.overdueAmount).split(' ')[0]} Overdue</span> : <span className="font-semibold text-emerald-600">All Current</span>}
-                                </div>
-                              </div>
-                            </div>
+                          {/* Full Card Embedded Translucent Progress Fill */}
+                          <div 
+                            className={cn(
+                              "absolute left-0 top-0 bottom-0 transition-all duration-500 pointer-events-none opacity-15",
+                              cust.pctOverdue >= 80 ? "bg-red-500" : cust.pctOverdue >= 30 ? "bg-amber-500" : "bg-emerald-500"
+                            )} 
+                            style={{ width: `${Math.max(cust.pctOverdue, 0)}%` }} 
+                          />
 
-                            <div className="text-right shrink-0">
-                              <div className="text-[11px] font-black text-slate-900">
-                                {formatAmount(cust.totalReceivables).split(' ')[0]}
+                          {/* Left Colored Accent Bar */}
+                          <div 
+                            className={cn(
+                              "absolute left-0 top-0 bottom-0 w-1 transition-all duration-300",
+                              cust.pctOverdue >= 80 ? "bg-red-500" : cust.pctOverdue >= 30 ? "bg-amber-500" : "bg-emerald-500"
+                            )}
+                          />
+
+                          <div className="relative z-10 flex items-center gap-2 min-w-0 pl-1.5">
+                            <StripeAvatar name={cust.customerName} />
+                            <div className="min-w-0">
+                              <div className="text-[11px] font-extrabold text-slate-900 truncate">{cust.customerName}</div>
+                              <div className="text-[9.5px] text-slate-500 truncate">
+                                {cust.totalInvoices} {cust.totalInvoices === 1 ? 'Invoice' : 'Invoices'} • {cust.overdueCount > 0 ? <span className="font-bold text-red-600">{formatAmount(cust.overdueAmount).split(' ')[0]} Overdue</span> : <span className="font-semibold text-emerald-600">All Current</span>}
                               </div>
-                              <span className="text-[8.5px] font-bold text-slate-600 bg-slate-100 px-1.5 py-0.2 rounded border border-slate-200 inline-block">
-                                {cust.pctOverdue}% Risk
-                              </span>
                             </div>
                           </div>
 
-                          {/* Calculation-based Red Risk Progress Bar */}
-                          <div className="w-full bg-slate-100 h-1 rounded-full overflow-hidden">
-                            <div 
-                              className={cn(
-                                "h-full rounded-full transition-all duration-500",
-                                cust.pctOverdue >= 80 ? "bg-red-600" : cust.pctOverdue >= 30 ? "bg-amber-500" : "bg-emerald-500"
-                              )} 
-                              style={{ width: `${Math.max(cust.pctOverdue, 2)}%` }} 
-                            />
+                          <div className="relative z-10 text-right shrink-0">
+                            <div className="text-[11px] font-black text-slate-900">
+                              {formatAmount(cust.totalReceivables).split(' ')[0]}
+                            </div>
+                            <span className={cn(
+                              "text-[8.5px] font-bold px-1.5 py-0.2 rounded border inline-block mt-0.5",
+                              cust.pctOverdue >= 80 ? "bg-red-50 text-red-700 border-red-200" : cust.pctOverdue >= 30 ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                            )}>
+                              {cust.pctOverdue}% Risk
+                            </span>
                           </div>
                         </div>
                       ))
