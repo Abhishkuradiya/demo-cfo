@@ -92,8 +92,8 @@ export function Sidebar() {
         { name: 'Account Receivable', href: '/invoices' },
         { name: 'Top Overdue Invoices', href: '/invoices/overdue' },
         { name: 'Bill Status Summary', href: '/bills' },
-        { name: 'Account Receivable', href: '/reports/account-receivable' },
-        { name: 'Aged Receivables', href: '/reports/aged-receivables' },
+        { name: 'Aged Receivables Detail', href: '/reports/account-receivable' },
+        { name: 'Aged Receivables Summary', href: '/reports/aged-receivables' },
         { name: 'Bank Accounts', href: '/banking/accounts' },
         { name: 'Balance Sheet', href: '/reports/balance-sheet' },
         { name: 'Profit & Loss', href: '/reports/profit-and-loss' },
@@ -256,7 +256,7 @@ export function Sidebar() {
                     {item.subItems.map((sub) => {
                       const isSubActive = pathname === sub.href;
                       return (
-                        <div key={sub.name} className="relative flex items-center h-8">
+                        <div key={sub.href} className="relative flex items-center h-8">
                           {/* Curved branch line */}
                           <div className="absolute -left-4 top-[14px] w-4 h-4 border-l border-b border-slate-750/50 rounded-bl-lg pointer-events-none" />
                           <Link
