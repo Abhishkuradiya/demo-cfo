@@ -78,25 +78,27 @@ const StripeAvatar = ({ name }: { name: string }) => {
 
 // SVG Sparkline Component
 const StripeSparkline = ({ color = '#2563eb' }: { color?: string }) => (
-  <svg className="w-full h-8 overflow-visible" viewBox="0 0 100 25" preserveAspectRatio="none">
-    <defs>
-      <linearGradient id={`grad-${color.replace('#', '')}`} x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stopColor={color} stopOpacity="0.25" />
-        <stop offset="100%" stopColor={color} stopOpacity="0.0" />
-      </linearGradient>
-    </defs>
-    <path
-      d="M0,22 Q15,18 30,12 T60,15 T80,5 T100,10 L100,25 L0,25 Z"
-      fill={`url(#grad-${color.replace('#', '')})`}
-    />
-    <path
-      d="M0,22 Q15,18 30,12 T60,15 T80,5 T100,10"
-      fill="none"
-      stroke={color}
-      strokeWidth="2.5"
-      strokeLinecap="round"
-    />
-  </svg>
+  <div className="w-full h-8 overflow-hidden rounded-b-xl">
+    <svg className="w-full h-full block" viewBox="0 0 100 25" preserveAspectRatio="none">
+      <defs>
+        <linearGradient id={`grad-${color.replace('#', '')}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.25" />
+          <stop offset="100%" stopColor={color} stopOpacity="0.0" />
+        </linearGradient>
+      </defs>
+      <path
+        d="M 0,22 Q 15,18 30,12 T 60,15 T 80,5 T 98,10 L 98,25 L 0,25 Z"
+        fill={`url(#grad-${color.replace('#', '')})`}
+      />
+      <path
+        d="M 0,22 Q 15,18 30,12 T 60,15 T 80,5 T 98,10"
+        fill="none"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </svg>
+  </div>
 );
 
 export default function AccountPayableDashboard() {
@@ -179,15 +181,15 @@ export default function AccountPayableDashboard() {
         v.bills.some((b: any) => b.billNumber.toLowerCase().includes(searchTerm.toLowerCase()));
       
       let matchesBucket = true;
-      if (selectedBucketFilter === 'current') matchesBucket = v.currentNotDue > 0;
-      else if (selectedBucketFilter === '1-30') matchesBucket = v.days1to30 > 0;
-      else if (selectedBucketFilter === '31-60') matchesBucket = v.days31to60 > 0;
-      else if (selectedBucketFilter === '61-90') matchesBucket = v.days61to90 > 0;
-      else if (selectedBucketFilter === '90+') matchesBucket = v.days90Plus > 0;
+      if (selectedBucketFilter === 'current') matchesBucket = Math.abs(v.currentNotDue) > 0.001;
+      else if (selectedBucketFilter === '1-30') matchesBucket = Math.abs(v.days1to30) > 0.001;
+      else if (selectedBucketFilter === '31-60') matchesBucket = Math.abs(v.days31to60) > 0.001;
+      else if (selectedBucketFilter === '61-90') matchesBucket = Math.abs(v.days61to90) > 0.001;
+      else if (selectedBucketFilter === '90+') matchesBucket = Math.abs(v.days90Plus) > 0.001;
 
       let matchesRisk = true;
       if (selectedRiskFilter === 'HIGH') matchesRisk = v.pctOverdue >= 40;
-      else if (selectedRiskFilter === 'CRITICAL') matchesRisk = v.days90Plus > 0;
+      else if (selectedRiskFilter === 'CRITICAL') matchesRisk = Math.abs(v.days90Plus) > 0.001;
       else if (selectedRiskFilter === 'LOW') matchesRisk = v.pctOverdue < 15;
 
       return matchesSearch && matchesBucket && matchesRisk;
@@ -479,7 +481,7 @@ export default function AccountPayableDashboard() {
             toast.info('Showing all payables');
           }}
           className={cn(
-            "bg-white rounded-xl border p-4 shadow-2xs hover:border-emerald-400 transition-all cursor-pointer flex flex-col justify-between group",
+            "bg-white rounded-xl border p-4 shadow-2xs hover:border-emerald-400 transition-all cursor-pointer flex flex-col justify-between group overflow-hidden relative",
             selectedBucketFilter === 'ALL' ? "border-emerald-500 ring-1 ring-emerald-500/20" : "border-slate-200/80"
           )}
         >
@@ -506,7 +508,7 @@ export default function AccountPayableDashboard() {
             toast.info('Filtered: Current Not Due');
           }}
           className={cn(
-            "bg-white rounded-xl border p-4 shadow-2xs hover:border-blue-400 transition-all cursor-pointer flex flex-col justify-between group",
+            "bg-white rounded-xl border p-4 shadow-2xs hover:border-blue-400 transition-all cursor-pointer flex flex-col justify-between group overflow-hidden relative",
             selectedBucketFilter === 'current' ? "border-blue-500 ring-1 ring-blue-500/20" : "border-slate-200/80"
           )}
         >
@@ -534,7 +536,7 @@ export default function AccountPayableDashboard() {
             toast.warning('Viewing overdue bills');
           }}
           className={cn(
-            "bg-white rounded-xl border p-4 shadow-2xs hover:border-amber-400 transition-all cursor-pointer flex flex-col justify-between group",
+            "bg-white rounded-xl border p-4 shadow-2xs hover:border-amber-400 transition-all cursor-pointer flex flex-col justify-between group overflow-hidden relative",
             activeTab === 'overdue' ? "border-amber-500 ring-1 ring-amber-500/20" : "border-slate-200/80"
           )}
         >
@@ -563,7 +565,7 @@ export default function AccountPayableDashboard() {
             toast.warning('Filtered: High Risk 90+ Days Overdue');
           }}
           className={cn(
-            "bg-white rounded-xl border p-4 shadow-2xs hover:border-red-500 transition-all cursor-pointer flex flex-col justify-between group",
+            "bg-white rounded-xl border p-4 shadow-2xs hover:border-red-500 transition-all cursor-pointer flex flex-col justify-between group overflow-hidden relative",
             selectedBucketFilter === '90+' ? "border-red-500 ring-1 ring-red-500/20" : "border-slate-200/80"
           )}
         >

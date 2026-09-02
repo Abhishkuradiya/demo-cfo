@@ -259,15 +259,15 @@ export default function ConsistentAccountReceivablePage() {
         c.invoices.some((inv: any) => inv.invoiceNumber.toLowerCase().includes(searchTerm.toLowerCase()));
       
       let matchesBucket = true;
-      if (selectedBucketFilter === 'current') matchesBucket = c.currentNotDue > 0;
-      else if (selectedBucketFilter === '1-30') matchesBucket = c.days1to30 > 0;
-      else if (selectedBucketFilter === '31-60') matchesBucket = c.days31to60 > 0;
-      else if (selectedBucketFilter === '61-90') matchesBucket = c.days61to90 > 0;
-      else if (selectedBucketFilter === '90+') matchesBucket = c.days90Plus > 0;
+      if (selectedBucketFilter === 'current') matchesBucket = Math.abs(c.currentNotDue) > 0.001;
+      else if (selectedBucketFilter === '1-30') matchesBucket = Math.abs(c.days1to30) > 0.001;
+      else if (selectedBucketFilter === '31-60') matchesBucket = Math.abs(c.days31to60) > 0.001;
+      else if (selectedBucketFilter === '61-90') matchesBucket = Math.abs(c.days61to90) > 0.001;
+      else if (selectedBucketFilter === '90+') matchesBucket = Math.abs(c.days90Plus) > 0.001;
 
       let matchesRisk = true;
       if (selectedRiskFilter === 'HIGH') matchesRisk = c.pctOverdue >= 40;
-      else if (selectedRiskFilter === 'CRITICAL') matchesRisk = c.days90Plus > 0;
+      else if (selectedRiskFilter === 'CRITICAL') matchesRisk = Math.abs(c.days90Plus) > 0.001;
       else if (selectedRiskFilter === 'LOW') matchesRisk = c.pctOverdue < 15;
 
       return matchesSearch && matchesBucket && matchesRisk;
