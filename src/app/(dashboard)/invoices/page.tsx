@@ -102,7 +102,10 @@ export default function ConsistentAccountReceivablePage() {
   const [activeTab, setActiveTab] = useState<'overview' | 'customers' | 'overdue' | 'ageing'>('overview');
   const [selectedBucketFilter, setSelectedBucketFilter] = useState<string>('ALL');
   const [selectedRiskFilter, setSelectedRiskFilter] = useState<string>('ALL');
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState<string>('');
+  // Customer Summary Table Sorting State
+  const [sortCol, setSortCol] = useState<'overdue' | 'total' | 'name' | 'pct'>('overdue');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   
   // Interactive Customer Expansion State
   const [expandedCustomer, setExpandedCustomer] = useState<string | null>(null);
@@ -248,10 +251,10 @@ export default function ConsistentAccountReceivablePage() {
     toast.success('Report exported as CSV');
   };
 
-  // Filter Customer Summary
+  // Filter & Sort Customer Summary
   const customerList = data?.customerSummary || [];
   const filteredCustomers = useMemo(() => {
-    return customerList.filter((c: any) => {
+    let list = customerList.filter((c: any) => {
       const matchesSearch = c.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
         c.invoices.some((inv: any) => inv.invoiceNumber.toLowerCase().includes(searchTerm.toLowerCase()));
       
@@ -269,7 +272,20 @@ export default function ConsistentAccountReceivablePage() {
 
       return matchesSearch && matchesBucket && matchesRisk;
     });
-  }, [customerList, searchTerm, selectedBucketFilter, selectedRiskFilter]);
+
+    return [...list].sort((a: any, b: any) => {
+      const aOverdue = a.days1to30 + a.days31to60 + a.days61to90 + a.days90Plus;
+      const bOverdue = b.days1to30 + b.days31to60 + b.days61to90 + b.days90Plus;
+
+      let res = 0;
+      if (sortCol === 'overdue') res = bOverdue - aOverdue;
+      else if (sortCol === 'total') res = b.totalReceivables - a.totalReceivables;
+      else if (sortCol === 'name') res = a.customerName.localeCompare(b.customerName);
+      else if (sortCol === 'pct') res = b.pctOverdue - a.pctOverdue;
+
+      return sortDir === 'desc' ? res : -res;
+    });
+  }, [customerList, searchTerm, selectedBucketFilter, selectedRiskFilter, sortCol, sortDir]);
 
   const totalPages = Math.ceil(filteredCustomers.length / pageSize) || 1;
   const paginatedCustomers = filteredCustomers.slice((currentPage - 1) * pageSize, currentPage * pageSize);
@@ -784,16 +800,36 @@ export default function ConsistentAccountReceivablePage() {
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="border-b border-slate-100 text-[10px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50/50">
-                    <th className="py-2 px-3">CUSTOMER</th>
+                    <th 
+                      onClick={() => { setSortCol('name'); setSortDir(sortCol === 'name' && sortDir === 'asc' ? 'desc' : 'asc'); }}
+                      className="py-2 px-3 cursor-pointer hover:text-slate-700 select-none"
+                    >
+                      CUSTOMER {sortCol === 'name' ? (sortDir === 'desc' ? '↓' : '↑') : ''}
+                    </th>
                     <th className="py-2 px-3 text-center">INVOICES</th>
-                    <th className="py-2 px-3 text-right">TOTAL RECEIVABLES</th>
+                    <th 
+                      onClick={() => { setSortCol('total'); setSortDir(sortCol === 'total' && sortDir === 'desc' ? 'asc' : 'desc'); }}
+                      className="py-2 px-3 text-right cursor-pointer hover:text-slate-700 select-none"
+                    >
+                      TOTAL RECEIVABLES {sortCol === 'total' ? (sortDir === 'desc' ? '↓' : '↑') : ''}
+                    </th>
                     <th className="py-2 px-3 text-right">CURRENT</th>
                     <th className="py-2 px-3 text-right">1 - 30 DAYS</th>
                     <th className="py-2 px-3 text-right">31 - 60 DAYS</th>
                     <th className="py-2 px-3 text-right">61 - 90 DAYS</th>
                     <th className="py-2 px-3 text-right">90+ DAYS</th>
-                    <th className="py-2 px-3 text-right text-red-600">TOTAL OVERDUE</th>
-                    <th className="py-2 px-3 text-right">% OVERDUE</th>
+                    <th 
+                      onClick={() => { setSortCol('overdue'); setSortDir(sortCol === 'overdue' && sortDir === 'desc' ? 'asc' : 'desc'); }}
+                      className="py-2 px-3 text-right text-red-600 cursor-pointer hover:text-red-800 select-none font-black"
+                    >
+                      TOTAL OVERDUE {sortCol === 'overdue' ? (sortDir === 'desc' ? '↓' : '↑') : ''}
+                    </th>
+                    <th 
+                      onClick={() => { setSortCol('pct'); setSortDir(sortCol === 'pct' && sortDir === 'desc' ? 'asc' : 'desc'); }}
+                      className="py-2 px-3 text-right cursor-pointer hover:text-slate-700 select-none"
+                    >
+                      % OVERDUE {sortCol === 'pct' ? (sortDir === 'desc' ? '↓' : '↑') : ''}
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-[11.5px]">

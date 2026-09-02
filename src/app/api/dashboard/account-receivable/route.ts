@@ -275,8 +275,13 @@ export async function GET(req: NextRequest) {
       customerSummaryList = customerSummaryList.filter(c => c.customerName.toLowerCase().includes(customerFilter));
     }
 
-    // Sort customer list by totalReceivables descending
-    customerSummaryList.sort((a, b) => b.totalReceivables - a.totalReceivables);
+    // Sort customer list by totalOverdue descending (matches Top Overdue Customers card order 100%)
+    customerSummaryList.sort((a, b) => {
+      const aOverdue = a.days1to30 + a.days31to60 + a.days61to90 + a.days90Plus;
+      const bOverdue = b.days1to30 + b.days31to60 + b.days61to90 + b.days90Plus;
+      if (bOverdue !== aOverdue) return bOverdue - aOverdue;
+      return b.totalReceivables - a.totalReceivables;
+    });
 
     // Collection Efficiency & Quick Insights
     const totalIssued = processedInvoices.reduce((acc, inv) => acc + inv.total, 0);
