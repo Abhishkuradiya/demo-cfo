@@ -110,8 +110,28 @@ export async function GET(req: NextRequest) {
       const invDate = parseXeroDate(inv.Date || inv.invoice_date);
       const invDueDate = parseXeroDate(inv.DueDate || inv.due_date || inv.Date || inv.invoice_date);
       const total = parseFloat(inv.Total || inv.total || 0);
-      const rawAmountDue = parseFloat(inv.AmountDue || inv.amount_due || (st === 'PAID' ? 0 : total));
-      const amountPaid = parseFloat(inv.AmountPaid || inv.amount_paid || (st === 'PAID' ? total : 0));
+      
+      let rawAmountDue = 0;
+      if (st === 'PAID') {
+        rawAmountDue = 0;
+      } else if (inv.AmountDue !== undefined && inv.AmountDue !== null) {
+        rawAmountDue = parseFloat(inv.AmountDue);
+      } else if (inv.amount_due !== undefined && inv.amount_due !== null) {
+        rawAmountDue = parseFloat(inv.amount_due);
+      } else {
+        rawAmountDue = total;
+      }
+
+      let amountPaid = 0;
+      if (st === 'PAID') {
+        amountPaid = total;
+      } else if (inv.AmountPaid !== undefined && inv.AmountPaid !== null) {
+        amountPaid = parseFloat(inv.AmountPaid);
+      } else if (inv.amount_paid !== undefined && inv.amount_paid !== null) {
+        amountPaid = parseFloat(inv.amount_paid);
+      } else {
+        amountPaid = total - rawAmountDue;
+      }
 
       const isCreditNote = t === 'ACCPAYCRED' || t === 'CREDITNOTE';
       const amountDue = isCreditNote ? -Math.abs(rawAmountDue) : rawAmountDue;
