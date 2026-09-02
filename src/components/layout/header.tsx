@@ -226,9 +226,12 @@ export function Header() {
           subtitle: "Manage accounts receivable and customer invoice logs"
         };
       case '/invoices':
+      case '/reports/account-receivable':
+      case '/reports/aged-receivables':
+      case '/reports/invoice-status-summary':
         return {
-          title: "Invoices Management",
-          subtitle: "Draft, track, and reconcile user invoices"
+          title: "Account Receivable",
+          subtitle: "Real-time overview of your outstanding invoices and collections"
         };
       case '/products':
         return {

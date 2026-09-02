@@ -89,7 +89,7 @@ export function Sidebar() {
       subItems: [
         { name: 'Xero Dashboard', href: '/overview' },
         { name: 'Chart of Accounts', href: '/chart-of-accounts' },
-        { name: 'Invoice Status Summary', href: '/invoices' },
+        { name: 'Account Receivable', href: '/invoices' },
         { name: 'Top Overdue Invoices', href: '/invoices/overdue' },
         { name: 'Bill Status Summary', href: '/bills' },
         { name: 'Account Receivable', href: '/reports/account-receivable' },

@@ -35,7 +35,7 @@ import { toast } from 'sonner';
 
 const ReactECharts = dynamic(() => import('echarts-for-react'), { ssr: false });
 
-// Clean Minimalist Sparkline (40px viewBox)
+// Clean Mini Sparkline (40px viewBox)
 function StripeSparkline({ color, height = 36 }: { color: string; height?: number }) {
   const cleanColor = color.replace('#', '');
   return (
@@ -63,7 +63,7 @@ function StripeSparkline({ color, height = 36 }: { color: string; height?: numbe
   );
 }
 
-// Avatar Initials
+// Avatar Initials Generator
 function StripeAvatar({ name }: { name: string }) {
   const getInitials = (n: string) => {
     if (!n) return 'CU';
@@ -90,15 +90,15 @@ function StripeAvatar({ name }: { name: string }) {
   );
 }
 
-export default function StripeStyleAccountReceivableDashboard() {
+export default function AccountReceivableDashboardPage() {
   const [asOnDate, setAsOnDate] = useState<string>('2026-08-31');
   const [loading, setLoading] = useState<boolean>(true);
   const [data, setData] = useState<any>(null);
 
-  // Active Main Tab State (Minimalist Inline Navigation)
+  // Active Navigation Tab
   const [activeTab, setActiveTab] = useState<'overview' | 'customers' | 'overdue' | 'ageing'>('overview');
 
-  // Inline Table Expansion & Filtering State
+  // Inline Table Expansion & Filtering
   const [expandedCustomer, setExpandedCustomer] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedAgeingBucket, setSelectedAgeingBucket] = useState<string>('1-30');
@@ -165,6 +165,7 @@ export default function StripeStyleAccountReceivableDashboard() {
     };
   }, [data, currencyCode]);
 
+  // Expanded Receivables Trend ECharts Config (Fills entire card without whitespace)
   const trendLineOption = useMemo(() => {
     if (!data?.trend) return {};
     return {
@@ -176,32 +177,32 @@ export default function StripeStyleAccountReceivableDashboard() {
         textStyle: { color: '#ffffff', fontSize: 11 }
       },
       legend: {
-        bottom: '0%',
+        bottom: '2%',
         icon: 'circle',
-        itemWidth: 8,
-        itemHeight: 8,
-        textStyle: { color: '#475569', fontSize: 10.5, fontWeight: 'bold' },
+        itemWidth: 9,
+        itemHeight: 9,
+        textStyle: { color: '#475569', fontSize: 11, fontWeight: 'bold' },
         data: ['Current', '1 - 30 Days', '31 - 60 Days', '61 - 90 Days', '90+ Days']
       },
-      grid: { left: '3%', right: '4%', top: '8%', bottom: '22%', containLabel: true },
+      grid: { left: '3%', right: '3%', top: '6%', bottom: '15%', containLabel: true },
       xAxis: {
         type: 'category',
         data: data.trend.labels,
         axisLine: { lineStyle: { color: '#cbd5e1' } },
-        axisLabel: { color: '#64748b', fontSize: 10, fontWeight: 'bold' }
+        axisLabel: { color: '#64748b', fontSize: 11, fontWeight: 'bold' }
       },
       yAxis: {
         type: 'value',
         axisLine: { show: false },
         splitLine: { lineStyle: { color: '#f1f5f9', type: 'dashed' } },
-        axisLabel: { color: '#94a3b8', fontSize: 10, formatter: (val: number) => `£${val >= 1000 ? `${(val / 1000).toFixed(0)}K` : val}` }
+        axisLabel: { color: '#94a3b8', fontSize: 10.5, formatter: (val: number) => `£${val >= 1000 ? `${(val / 1000).toFixed(0)}K` : val}` }
       },
       series: [
-        { name: 'Current', type: 'line', smooth: true, symbolSize: 6, lineStyle: { width: 2.5, color: '#2563eb' }, itemStyle: { color: '#2563eb' }, data: data.trend.series.current },
-        { name: '1 - 30 Days', type: 'line', smooth: true, symbolSize: 6, lineStyle: { width: 2.5, color: '#eab308' }, itemStyle: { color: '#eab308' }, data: data.trend.series.days1to30 },
-        { name: '31 - 60 Days', type: 'line', smooth: true, symbolSize: 6, lineStyle: { width: 2.5, color: '#f97316' }, itemStyle: { color: '#f97316' }, data: data.trend.series.days31to60 },
-        { name: '61 - 90 Days', type: 'line', smooth: true, symbolSize: 6, lineStyle: { width: 2.5, color: '#ef4444' }, itemStyle: { color: '#ef4444' }, data: data.trend.series.days61to90 },
-        { name: '90+ Days', type: 'line', smooth: true, symbolSize: 6, lineStyle: { width: 2.5, color: '#991b1b' }, itemStyle: { color: '#991b1b' }, data: data.trend.series.days90Plus }
+        { name: 'Current', type: 'line', smooth: true, symbolSize: 6, lineStyle: { width: 2.5, color: '#2563eb' }, itemStyle: { color: '#2563eb' }, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(37, 99, 235, 0.12)' }, { offset: 1, color: 'rgba(37, 99, 235, 0.0)' }]) }, data: data.trend.series.current },
+        { name: '1 - 30 Days', type: 'line', smooth: true, symbolSize: 6, lineStyle: { width: 2.5, color: '#eab308' }, itemStyle: { color: '#eab308' }, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(234, 179, 8, 0.12)' }, { offset: 1, color: 'rgba(234, 179, 8, 0.0)' }]) }, data: data.trend.series.days1to30 },
+        { name: '31 - 60 Days', type: 'line', smooth: true, symbolSize: 6, lineStyle: { width: 2.5, color: '#f97316' }, itemStyle: { color: '#f97316' }, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(249, 115, 22, 0.12)' }, { offset: 1, color: 'rgba(249, 115, 22, 0.0)' }]) }, data: data.trend.series.days31to60 },
+        { name: '61 - 90 Days', type: 'line', smooth: true, symbolSize: 6, lineStyle: { width: 2.5, color: '#ef4444' }, itemStyle: { color: '#ef4444' }, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(239, 68, 68, 0.12)' }, { offset: 1, color: 'rgba(239, 68, 68, 0.0)' }]) }, data: data.trend.series.days61to90 },
+        { name: '90+ Days', type: 'line', smooth: true, symbolSize: 6, lineStyle: { width: 2.5, color: '#991b1b' }, itemStyle: { color: '#991b1b' }, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(153, 27, 27, 0.12)' }, { offset: 1, color: 'rgba(153, 27, 27, 0.0)' }]) }, data: data.trend.series.days90Plus }
       ]
     };
   }, [data]);
@@ -225,7 +226,7 @@ export default function StripeStyleAccountReceivableDashboard() {
     const csvContent = 'data:text/csv;charset=utf-8,' + [csvHeader, ...csvRows].join('\n');
     const link = document.createElement('a');
     link.setAttribute('href', encodeURI(csvContent));
-    link.setAttribute('download', `Account_Receivable_Export_${asOnDate}.csv`);
+    link.setAttribute('download', `Account_Receivable_Report_${asOnDate}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -266,10 +267,10 @@ export default function StripeStyleAccountReceivableDashboard() {
 
   return (
     <div className="min-h-screen bg-[#f8fafc] p-4 lg:p-6 select-none font-sans text-slate-800">
-      <div className="max-w-[1600px] mx-auto space-y-6">
+      <div className="max-w-[1640px] mx-auto space-y-6">
         
         {/* ========================================================================= */}
-        {/* STRIPE-STYLE MINIMALIST HEADER & INLINE NAVIGATION TABS */}
+        {/* HEADER BAR */}
         {/* ========================================================================= */}
         <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-2xs space-y-4">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -281,13 +282,13 @@ export default function StripeStyleAccountReceivableDashboard() {
                 <span>&gt;</span>
                 <span className="text-slate-700 font-bold">Account Receivable</span>
               </div>
-              <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">Account Receivable</h1>
+              <h1 className="text-2xl font-black text-slate-900 tracking-tight">Account Receivable Dashboard</h1>
               <p className="text-xs text-slate-500 font-medium mt-0.5">
-                Clean, real-time overview of outstanding receivables and collections.
+                Real-time financial overview of your outstanding receivables, customer ageing, and collection trends.
               </p>
             </div>
 
-            {/* Top Action Bar */}
+            {/* Top Action Controls */}
             <div className="flex flex-wrap items-center gap-3">
               {/* As On Date Selector */}
               <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-700">
@@ -322,7 +323,7 @@ export default function StripeStyleAccountReceivableDashboard() {
             </div>
           </div>
 
-          {/* INLINE TAB NAVIGATION (NO DRAWERS / NO SIDEVIEWS) */}
+          {/* INLINE TAB NAVIGATION */}
           <div className="flex items-center gap-2 border-t border-slate-100 pt-3 text-xs font-semibold text-slate-600">
             <button
               onClick={() => setActiveTab('overview')}
@@ -373,7 +374,7 @@ export default function StripeStyleAccountReceivableDashboard() {
         </div>
 
         {/* ========================================================================= */}
-        {/* 4 PRIMARY METRIC CARDS (UNCLUTTERED STRIPE STYLE) */}
+        {/* 4 PRIMARY CLEAR METRIC CARDS */}
         {/* ========================================================================= */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           
@@ -387,7 +388,7 @@ export default function StripeStyleAccountReceivableDashboard() {
               <div className="text-2xl font-extrabold text-slate-900 mt-1.5 tracking-tight">
                 {formatAmount(totalReceivablesVal)}
               </div>
-              <span className="text-[11px] text-emerald-600 font-semibold mt-1 block">100% of outstanding balance</span>
+              <span className="text-[11px] text-emerald-600 font-semibold mt-1 block">100% of total outstanding balance</span>
             </div>
             <div className="mt-2 -mx-4 -mb-4">
               <StripeSparkline color="#10b981" />
@@ -453,7 +454,7 @@ export default function StripeStyleAccountReceivableDashboard() {
         </div>
 
         {/* ========================================================================= */}
-        {/* TAB CONTENT 1: OVERVIEW TAB */}
+        {/* TAB CONTENT 1: OVERVIEW TAB (FEATURING FULL-HEIGHT EXPANDED TREND GRAPH) */}
         {/* ========================================================================= */}
         {activeTab === 'overview' && (
           <div className="space-y-6">
@@ -508,17 +509,18 @@ export default function StripeStyleAccountReceivableDashboard() {
                 </button>
               </div>
 
-              {/* Receivables Trend (5 cols) */}
+              {/* Receivables Trend (5 cols) - FULL EXPANDED GRAPH (NO BOTTOM WHITESPACE) */}
               <div className="lg:col-span-5 bg-white rounded-2xl border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between mb-2">
+                <div className="flex flex-col h-full">
+                  <div className="flex items-center justify-between mb-1">
                     <h3 className="text-sm font-extrabold text-slate-900">Receivables Trend</h3>
                     <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
                       Last 6 Months
                     </span>
                   </div>
                   
-                  <div className="h-64 w-full">
+                  {/* Chart fills full height of card */}
+                  <div className="h-[340px] w-full flex-1">
                     <ReactECharts option={trendLineOption} style={{ height: '100%', width: '100%' }} />
                   </div>
                 </div>
