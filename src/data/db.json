@@ -66,31 +66,10 @@
       "client_id": "540F833512984F9081DCA2D95B6E63F7",
       "client_secret": "ePvj5piHS7enomLOM18UWrJA6Un1hMuvsqRYuAfFRqIrMSgV",
       "tenant_identifier": "d01e7f74-348d-4b6c-a94c-996fd263bdb2",
-      "access_token": "eyJhbGciOiJSUzI1NiIsImtpZCI6IjFDQUY4RTY2NzcyRDZEQzAyOEQ2NzI2RkQwMjYxNTgxNTcwRUZDMTkiLCJ4NXQiOiJISy1PWm5jdGJjQW8xbkp2MENZVmdWY09fQmsiLCJ0eXAiOiJKV1QifQ.eyJpc3MiOiJodHRwczovL2lkZW50aXR5Lnhlcm8uY29tIiwibmJmIjoxNzg2MDkwODY3LCJpYXQiOjE3ODYwOTA4NjcsImV4cCI6MTc4NjA5MjY2NywiYXVkIjoiaHR0cHM6Ly9pZGVudGl0eS54ZXJvLmNvbS9yZXNvdXJjZXMiLCJzY29wZSI6WyJvcGVuaWQiLCJwcm9maWxlIiwiZW1haWwiLCJhY2NvdW50aW5nLmNvbnRhY3RzLnJlYWQiLCJhY2NvdW50aW5nLmludm9pY2VzLnJlYWQiLCJhY2NvdW50aW5nLnBheW1lbnRzLnJlYWQiLCJhY2NvdW50aW5nLnNldHRpbmdzLnJlYWQiLCJhY2NvdW50aW5nLnJlcG9ydHMucHJvZml0YW5kbG9zcy5yZWFkIiwiYWNjb3VudGluZy5iYW5rdHJhbnNhY3Rpb25zLnJlYWQiLCJhY2NvdW50aW5nLmF0dGFjaG1lbnRzIiwiYWNjb3VudGluZy5idWRnZXRzLnJlYWQiLCJhY2NvdW50aW5nLm1hbnVhbGpvdXJuYWxzLnJlYWQiLCJhY2NvdW50aW5nLnJlcG9ydHMuYmFsYW5jZXNoZWV0LnJlYWQiLCJhY2NvdW50aW5nLnJlcG9ydHMudHJpYWxiYWxhbmNlLnJlYWQiLCJhY2NvdW50aW5nLnJlcG9ydHMuYWdlZC5yZWFkIiwiYWNjb3VudGluZy5pbnZvaWNlcyIsImFjY291bnRpbmcuY29udGFjdHMiLCJhY2NvdW50aW5nLnNldHRpbmdzIiwiYWNjb3VudGluZy5iYW5rdHJhbnNhY3Rpb25zIiwib2ZmbGluZV9hY2Nlc3MiXSwiYW1yIjpbInB3ZCIsIm1mYSIsIm90cCJdLCJjbGllbnRfaWQiOiI1NDBGODMzNTEyOTg0RjkwODFEQ0EyRDk1QjZFNjNGNyIsInN1YiI6IjUyNTRiNDM3Nzk2OTU2OTM5MmI2YWEzYzVlOTk4OTI1IiwiYXV0aF90aW1lIjoxNzg2MDIwNjQ3LCJ4ZXJvX3VzZXJpZCI6ImZmOTc5OWVjLTQyNDgtNDM2MS04NmM0LTkzYzliOGI2YmU2YSIsImdsb2JhbF9zZXNzaW9uX2lkIjoiZDY1MzdiODUwNDhhNDlmYjlmMTZmODQwODc2YTIyMzMiLCJzaWQiOiJkNjUzN2I4NTA0OGE0OWZiOWYxNmY4NDA4NzZhMjIzMyIsImF1dGhlbnRpY2F0aW9uX2V2ZW50X2lkIjoiZmQ3ODE0YTMtMGE4NC00OTlmLWFjOTktYTJmOTIzYTBkYzMwIiwianRpIjoiMjhDNDBGMUEyODA1OEY3MjdBQTg0NTY3QThGNzE0MjMifQ.uMsVu4ybkcbZMOkyQQSAUj7_rJQRa0YKECWXmLp6JzWsMN426Wcso73jek4HjhXRrK4gmrTz-Lhgg6msMu5aggaurX6coe6uVU-UVVStNbMU_gLVP7_6lzMMwtAbSnhrjkf6VZtpg4_J08c_SfD3DMmez8Nd25rzL0qDWIGUA-597G66UnYwpZTCcsZKs09Em6MPCCU_f-jbYr1C57zFOQodnRGdPgYcO0th9Tmy-E1t5vlfBMhs9Df_TuKBlws0aDU4nD_zt9b3Wy5gS_aK0yJfZBb3gaR5Co_DX5XGxbRhwBW4exF1RltaknHtPIuBATrLEUost-PzG8jbz7c1jQ",
-      "refresh_token": "KO2z03b41t0zVrxtzbW1N-3SS84d9KcvLCI_B2-3WEE",
-      "expires_at": "2026-08-07T08:51:08.513Z",
-      "scopes": [
-        "openid",
-        "profile",
-        "email",
-        "accounting.contacts.read",
-        "accounting.invoices.read",
-        "accounting.payments.read",
-        "accounting.settings.read",
-        "accounting.reports.profitandloss.read",
-        "accounting.banktransactions.read",
-        "accounting.attachments",
-        "accounting.budgets.read",
-        "accounting.manualjournals.read",
-        "accounting.reports.balancesheet.read",
-        "accounting.reports.trialbalance.read",
-        "accounting.reports.aged.read",
-        "accounting.invoices",
-        "accounting.contacts",
-        "accounting.settings",
-        "accounting.banktransactions",
-        "offline_access"
-      ],
+      "access_token": null,
+      "refresh_token": null,
+      "expires_at": null,
+      "scopes": null,
       "last_synced_at": "2026-08-07T08:23:54.477Z"
     },
     {
@@ -45542,13 +45521,6 @@
       "created_at": "2026-08-06T12:42:55.356Z"
     },
     {
-      "id": 2,
-      "email": "chittipriya@gmail.com",
-      "password_hash": "5d2303f664217cc71e135a255ae27bc8:f4ed9221cfbc73f06a4fbc7894328e329017ccc7c50e84488ab4efb2511f9e4fd61cd8f7df6b794667748d31d7732dc9053e817049527497cbbbeca593f90025",
-      "tenant_id": 2,
-      "created_at": "2026-08-06T12:52:40.182Z"
-    },
-    {
       "id": 3,
       "email": "finance@cfo.com",
       "password_hash": "8641ce521f2cdc7ed9be8c77c830981a:57850573af0702c2898e4515b9923f2f50ec7b00ed2b39ee818b7b1a6ade8c7980993fdd342f9061163b77a527da2bb9bbb6df88429b69f5e5117133b4c2a3b3",
@@ -74108,5 +74080,6 @@
       "title": "What were our biggest sou...",
       "createdAt": "2026-08-13T14:02:02.449Z"
     }
-  ]
+  ],
+  "tax_transactions": []
 }

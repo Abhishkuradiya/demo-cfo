@@ -7,6 +7,7 @@ import { useSidebarStore } from '@/store/sidebar-store';
 import { Bell, Calendar, RefreshCw, Menu, Star, Filter, ChevronDown, Trash2, Building2, Check, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { DateRangePicker } from '../ui/date-range-picker';
+import { cn } from '@/lib/utils';
 
 function formatTimeAgo(dateStr: string | null | undefined): string {
   if (!dateStr) return "Never synced";
@@ -39,6 +40,9 @@ export function Header() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const datePickerRef = useRef<HTMLDivElement>(null);
+  const [tempFromDate, setTempFromDate] = useState<string>('');
+  const [tempToDate, setTempToDate] = useState<string>('');
 
   // Xero connections and organisation switcher state
   const [connections, setConnections] = useState<{ xeroTenantId: string; name: string }[]>([]);
@@ -52,11 +56,14 @@ export function Header() {
   const [defaultStart, setDefaultStart] = useState<string | null>(null);
   const [defaultEnd, setDefaultEnd] = useState<string | null>(null);
 
-  // Close switcher when clicking outside
+  // Close switcher and date picker when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (switcherRef.current && !switcherRef.current.contains(event.target as Node)) {
         setShowOrgSwitcher(false);
+      }
+      if (datePickerRef.current && !datePickerRef.current.contains(event.target as Node)) {
+        setShowDatePicker(false);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
@@ -71,12 +78,16 @@ export function Header() {
     return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   };
 
-  const activeStart = fromDate || defaultStart;
-  const activeEnd = toDate || defaultEnd;
+  const now = new Date();
+  const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+  const currentMonthEnd = now.toISOString().slice(0, 10);
+
+  const activeStart = fromDate || defaultStart || currentMonthStart;
+  const activeEnd = toDate || defaultEnd || currentMonthEnd;
 
   const dateRangeLabel = (activeStart && activeEnd)
-    ? `${formatDateLabel(activeStart)} - ${formatDateLabel(activeEnd)}`
-    : "Last 6 Months";
+    ? `${formatDateLabel(activeStart)} – ${formatDateLabel(activeEnd)}`
+    : `${formatDateLabel(currentMonthStart)} – ${formatDateLabel(currentMonthEnd)}`;
 
   const updateUrl = (from: Date, to: Date) => {
     const fromStr = from.toISOString().slice(0, 10);
@@ -336,29 +347,6 @@ export function Header() {
       </div>
 
       <div className="flex items-center gap-4">
-        {/* Date Range Picker */}
-        {!pathname.startsWith('/reports') && (
-          <div className="relative">
-            <button
-              onClick={() => setShowDatePicker(!showDatePicker)}
-              className="flex items-center gap-2.5 px-4 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700 shadow-2xs transition cursor-pointer outline-none h-9.5"
-            >
-              <span>{dateRangeLabel}</span>
-              <Calendar className="h-4 w-4 text-slate-450" />
-            </button>
-
-            <DateRangePicker
-              isOpen={showDatePicker}
-              onClose={() => setShowDatePicker(false)}
-              onApply={(start, end) => {
-                updateUrl(start, end);
-                setShowDatePicker(false);
-              }}
-              initialStart={fromDate || defaultStart || undefined}
-              initialEnd={toDate || defaultEnd || undefined}
-            />
-          </div>
-        )}
 
         {/* Organisation Switcher */}
         {connections.length > 0 && (
@@ -400,6 +388,112 @@ export function Header() {
                       </button>
                     );
                   })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Date Range Picker for Overview / Reports */}
+        {(pathname === '/overview' || isSales || pathname.startsWith('/reports')) && (
+          <div className="relative shrink-0" ref={datePickerRef}>
+            <button
+              onClick={() => setShowDatePicker(!showDatePicker)}
+              className="flex items-center gap-2 px-3.5 py-2 bg-white border border-slate-200 rounded-lg shadow-2xs text-xs font-bold text-slate-700 hover:bg-slate-50 transition cursor-pointer outline-none h-9.5"
+            >
+              <Calendar className="h-3.5 w-3.5 text-blue-600" />
+              <span>{dateRangeLabel}</span>
+              <ChevronDown className={cn("h-3.5 w-3.5 text-slate-400 transition-transform", showDatePicker && "rotate-180")} />
+            </button>
+
+            {/* Dropdown Menu */}
+            {showDatePicker && (
+              <div className="absolute right-0 mt-2 w-72 bg-white rounded-xl border border-slate-200 shadow-xl p-3.5 z-50 animate-in fade-in zoom-in-95 duration-150">
+                <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block mb-2 px-1">Quick Select</span>
+                <div className="grid grid-cols-2 gap-1.5 mb-3">
+                  <button
+                    onClick={() => {
+                      const now = new Date();
+                      const from = new Date(now.getFullYear(), now.getMonth(), 1);
+                      const to = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                      updateUrl(from, to);
+                      setShowDatePicker(false);
+                    }}
+                    className="px-3 py-1.5 text-[11px] font-bold bg-slate-50 hover:bg-blue-50 hover:text-blue-600 rounded-lg text-slate-700 text-left transition"
+                  >
+                    This Month
+                  </button>
+                  <button
+                    onClick={() => {
+                      const now = new Date();
+                      const from = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                      const to = new Date(now.getFullYear(), now.getMonth(), 0);
+                      updateUrl(from, to);
+                      setShowDatePicker(false);
+                    }}
+                    className="px-3 py-1.5 text-[11px] font-bold bg-slate-50 hover:bg-blue-50 hover:text-blue-600 rounded-lg text-slate-700 text-left transition"
+                  >
+                    Last Month
+                  </button>
+                  <button
+                    onClick={() => {
+                      const now = new Date();
+                      const from = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+                      const to = now;
+                      updateUrl(from, to);
+                      setShowDatePicker(false);
+                    }}
+                    className="px-3 py-1.5 text-[11px] font-bold bg-slate-50 hover:bg-blue-50 hover:text-blue-600 rounded-lg text-slate-700 text-left transition"
+                  >
+                    Last 3 Months
+                  </button>
+                  <button
+                    onClick={() => {
+                      const now = new Date();
+                      const from = new Date(now.getFullYear(), 0, 1);
+                      const to = new Date(now.getFullYear(), 11, 31);
+                      updateUrl(from, to);
+                      setShowDatePicker(false);
+                    }}
+                    className="px-3 py-1.5 text-[11px] font-bold bg-slate-50 hover:bg-blue-50 hover:text-blue-600 rounded-lg text-slate-700 text-left transition"
+                  >
+                    This Year
+                  </button>
+                </div>
+
+                <div className="border-t border-slate-100 pt-3 space-y-2.5">
+                  <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block px-1">Custom Range</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[9.5px] font-bold text-slate-400 block mb-1">From Date</label>
+                      <input
+                        type="date"
+                        value={tempFromDate || activeStart}
+                        onChange={(e) => setTempFromDate(e.target.value)}
+                        className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-[11px] font-medium text-slate-700 focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[9.5px] font-bold text-slate-400 block mb-1">To Date</label>
+                      <input
+                        type="date"
+                        value={tempToDate || activeEnd}
+                        onChange={(e) => setTempToDate(e.target.value)}
+                        className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-[11px] font-medium text-slate-700 focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      if (tempFromDate && tempToDate) {
+                        updateUrl(new Date(tempFromDate), new Date(tempToDate));
+                        setShowDatePicker(false);
+                      }
+                    }}
+                    className="w-full py-2 mt-1 bg-blue-600 hover:bg-blue-700 text-white font-bold text-[11.5px] rounded-lg shadow-2xs transition cursor-pointer"
+                  >
+                    Apply Date Range
+                  </button>
                 </div>
               </div>
             )}

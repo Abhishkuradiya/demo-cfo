@@ -457,10 +457,10 @@ export default function ConnectedBankAccounts({ onManageConnections }: { onManag
 
         {/* Buttons Block */}
         <div className="mt-4 space-y-2">
-          <ActionButton label="Manage Bank Connections" onClick={onManageConnections} />
+          <ActionButton label="Manage Bank Connections" onClick={onManageConnections || (() => window.location.href = '/banking/accounts')} />
           
           <a
-            href="/cash-flow"
+            href="/banking/accounts"
             className="flex items-center justify-center gap-0.5 text-[9.5px] font-bold text-blue-600 hover:text-blue-700 transition py-1 hover:underline"
           >
             <span>Open Banking Dashboard</span>

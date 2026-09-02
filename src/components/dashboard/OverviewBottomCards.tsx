@@ -205,13 +205,6 @@ function RecentActivityCard({
           </div>
         ))}
       </div>
-
-      <div className="mt-4 shrink-0">
-        <button onClick={onNavigate} className="w-full py-2.5 px-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg text-[10.5px] font-bold flex items-center justify-center gap-1.5 transition">
-          <span>View All</span>
-          <ArrowRight className="h-3.5 w-3.5" />
-        </button>
-      </div>
     </div>
   );
 }
@@ -286,13 +279,6 @@ function PendingApprovalsCard({
           </div>
         ))}
       </div>
-
-      <div className="mt-4 shrink-0">
-        <button onClick={onNavigate} className="w-full py-2.5 px-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg text-[10.5px] font-bold flex items-center justify-center gap-1.5 transition">
-          <span>View All Pending</span>
-          <ArrowRight className="h-3.5 w-3.5" />
-        </button>
-      </div>
     </div>
   );
 }
@@ -337,19 +323,19 @@ function TopCustomersCard({
       <div className="flex-1 py-3.5 space-y-3">
         {customers.map((c, idx) => (
           <div key={idx} className="flex justify-between items-center text-[10.5px]">
-            <div className="flex items-center gap-2.5 min-w-0">
+            <div className="flex items-center gap-2.5 min-w-0 flex-1 pr-2">
               <div className="h-7 w-7 rounded-full bg-blue-50 border border-blue-100 text-blue-600 font-extrabold text-[9px] flex items-center justify-center shrink-0">
                 {c.avatar}
               </div>
-              <span className="font-extrabold text-slate-700 truncate">{c.name}</span>
+              <span className="font-extrabold text-slate-700 truncate block" title={c.name}>{c.name}</span>
             </div>
-            <span className="font-extrabold text-emerald-600 shrink-0">{formatCurrency(c.revenue, currency)}</span>
+            <span className="font-extrabold text-emerald-600 shrink-0 whitespace-nowrap">{formatCurrency(c.revenue, currency)}</span>
           </div>
         ))}
       </div>
 
       <div className="mt-4 shrink-0">
-        <button onClick={onNavigate} className="w-full py-2.5 px-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg text-[10.5px] font-bold flex items-center justify-center gap-1.5 transition">
+        <button onClick={onNavigate || (() => window.location.href = '/reports/customers')} className="w-full py-2.5 px-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg text-[10.5px] font-bold flex items-center justify-center gap-1.5 transition cursor-pointer">
           <span>View All</span>
           <ArrowRight className="h-3.5 w-3.5" />
         </button>
@@ -398,19 +384,19 @@ function TopVendorsCard({
       <div className="flex-1 py-3.5 space-y-3">
         {vendors.map((v, idx) => (
           <div key={idx} className="flex justify-between items-center text-[10.5px]">
-            <div className="flex items-center gap-2.5 min-w-0">
+            <div className="flex items-center gap-2.5 min-w-0 flex-1 pr-2">
               <div className="h-7 w-7 rounded-full bg-orange-50 border border-orange-100 text-orange-600 font-extrabold text-[9px] flex items-center justify-center shrink-0">
                 {v.avatar}
               </div>
-              <span className="font-extrabold text-slate-700 truncate">{v.name}</span>
+              <span className="font-extrabold text-slate-700 truncate block" title={v.name}>{v.name}</span>
             </div>
-            <span className="font-extrabold text-slate-700 shrink-0">{formatCurrency(v.amount, currency)}</span>
+            <span className="font-extrabold text-slate-700 shrink-0 whitespace-nowrap">{formatCurrency(v.amount, currency)}</span>
           </div>
         ))}
       </div>
 
       <div className="mt-4 shrink-0">
-        <button onClick={onNavigate} className="w-full py-2.5 px-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg text-[10.5px] font-bold flex items-center justify-center gap-1.5 transition">
+        <button onClick={onNavigate || (() => window.location.href = '/reports/vendors')} className="w-full py-2.5 px-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg text-[10.5px] font-bold flex items-center justify-center gap-1.5 transition cursor-pointer">
           <span>View All</span>
           <ArrowRight className="h-3.5 w-3.5" />
         </button>

@@ -272,7 +272,10 @@ function ChartOfAccountsCard({
   return (
     <div className="bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs hover:shadow-xs transition duration-300 flex flex-col justify-between select-none min-h-[395px]">
       <div className="border-b border-slate-100 pb-3 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-1.5">
+        <div 
+          onClick={onNavigate}
+          className="flex items-center gap-1.5 cursor-pointer hover:opacity-80 transition"
+        >
           <Layers className="h-4 w-4 text-[#0064eb] stroke-[2]" />
           <h3 className="text-[13.5px] font-bold text-slate-800">Chart of Accounts</h3>
         </div>
@@ -281,7 +284,10 @@ function ChartOfAccountsCard({
 
       {/* Donut Chart and Legends */}
       <div className="flex items-center justify-between py-3 shrink-0 border-b border-slate-50">
-        <div className="relative flex items-center justify-center h-16 w-16 shrink-0">
+        <div 
+          onClick={onNavigate}
+          className="relative flex items-center justify-center h-16 w-16 shrink-0 cursor-pointer hover:scale-105 transition-transform"
+        >
           <svg className="h-full w-full transform -rotate-90" viewBox="0 0 40 40">
             {/* Background track ring */}
             <circle cx="20" cy="20" r={radius} stroke="#f1f5f9" strokeWidth={strokeWidth} fill="none" />
@@ -316,7 +322,11 @@ function ChartOfAccountsCard({
       <div className="flex-1 py-3">
         <div className="space-y-0 divide-y divide-slate-100/60">
           {items.map((item, idx) => (
-            <div key={idx} className="flex justify-between items-center text-[10.5px] py-2 first:pt-0 last:pb-0">
+            <div 
+              key={idx} 
+              onClick={() => window.location.href = `/chart-of-accounts?type=${item.label}`}
+              className="flex justify-between items-center text-[10.5px] py-2 first:pt-0 last:pb-0 cursor-pointer hover:bg-slate-50/80 px-1 rounded transition"
+            >
               <span className="flex items-center gap-1.5 text-slate-500 font-semibold">
                 <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
                 {item.label}
@@ -328,7 +338,7 @@ function ChartOfAccountsCard({
       </div>
 
       <div className="mt-4 shrink-0">
-        <button onClick={onNavigate} className="w-full py-2.5 px-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg text-[10.5px] font-bold flex items-center justify-center gap-1.5 transition">
+        <button onClick={onNavigate} className="w-full py-2.5 px-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg text-[10.5px] font-bold flex items-center justify-center gap-1.5 transition cursor-pointer">
           <span>View Chart of Accounts</span>
           <ArrowRight className="h-3.5 w-3.5" />
         </button>
@@ -417,10 +427,10 @@ function TrackingCategoriesCard({
   if (loading) return <CardSkeleton />;
   if (error) return <CardErrorState title="Tracking Fetch Failed" desc="We couldn't retrieve tracking category configuration." onRetry={onRetry} />;
   
-  const enabled = data ? data.enabled : false;
-  const categories = data ? data.categories : [];
-  const totalCategories = data ? data.totalCategories : 0;
-  const totalOptions = data ? data.totalOptions : 0;
+  const categories = data ? (data.categories || []) : [];
+  const enabled = data ? (data.enabled !== undefined ? data.enabled : categories.length > 0) : false;
+  const totalCategories = data ? (data.totalCategories ?? categories.length) : 0;
+  const totalOptions = data ? (data.totalOptions ?? (data as any)?.summary?.trackingOptions ?? 0) : 0;
 
   // --- Empty state ---
   if (!enabled || categories.length === 0) {
@@ -823,14 +833,14 @@ export function OverviewMoreCardsRow({ connected = false, loading = false }: { c
         loading={accountsLoading} 
         error={accountsError} 
         onRetry={fetchAccounts}
-        onNavigate={() => window.location.href = '/reports'}
+        onNavigate={() => window.location.href = '/chart-of-accounts'}
       />
       <TrackingCategoriesCard 
         data={trackingData} 
         loading={trackingLoading} 
         error={trackingError} 
         onRetry={fetchTracking}
-        onNavigate={() => window.location.href = '/settings'}
+        onNavigate={() => window.location.href = '/tracking-categories'}
       />
       <MultiCurrencyCard 
         data={currencyData} 

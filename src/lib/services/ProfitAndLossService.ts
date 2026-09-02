@@ -1,5 +1,5 @@
 import { XeroReportParser } from './XeroReportParser';
- 
+
 export interface ProfitAndLossSummary {
   revenue: number;
   cogs: number;
@@ -9,7 +9,7 @@ export interface ProfitAndLossSummary {
   otherExpenses: number;
   netProfit: number;
 }
- 
+
 export class ProfitAndLossService {
   /**
    * Parses the nested Rows grid of a Profit and Loss report
@@ -25,23 +25,23 @@ export class ProfitAndLossService {
       otherExpenses: 0,
       netProfit: 0
     };
- 
+
     if (!report || !report.Rows || !Array.isArray(report.Rows)) return result;
- 
+
     const rows = report.Rows;
- 
+
     // 1. Extract Revenue (Total Trading Income or Sales summary rows)
     const revenueVal = XeroReportParser.findRowValue(rows, [
       'total turnover',
+      'turnover',
       'total trading income',
       'total revenue',
       'total income',
-      'turnover',
       'revenue',
       'sales'
     ]);
     result.revenue = revenueVal !== null ? revenueVal : 0;
- 
+
     // 2. Extract Cost of Goods Sold (COGS)
     const cogsVal = XeroReportParser.findRowValue(rows, [
       'total cost of sales',
@@ -51,16 +51,20 @@ export class ProfitAndLossService {
       'direct costs'
     ]);
     result.cogs = cogsVal !== null ? cogsVal : 0;
- 
+
     // 3. Extract Gross Profit
     const gpVal = XeroReportParser.findRowValue(rows, ['gross profit']);
     result.grossProfit = gpVal !== null ? gpVal : (result.revenue - result.cogs);
- 
+
     // 4. Extract Operating Expenses
     const expensesVal = XeroReportParser.findRowValue(rows, [
       'total operating expenses',
+      'total administrative costs',
+      'total overheads',
       'total expenses',
-      'operating expenses'
+      'operating expenses',
+      'administrative costs',
+      'overheads'
     ]);
     result.operatingExpenses = expensesVal !== null ? expensesVal : 0;
 
@@ -77,15 +81,18 @@ export class ProfitAndLossService {
       'other expenses'
     ]);
     result.otherExpenses = otherExpensesVal !== null ? otherExpensesVal : 0;
- 
+
     // 7. Extract Net Profit
     const npVal = XeroReportParser.findRowValue(rows, [
       'net profit',
       'net profit / loss',
-      'net income'
+      'net income',
+      'profit after taxation',
+      'profit on ordinary activities before taxation',
+      'profit for the year'
     ]);
     result.netProfit = npVal !== null ? npVal : ((result.grossProfit + result.otherIncome) - (result.operatingExpenses + result.otherExpenses));
- 
+
     return result;
   }
 }

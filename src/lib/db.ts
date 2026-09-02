@@ -128,6 +128,8 @@ const initPgTables = async () => {
         payment_type VARCHAR(50),
         status VARCHAR(50),
         payment_date TIMESTAMP,
+        invoice_id VARCHAR(255),
+        invoice_type VARCHAR(50),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
@@ -314,6 +316,8 @@ const initPgTables = async () => {
       ALTER TABLE tenant_credentials ALTER COLUMN access_token DROP NOT NULL;
       ALTER TABLE tenant_credentials ALTER COLUMN refresh_token DROP NOT NULL;
       ALTER TABLE tenant_credentials ALTER COLUMN expires_at DROP NOT NULL;
+      ALTER TABLE payments ADD COLUMN IF NOT EXISTS invoice_id VARCHAR(255);
+      ALTER TABLE payments ADD COLUMN IF NOT EXISTS invoice_type VARCHAR(50);
     `);
 
     client.release();
@@ -661,14 +665,16 @@ export const db = {
             );
           } else if (type === 'payments') {
             await pgPool.query(
-              'INSERT INTO payments (tenant_id, external_id, amount, payment_type, status, payment_date) VALUES ($1, $2, $3, $4, $5, $6)',
+              'INSERT INTO payments (tenant_id, external_id, amount, payment_type, status, payment_date, invoice_id, invoice_type) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
               [
                 tenantId,
                 item.PaymentID || null,
                 item.Amount || 0,
                 item.PaymentType || null,
                 item.Status || null,
-                item.Date ? parseXeroDate(item.Date) : null
+                item.Date ? parseXeroDate(item.Date) : null,
+                item.Invoice?.InvoiceID || null,
+                item.Invoice?.Type || null
               ]
             );
           } else if (type === 'accounts') {
@@ -797,7 +803,11 @@ export const db = {
             Amount: parseFloat(r.amount || 0),
             PaymentType: r.payment_type,
             Status: r.status,
-            Date: r.payment_date || r.created_at
+            Date: r.payment_date || r.created_at,
+            Invoice: r.invoice_id ? {
+              InvoiceID: r.invoice_id,
+              Type: r.invoice_type
+            } : null
           }));
         }
       } catch (e) {

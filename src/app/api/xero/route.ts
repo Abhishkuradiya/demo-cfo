@@ -85,6 +85,10 @@ export async function GET(req: NextRequest) {
         }
       }
 
+      // Helper to format Date as YYYY-MM-DD using local time (avoids UTC timezone shift from toISOString)
+      const formatLocalDate = (d: Date) =>
+        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
       let startDateStr = "";
       let endDateStr = "";
 
@@ -93,14 +97,14 @@ export async function GET(req: NextRequest) {
         const endMonth = latestInvoiceDate.getMonth();
         const endDate = new Date(endYear, endMonth + 1, 0);
         const startDate = new Date(endYear, endMonth - 5, 1);
-        startDateStr = startDate.toISOString().slice(0, 10);
-        endDateStr = endDate.toISOString().slice(0, 10);
+        startDateStr = formatLocalDate(startDate);
+        endDateStr = formatLocalDate(endDate);
       } else {
         const now = new Date();
         const endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
         const startDate = new Date(now.getFullYear(), now.getMonth() - 5, 1);
-        startDateStr = startDate.toISOString().slice(0, 10);
-        endDateStr = endDate.toISOString().slice(0, 10);
+        startDateStr = formatLocalDate(startDate);
+        endDateStr = formatLocalDate(endDate);
       }
 
       return NextResponse.json({

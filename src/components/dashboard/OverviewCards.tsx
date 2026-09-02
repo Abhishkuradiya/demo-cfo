@@ -295,10 +295,10 @@ export function ConnectedBankAccountsCard({ data, loading, onRefresh, onManageCo
           <span>{formatTimeAgo(data.last_sync)}</span>
         </div>
         <div className="mt-3 space-y-1">
-          <button onClick={onManageConnections} className="w-full py-2 bg-[#0064eb] hover:bg-blue-600 text-white rounded-md text-[10px] font-bold uppercase tracking-wider transition">
+          <button onClick={onManageConnections || (() => window.location.href = '/banking/accounts')} className="w-full py-2 bg-[#0064eb] hover:bg-blue-600 text-white rounded-md text-[10px] font-bold uppercase tracking-wider transition cursor-pointer">
             Manage Bank Connections
           </button>
-          <a href="/cash-flow" className="flex items-center justify-center gap-0.5 text-[9px] font-bold text-blue-600 hover:underline">
+          <a href="/banking/accounts" className="flex items-center justify-center gap-0.5 text-[9px] font-bold text-blue-600 hover:underline">
             <span>Open Banking Dashboard</span>
             <ArrowRight className="h-2.5 w-2.5" />
           </a>
@@ -337,14 +337,20 @@ export function InvoiceStatusSummaryCard({ summary, loading, onViewAll }: Invoic
   return (
     <div className="bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs hover:shadow-xs transition duration-300 flex flex-col justify-between select-none min-h-[395px]">
       <div className="border-b border-slate-100 pb-3 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-1.5">
+        <div 
+          onClick={onViewAll || (() => window.location.href = '/invoices')}
+          className="flex items-center gap-1.5 cursor-pointer hover:opacity-80 transition"
+        >
           <FileText className="h-4 w-4 text-[#0064eb]" />
           <h3 className="text-[13.5px] font-bold text-slate-800">Invoice Status Summary</h3>
         </div>
         <button className="text-slate-400 hover:text-slate-600 outline-none"><MoreVertical className="h-4 w-4" /></button>
       </div>
 
-      <div className="py-2.5 flex justify-between items-center border-b border-slate-50 shrink-0">
+      <div 
+        onClick={onViewAll || (() => window.location.href = '/invoices')}
+        className="py-2.5 flex justify-between items-center border-b border-slate-50 shrink-0 cursor-pointer hover:opacity-80 transition"
+      >
         <span className="text-[9.5px] font-bold text-slate-400 uppercase">Receivables</span>
         <span className="text-[11px] font-extrabold text-slate-800">{total} Invoices</span>
       </div>
@@ -353,7 +359,11 @@ export function InvoiceStatusSummaryCard({ summary, loading, onViewAll }: Invoic
         {statuses.map((s, idx) => {
           const percentage = total > 0 ? (s.count / total) * 100 : 0;
           return (
-            <div key={idx} className="space-y-1">
+            <div 
+              key={idx} 
+              onClick={() => window.location.href = `/invoices?status=${encodeURIComponent(s.label.toUpperCase())}`}
+              className="space-y-1 cursor-pointer hover:bg-slate-50/80 px-1 py-1 rounded transition"
+            >
               <div className="flex items-center justify-between text-[10px] font-bold">
                 <span className="text-slate-500">{s.label}</span>
                 <span className="text-slate-700">{s.count}</span>
@@ -367,7 +377,7 @@ export function InvoiceStatusSummaryCard({ summary, loading, onViewAll }: Invoic
       </div>
 
       <div className="mt-4 shrink-0">
-        <button onClick={onViewAll} className="w-full py-2.5 px-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg text-[10.5px] font-bold flex items-center justify-center gap-1.5 transition">
+        <button onClick={onViewAll || (() => window.location.href = '/invoices')} className="w-full py-2.5 px-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg text-[10.5px] font-bold flex items-center justify-center gap-1.5 transition cursor-pointer">
           <span>View All Invoices</span>
           <ArrowRight className="h-3.5 w-3.5" />
         </button>
@@ -405,14 +415,20 @@ export function BillStatusSummaryCard({ summary, loading, onViewAll }: BillCardP
   return (
     <div className="bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs hover:shadow-xs transition duration-300 flex flex-col justify-between select-none min-h-[395px]">
       <div className="border-b border-slate-100 pb-3 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-1.5">
+        <div 
+          onClick={onViewAll || (() => window.location.href = '/bills')}
+          className="flex items-center gap-1.5 cursor-pointer hover:opacity-80 transition"
+        >
           <ClipboardList className="h-4 w-4 text-[#0064eb]" />
           <h3 className="text-[13.5px] font-bold text-slate-800">Bill Status Summary</h3>
         </div>
         <button className="text-slate-400 hover:text-slate-600 outline-none"><MoreVertical className="h-4 w-4" /></button>
       </div>
 
-      <div className="py-2.5 flex justify-between items-center border-b border-slate-50 shrink-0">
+      <div 
+        onClick={onViewAll || (() => window.location.href = '/bills')}
+        className="py-2.5 flex justify-between items-center border-b border-slate-50 shrink-0 cursor-pointer hover:opacity-80 transition"
+      >
         <span className="text-[9.5px] font-bold text-slate-400 uppercase">Payables</span>
         <span className="text-[11px] font-extrabold text-slate-800">{total} Bills</span>
       </div>
@@ -421,7 +437,11 @@ export function BillStatusSummaryCard({ summary, loading, onViewAll }: BillCardP
         {statuses.map((s, idx) => {
           const percentage = total > 0 ? (s.count / total) * 100 : 0;
           return (
-            <div key={idx} className="space-y-1">
+            <div 
+              key={idx} 
+              onClick={() => window.location.href = `/bills?status=${encodeURIComponent(s.label.replace(' Bills', '').toUpperCase())}`}
+              className="space-y-1 cursor-pointer hover:bg-slate-50/80 px-1 py-1 rounded transition"
+            >
               <div className="flex items-center justify-between text-[10px] font-bold">
                 <span className="text-slate-500">{s.label}</span>
                 <span className="text-slate-700">{s.count}</span>
@@ -435,10 +455,84 @@ export function BillStatusSummaryCard({ summary, loading, onViewAll }: BillCardP
       </div>
 
       <div className="mt-4 shrink-0">
-        <button onClick={onViewAll} className="w-full py-2.5 px-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg text-[10.5px] font-bold flex items-center justify-center gap-1.5 transition">
+        <button onClick={onViewAll || (() => window.location.href = '/bills')} className="w-full py-2.5 px-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg text-[10.5px] font-bold flex items-center justify-center gap-1.5 transition cursor-pointer">
           <span>View All Bills</span>
           <ArrowRight className="h-3.5 w-3.5" />
         </button>
+      </div>
+    </div>
+  );
+}
+
+// --- CARD 4: TRACKING CATEGORIES CARD (Matching Image 2 Mockup) ---
+export function TrackingCategoriesCard({
+  configuredCategories = 1,
+  trackingOptions = 7,
+  activeStatus = 'Active (1)',
+  loading = false,
+  onNavigate
+}: {
+  configuredCategories?: number;
+  trackingOptions?: number;
+  activeStatus?: string;
+  loading?: boolean;
+  onNavigate?: () => void;
+}) {
+  if (loading) return <CardSkeleton />;
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between select-none min-h-[395px] hover:shadow-xs transition duration-300">
+      <div>
+        {/* Card Header */}
+        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+          <div className="flex items-center gap-2">
+            <div className="h-7 w-7 rounded-lg bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600">
+              <ClipboardList className="h-4 w-4" />
+            </div>
+            <h3 className="text-[13.5px] font-bold text-slate-800">Tracking Categories</h3>
+          </div>
+          <span className="flex items-center gap-1 text-[10px] font-extrabold text-emerald-600 bg-emerald-50 border border-emerald-200/60 px-2 py-0.5 rounded-full">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+            {activeStatus}
+          </span>
+        </div>
+
+        {/* Dimension Details */}
+        <div className="mt-4 space-y-3">
+          <span className="text-[9.5px] font-extrabold text-slate-400 uppercase tracking-wider block">CONFIGURED DIMENSIONS</span>
+          
+          <div className="p-3.5 rounded-xl bg-slate-50/70 border border-slate-200/60">
+            <div className="flex items-center justify-between">
+              <h4 className="text-[13px] font-bold text-slate-900">Trading Name</h4>
+              <span className="px-2 py-0.5 text-[9px] font-extrabold bg-emerald-100 text-emerald-700 rounded uppercase">ACTIVE</span>
+            </div>
+            <span className="text-[10px] text-slate-400 font-semibold block mt-0.5">{trackingOptions} Tracking Options</span>
+
+            {/* Option Pills */}
+            <div className="flex flex-wrap items-center gap-1.5 mt-3">
+              <span className="px-2.5 py-1 text-[9.5px] font-bold bg-white border border-slate-200 text-slate-700 rounded-md uppercase">GENERAL</span>
+              <span className="px-2.5 py-1 text-[9.5px] font-bold bg-white border border-slate-200 text-slate-700 rounded-md uppercase">GWL</span>
+              <span className="px-2.5 py-1 text-[9.5px] font-bold bg-white border border-slate-200 text-slate-700 rounded-md uppercase">Missing Invoice</span>
+              <span className="px-2 py-1 text-[9.5px] font-extrabold text-blue-600 bg-blue-50 rounded-md">+4 More</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Footer Details & Action Button */}
+      <div>
+        <div className="flex items-center justify-between text-[11px] text-slate-500 font-semibold mb-3 border-t border-slate-100 pt-3">
+          <span>Configured Categories: <b className="text-slate-800">{configuredCategories}</b></span>
+          <span>Tracking Options: <b className="text-slate-800">{trackingOptions}</b></span>
+        </div>
+
+        <a
+          href="/tracking-categories"
+          className="w-full py-2.5 px-4 bg-slate-50 hover:bg-blue-50 border border-slate-200 text-slate-700 hover:text-blue-600 rounded-xl font-bold text-[12px] flex items-center justify-center gap-2 transition cursor-pointer"
+        >
+          <span>Manage Tracking</span>
+          <ArrowRight className="h-4 w-4" />
+        </a>
       </div>
     </div>
   );

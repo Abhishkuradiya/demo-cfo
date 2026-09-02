@@ -11,7 +11,7 @@ import { XeroFixedAssetsService } from '@/lib/fixedAssetsService';
 import { XeroBudgetService } from '@/lib/budgetService';
 import { XeroTaxService } from '@/lib/taxService';
 import { XeroGeneralLedgerService } from '@/lib/generalLedgerService';
- 
+
 export async function GET(req: NextRequest) {
   const tenantId = await getTenantIdFromSession();
   if (tenantId === null) {
@@ -19,24 +19,24 @@ export async function GET(req: NextRequest) {
   }
   const { searchParams } = new URL(req.url);
   const view = (searchParams.get('view') || 'monthly').toLowerCase();
- 
+
   try {
     // 1. Check Xero connection status
     const tokenInfo = await getXeroAccessToken(tenantId);
     const isConnected = !!tokenInfo;
     const accessToken = tokenInfo?.accessToken || '';
     const xeroTenantId = tokenInfo?.xeroTenantId || '';
- 
+
     // 2. Fetch cached invoices
     let cachedInvoices = await db.getInvoices(tenantId);
- 
+
     // 3. If no invoices in warehouse, fetch from Xero API and cache them
     if (cachedInvoices.length === 0 && isConnected) {
       try {
         const invoices = await fetchXeroResource(
-          accessToken, 
-          xeroTenantId, 
-          'Invoices', 
+          accessToken,
+          xeroTenantId,
+          'Invoices',
           'where=(Type=="ACCREC" OR Type=="ACCPAY") AND (Status=="PAID" OR Status=="AUTHORISED")'
         );
         await db.saveCachedRecords(tenantId, 'invoices', invoices || []);
@@ -46,14 +46,14 @@ export async function GET(req: NextRequest) {
         console.error('Failed to sync invoices from Xero API on first load:', err.message);
       }
     }
- 
+
     // 4. Determine date parameters
     const fromDateParam = searchParams.get('from_date');
     const toDateParam = searchParams.get('to_date');
- 
+
     let startDate: Date;
     let endDate: Date;
- 
+
     if (fromDateParam && toDateParam) {
       startDate = new Date(fromDateParam);
       endDate = new Date(toDateParam);
@@ -68,7 +68,7 @@ export async function GET(req: NextRequest) {
           latestInvoiceDate = invDate;
         }
       }
- 
+
       if (latestInvoiceDate) {
         // Last 6 months ending in the latest invoice date's month
         const endYear = latestInvoiceDate.getFullYear();
@@ -82,64 +82,64 @@ export async function GET(req: NextRequest) {
         startDate = new Date(now.getFullYear(), now.getMonth() - 5, 1, 0, 0, 0, 0);
       }
     }
- 
+
     // Dynamic Comparison Period (preceding period of equal duration)
     const durationMs = endDate.getTime() - startDate.getTime();
     const compEndDate = new Date(startDate.getTime() - 1);
     const compStartDate = new Date(compEndDate.getTime() - durationMs);
- 
+
     // Dynamic Today & Yesterday (relative to endDate if past period selected)
     const referenceDate = (fromDateParam && toDateParam) ? endDate : new Date();
     const startOfToday = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), referenceDate.getDate(), 0, 0, 0, 0);
     const endOfToday = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), referenceDate.getDate(), 23, 59, 59, 999);
- 
+
     const yesterday = new Date(referenceDate);
     yesterday.setDate(referenceDate.getDate() - 1);
     const startOfYesterday = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 0, 0, 0, 0);
     const endOfYesterday = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 23, 59, 59, 999);
- 
+
     let revenueToday = 0;
     let revenueYesterday = 0;
     let invoiceRevenueMTD = 0;
     let invoiceRevenueLastMonth = 0;
- 
+
     // Track unique currencies
     const currencies = new Set<string>();
     const currencyFrequency: Record<string, number> = {};
- 
+
     for (const inv of cachedInvoices) {
       if (inv.Type !== 'ACCREC' || (inv.Status !== 'AUTHORISED' && inv.Status !== 'PAID')) continue;
       const invDate = parseXeroDate(inv.Date);
       if (!invDate) continue;
- 
+
       const total = inv.Total || 0;
       const currency = inv.CurrencyCode;
       if (currency) {
         currencies.add(currency);
         currencyFrequency[currency] = (currencyFrequency[currency] || 0) + 1;
       }
- 
+
       // Selected period invoices total
       if (invDate >= startDate && invDate <= endDate) {
         invoiceRevenueMTD += total;
       }
- 
+
       // Comparison period invoices total
       if (invDate >= compStartDate && invDate <= compEndDate) {
         invoiceRevenueLastMonth += total;
       }
- 
+
       // Today
       if (invDate >= startOfToday && invDate <= endOfToday) {
         revenueToday += total;
       }
- 
+
       // Yesterday
       if (invDate >= startOfYesterday && invDate <= endOfYesterday) {
         revenueYesterday += total;
       }
     }
- 
+
     // Determine currency string
     let finalCurrency = "";
     if (currencies.size === 1) {
@@ -153,7 +153,7 @@ export async function GET(req: NextRequest) {
         }
       }
     }
- 
+
     // Generate trend labels and data dynamically from cached invoices based on timeframe view parameter
     const getMonthsInRange = (start: Date, end: Date) => {
       const months = [];
@@ -169,10 +169,10 @@ export async function GET(req: NextRequest) {
       }
       return months;
     };
- 
+
     const chartLabels: string[] = [];
     const chartRevenue: number[] = [];
- 
+
     if (view === 'daily') {
       const curr = new Date(startDate);
       while (curr <= endDate) {
@@ -196,10 +196,10 @@ export async function GET(req: NextRequest) {
         if (weekEnd > endDate) {
           weekEnd.setTime(endDate.getTime());
         }
-        
+
         const label = `${curr.toLocaleDateString('en-US', { day: '2-digit', month: 'short' })} - ${weekEnd.toLocaleDateString('en-US', { day: '2-digit', month: 'short' })}`;
         chartLabels.push(label);
-        
+
         let weekSum = 0;
         for (const inv of cachedInvoices) {
           if (inv.Type !== 'ACCREC' || (inv.Status !== 'AUTHORISED' && inv.Status !== 'PAID')) continue;
@@ -227,16 +227,16 @@ export async function GET(req: NextRequest) {
         chartRevenue.push(parseFloat(mSum.toFixed(2)));
       }
     }
- 
+
     // 5. Fetch and parse active Profit & Loss report using new Service layer
     const pad = (n: number) => String(n).padStart(2, '0');
     const fromDateStr = `${startDate.getFullYear()}-${pad(startDate.getMonth() + 1)}-01`;
     const toDateStr = `${endDate.getFullYear()}-${pad(endDate.getMonth() + 1)}-${pad(endDate.getDate())}`;
     const queryParams = `fromDate=${fromDateStr}&toDate=${toDateStr}`;
- 
+
     const reportCacheKey = `ProfitAndLoss_${fromDateStr}_${toDateStr}`;
     let plReport = await db.getReport(tenantId, reportCacheKey);
- 
+
     if (!plReport && isConnected) {
       try {
         plReport = await fetchXeroReport(accessToken, xeroTenantId, 'ProfitAndLoss', queryParams);
@@ -247,16 +247,16 @@ export async function GET(req: NextRequest) {
         console.error('Failed to sync ProfitAndLoss report on dashboard route load:', err.message);
       }
     }
- 
+
     const plSummary = ProfitAndLossService.parseReport(plReport);
- 
+
     // 6. Fetch and parse comparison Profit & Loss report (for preceding period of equal duration)
     const compFromStr = `${compStartDate.getFullYear()}-${pad(compStartDate.getMonth() + 1)}-01`;
     const compToStr = `${compEndDate.getFullYear()}-${pad(compEndDate.getMonth() + 1)}-${pad(compEndDate.getDate())}`;
- 
+
     const compReportCacheKey = `ProfitAndLoss_${compFromStr}_${compToStr}`;
     let compPlReport = await db.getReport(tenantId, compReportCacheKey);
- 
+
     if (!compPlReport && isConnected) {
       try {
         compPlReport = await fetchXeroReport(accessToken, xeroTenantId, 'ProfitAndLoss', `fromDate=${compFromStr}&toDate=${compToStr}`);
@@ -267,9 +267,9 @@ export async function GET(req: NextRequest) {
         console.error('Failed to sync comparison ProfitAndLoss report:', err.message);
       }
     }
- 
+
     const compPlSummary = ProfitAndLossService.parseReport(compPlReport);
- 
+
     // 6b. Fetch and parse Year-To-Date (YTD) Profit & Loss report
     const ytdStartDateStr = `${endDate.getFullYear()}-01-01`;
     const ytdReportCacheKey = `ProfitAndLoss_YTD_${ytdStartDateStr}_${toDateStr}`;
@@ -285,7 +285,7 @@ export async function GET(req: NextRequest) {
       }
     }
     const ytdPlSummary = ProfitAndLossService.parseReport(ytdPlReport);
- 
+
     // 7. Calculate growth percent dynamically based on Accounting Revenue (P&L report)
     const revenueMTD = plSummary.revenue;
     const revenueLastMonth = compPlSummary.revenue;
@@ -294,13 +294,13 @@ export async function GET(req: NextRequest) {
       growthPercent = parseFloat((((revenueMTD - revenueLastMonth) / revenueLastMonth) * 100).toFixed(1));
     }
     if (isNaN(growthPercent)) growthPercent = 0;
- 
+
     let invoiceGrowthPercent = 0;
     if (invoiceRevenueLastMonth > 0) {
       invoiceGrowthPercent = parseFloat((((invoiceRevenueMTD - invoiceRevenueLastMonth) / invoiceRevenueLastMonth) * 100).toFixed(1));
     }
     if (isNaN(invoiceGrowthPercent)) invoiceGrowthPercent = 0;
- 
+
     // Net Profit Growth Percent
     const netProfit = plSummary.netProfit;
     const netProfitLastMonth = compPlSummary.netProfit;
@@ -309,7 +309,7 @@ export async function GET(req: NextRequest) {
       netProfitGrowthPercent = parseFloat((((netProfit - netProfitLastMonth) / Math.abs(netProfitLastMonth)) * 100).toFixed(1));
     }
     if (isNaN(netProfitGrowthPercent)) netProfitGrowthPercent = 0;
- 
+
     // 8. Fetch Balance Sheet report
     const bsCacheKey = `BalanceSheet_${toDateStr}`;
     let bsReport = await db.getReport(tenantId, bsCacheKey);
@@ -323,7 +323,7 @@ export async function GET(req: NextRequest) {
         console.error('Failed to sync BalanceSheet report:', err.message);
       }
     }
- 
+
     const totalCash = bsReport ? (BalanceSheetParser.findTotalCash(bsReport.Rows) || 0) : 0;
     const currentAssets = bsReport ? (BalanceSheetParser.findCurrentAssets(bsReport.Rows) || 0) : 0;
     const balanceSheetAccounts = bsReport ? BalanceSheetParser.findBankAccounts(bsReport.Rows) : [];
@@ -332,7 +332,7 @@ export async function GET(req: NextRequest) {
     const totalAssets = bsReport ? (BalanceSheetParser.findTotalAssets(bsReport.Rows) || currentAssets) : 0;
     const totalLiabilities = bsReport ? (BalanceSheetParser.findTotalLiabilities(bsReport.Rows) || 0) : 0;
     const totalEquity = bsReport ? (BalanceSheetParser.findTotalEquity(bsReport.Rows) || (totalAssets - totalLiabilities)) : 0;
- 
+
     // 8b. Fetch Comparison Balance Sheet report for cash growth calculation
     const compBsCacheKey = `BalanceSheet_${compToStr}`;
     let compBsReport = await db.getReport(tenantId, compBsCacheKey);
@@ -352,7 +352,7 @@ export async function GET(req: NextRequest) {
       cashGrowthPercent = parseFloat((((totalCash - compTotalCash) / compTotalCash) * 100).toFixed(1));
     }
     if (isNaN(cashGrowthPercent)) cashGrowthPercent = 0;
- 
+
     // 8c. Fetch Trial Balance report
     const tbCacheKey = `TrialBalance_${toDateStr}`;
     let tbReport = await db.getReport(tenantId, tbCacheKey);
@@ -380,9 +380,9 @@ export async function GET(req: NextRequest) {
         console.error('Failed to sync Accounts list:', err.message);
       }
     }
- 
+
     const bankAccounts = BankAccountMergeService.mergeAccounts(rawAccounts || [], balanceSheetAccounts);
- 
+
     // 9b. Fetch and parse Contacts to calculate customers, suppliers, and total outstanding balances
     let rawContacts = await db.getReport(tenantId, 'Contacts');
     if (!rawContacts && isConnected) {
@@ -429,7 +429,7 @@ export async function GET(req: NextRequest) {
         }
       }
     }
- 
+
     // 11. Calculate dynamic Accounts Receivable & Accounts Payable (PAID/Completed payments) for comparison date range
     let compAccountsReceivable = 0;
     let compAccountsPayable = 0;
@@ -444,31 +444,31 @@ export async function GET(req: NextRequest) {
         }
       }
     }
- 
+
     let arGrowthPercent = 0;
     if (compAccountsReceivable > 0) {
       arGrowthPercent = parseFloat((((accountsReceivable - compAccountsReceivable) / compAccountsReceivable) * 100).toFixed(1));
     }
     if (isNaN(arGrowthPercent)) arGrowthPercent = 0;
- 
+
     let apGrowthPercent = 0;
     if (compAccountsPayable > 0) {
       apGrowthPercent = parseFloat((((accountsPayable - compAccountsPayable) / compAccountsPayable) * 100).toFixed(1));
     }
     if (isNaN(apGrowthPercent)) apGrowthPercent = 0;
- 
+
     // 12. Calculate monthly trend data sets for sparklines
     const monthsRange = getMonthsInRange(startDate, endDate);
     const chartCash: number[] = [];
     const chartAR: number[] = [];
     const chartAP: number[] = [];
- 
+
     for (const m of monthsRange) {
       const pad = (n: number) => String(n).padStart(2, '0');
       const lastDayOfMonth = new Date(m.year, m.month + 1, 0).getDate();
       const mDateStr = `${m.year}-${pad(m.month + 1)}-${pad(lastDayOfMonth)}`;
       const mEnd = new Date(m.year, m.month + 1, 0, 23, 59, 59, 999);
- 
+
       // A. Cash trend point (Balance Sheet)
       const mBsCacheKey = `BalanceSheet_${mDateStr}`;
       let mBsReport = await db.getReport(tenantId, mBsCacheKey);
@@ -484,7 +484,7 @@ export async function GET(req: NextRequest) {
       }
       const mCash = mBsReport ? (BalanceSheetParser.findTotalCash(mBsReport.Rows) || 0) : 0;
       chartCash.push(parseFloat(mCash.toFixed(2)));
- 
+
       // B. Accounts Receivable & Accounts Payable trend points (Invoices)
       let mAR = 0;
       let mAP = 0;
@@ -501,12 +501,12 @@ export async function GET(req: NextRequest) {
       chartAR.push(parseFloat(mAR.toFixed(2)));
       chartAP.push(parseFloat(mAP.toFixed(2)));
     }
- 
+
     // 13. Calculate dynamic Top Overdue Invoices
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const overdueList: any[] = [];
- 
+
     for (const inv of cachedInvoices) {
       if (inv.Type === 'ACCREC' && inv.Status === 'AUTHORISED' && (inv.AmountDue || 0) > 0) {
         const dueDate = inv.DueDate ? parseXeroDate(inv.DueDate) : null;
@@ -523,11 +523,11 @@ export async function GET(req: NextRequest) {
         }
       }
     }
- 
+
     // Sort by most overdue first (highest days), then take top 5
     overdueList.sort((a, b) => b.days - a.days);
     const topOverdueInvoices = overdueList.slice(0, 5);
- 
+
     // Fetch cached organisation details
     let organisation = await db.getReport(tenantId, 'Organisation');
     if (!organisation && isConnected) {
@@ -581,7 +581,7 @@ export async function GET(req: NextRequest) {
 
     const credentials = await db.getCredentials(tenantId, 'xero');
     const lastSync = credentials?.last_synced_at || null;
- 
+
     // 15. Fetch inventory summary (using service)
     let inventoryValue = 0;
     let inventoryLowStock = 0;
@@ -656,7 +656,7 @@ export async function GET(req: NextRequest) {
         console.error('Failed to parse general ledger for dashboard summary:', e);
       }
     }
- 
+
     return NextResponse.json({
       connected: isConnected,
       inventoryValue,
@@ -729,8 +729,14 @@ export async function GET(req: NextRequest) {
       chartAP,
       overdueInvoices: topOverdueInvoices,
       rawBalanceSheet: bsReport
+    }, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+      }
     });
- 
+
   } catch (err: any) {
     return NextResponse.json({
       connected: false,

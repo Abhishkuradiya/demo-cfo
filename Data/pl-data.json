@@ -1,0 +1,1033 @@
+{
+    "Id": "596f20a5-552c-47d1-a872-be4aac367ffe",
+    "Status": "OK",
+    "ProviderName": "API Explorer",
+    "DateTimeUTC": "\/Date(1786368486077)\/",
+    "Reports": [
+        {
+            "ReportID": "ProfitAndLoss",
+            "ReportName": "Profit and Loss",
+            "ReportType": "ProfitAndLoss",
+            "ReportTitles": [
+                "Profit & Loss",
+                "MI Health Ltd",
+                "1 December 2025 to 30 November 2026"
+            ],
+            "ReportDate": "10 August 2026",
+            "UpdatedDateUTC": "\/Date(1786368486077)\/",
+            "Fields": [],
+            "Rows": [
+                {
+                    "RowType": "Header",
+                    "Cells": [
+                        {
+                            "Value": ""
+                        },
+                        {
+                            "Value": "30 Nov 26"
+                        }
+                    ]
+                },
+                {
+                    "RowType": "Section",
+                    "Title": "Income",
+                    "Rows": [
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Amazon Sales",
+                                    "Attributes": [
+                                        {
+                                            "Value": "1af9ec6c-08ff-4547-941b-63d9d527b558",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "1888748.80",
+                                    "Attributes": [
+                                        {
+                                            "Value": "1af9ec6c-08ff-4547-941b-63d9d527b558",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Ebay sales",
+                                    "Attributes": [
+                                        {
+                                            "Value": "55b7c002-7d96-444e-a5e7-8a242d0c5d87",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "455934.07",
+                                    "Attributes": [
+                                        {
+                                            "Value": "55b7c002-7d96-444e-a5e7-8a242d0c5d87",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Groupon Sales",
+                                    "Attributes": [
+                                        {
+                                            "Value": "9473fdf5-00ff-4298-a755-6ef6d295a29f",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "44249.06",
+                                    "Attributes": [
+                                        {
+                                            "Value": "9473fdf5-00ff-4298-a755-6ef6d295a29f",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Inter company sales",
+                                    "Attributes": [
+                                        {
+                                            "Value": "983d6fd2-0401-48bd-ba82-b24396b22dfb",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "98297.38",
+                                    "Attributes": [
+                                        {
+                                            "Value": "983d6fd2-0401-48bd-ba82-b24396b22dfb",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Sales",
+                                    "Attributes": [
+                                        {
+                                            "Value": "2a0ccc5f-c71b-4ccb-beae-f6a8d645290e",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "306328.46",
+                                    "Attributes": [
+                                        {
+                                            "Value": "2a0ccc5f-c71b-4ccb-beae-f6a8d645290e",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "SLA & Contract Income",
+                                    "Attributes": [
+                                        {
+                                            "Value": "892bbff8-688c-48c2-a40d-bbde829613e2",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "9756.00",
+                                    "Attributes": [
+                                        {
+                                            "Value": "892bbff8-688c-48c2-a40d-bbde829613e2",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Website Sales",
+                                    "Attributes": [
+                                        {
+                                            "Value": "8e8d0df3-e247-42fb-a681-4e533de1252e",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "1785181.45",
+                                    "Attributes": [
+                                        {
+                                            "Value": "8e8d0df3-e247-42fb-a681-4e533de1252e",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "SummaryRow",
+                            "Cells": [
+                                {
+                                    "Value": "Total Income"
+                                },
+                                {
+                                    "Value": "4588495.22"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "RowType": "Section",
+                    "Title": "Less Cost of Sales",
+                    "Rows": [
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Opening stock",
+                                    "Attributes": [
+                                        {
+                                            "Value": "213d4afc-bf62-4d3c-9a5e-378467a8ab21",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "108046.68",
+                                    "Attributes": [
+                                        {
+                                            "Value": "213d4afc-bf62-4d3c-9a5e-378467a8ab21",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "3PL",
+                                    "Attributes": [
+                                        {
+                                            "Value": "0fdbfd9f-9467-4024-b3a5-cae8cc04b6bf",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "9021.29",
+                                    "Attributes": [
+                                        {
+                                            "Value": "0fdbfd9f-9467-4024-b3a5-cae8cc04b6bf",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Amazon Fee",
+                                    "Attributes": [
+                                        {
+                                            "Value": "1c75c063-2f11-476b-80dc-bd5fb332af63",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "317056.00",
+                                    "Attributes": [
+                                        {
+                                            "Value": "1c75c063-2f11-476b-80dc-bd5fb332af63",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Amazon Shipping",
+                                    "Attributes": [
+                                        {
+                                            "Value": "316d3d8a-8dc5-4996-bdb0-6872b14963b4",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "76203.86",
+                                    "Attributes": [
+                                        {
+                                            "Value": "316d3d8a-8dc5-4996-bdb0-6872b14963b4",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Cost of goods or services",
+                                    "Attributes": [
+                                        {
+                                            "Value": "bdcb58a8-6fb9-4e51-8b28-b6b4863f052f",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "1027835.97",
+                                    "Attributes": [
+                                        {
+                                            "Value": "bdcb58a8-6fb9-4e51-8b28-b6b4863f052f",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Courier & Shipping Costs",
+                                    "Attributes": [
+                                        {
+                                            "Value": "82450d51-b53a-471c-8871-b2a16f0d18d5",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "225095.76",
+                                    "Attributes": [
+                                        {
+                                            "Value": "82450d51-b53a-471c-8871-b2a16f0d18d5",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Ebay fee",
+                                    "Attributes": [
+                                        {
+                                            "Value": "e5f28d2c-2828-47bf-b7b1-c00f8d994c62",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "86715.47",
+                                    "Attributes": [
+                                        {
+                                            "Value": "e5f28d2c-2828-47bf-b7b1-c00f8d994c62",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Inter company Purchases",
+                                    "Attributes": [
+                                        {
+                                            "Value": "f4e2874c-bf0a-443f-95c2-38489cac5b0e",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "1774983.40",
+                                    "Attributes": [
+                                        {
+                                            "Value": "f4e2874c-bf0a-443f-95c2-38489cac5b0e",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Logistics",
+                                    "Attributes": [
+                                        {
+                                            "Value": "a41830c3-8192-4425-803d-d217752acaf6",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "125.00",
+                                    "Attributes": [
+                                        {
+                                            "Value": "a41830c3-8192-4425-803d-d217752acaf6",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Merchant Fees",
+                                    "Attributes": [
+                                        {
+                                            "Value": "f558662d-c855-4219-8752-d539a262df13",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "32620.33",
+                                    "Attributes": [
+                                        {
+                                            "Value": "f558662d-c855-4219-8752-d539a262df13",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Packaging Materials",
+                                    "Attributes": [
+                                        {
+                                            "Value": "2e7e7a4d-b738-4536-9d08-4cff6f4f012f",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "16415.09",
+                                    "Attributes": [
+                                        {
+                                            "Value": "2e7e7a4d-b738-4536-9d08-4cff6f4f012f",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Referral Fees",
+                                    "Attributes": [
+                                        {
+                                            "Value": "35028527-a2a5-4649-8b7c-2517a0fd37e9",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "43585.18",
+                                    "Attributes": [
+                                        {
+                                            "Value": "35028527-a2a5-4649-8b7c-2517a0fd37e9",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Closing stock",
+                                    "Attributes": [
+                                        {
+                                            "Value": "20c1bfde-075e-41f2-a044-19a4a0da327d",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "-150000.00",
+                                    "Attributes": [
+                                        {
+                                            "Value": "20c1bfde-075e-41f2-a044-19a4a0da327d",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "SummaryRow",
+                            "Cells": [
+                                {
+                                    "Value": "Total Cost of Sales"
+                                },
+                                {
+                                    "Value": "3567704.03"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "RowType": "Section",
+                    "Title": "",
+                    "Rows": [
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Gross Profit"
+                                },
+                                {
+                                    "Value": "1020791.19"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "RowType": "Section",
+                    "Title": "Plus Other Income",
+                    "Rows": [
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Rebates & Supplier Incentives",
+                                    "Attributes": [
+                                        {
+                                            "Value": "b7fa5312-9891-4faf-9915-fdbefcf8b1d1",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "7333.08",
+                                    "Attributes": [
+                                        {
+                                            "Value": "b7fa5312-9891-4faf-9915-fdbefcf8b1d1",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "SummaryRow",
+                            "Cells": [
+                                {
+                                    "Value": "Total Other Income"
+                                },
+                                {
+                                    "Value": "7333.08"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "RowType": "Section",
+                    "Title": "Less Operating Expenses",
+                    "Rows": [
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Accountancy Fees",
+                                    "Attributes": [
+                                        {
+                                            "Value": "e076ca63-d574-4494-9c38-c1875c89112f",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "3268.89",
+                                    "Attributes": [
+                                        {
+                                            "Value": "e076ca63-d574-4494-9c38-c1875c89112f",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Bank Fees",
+                                    "Attributes": [
+                                        {
+                                            "Value": "81fecf54-ae87-4efd-abbe-d721da19aa05",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "564.74",
+                                    "Attributes": [
+                                        {
+                                            "Value": "81fecf54-ae87-4efd-abbe-d721da19aa05",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Charity",
+                                    "Attributes": [
+                                        {
+                                            "Value": "da109209-4a25-4dbb-a95a-335fe3b37c6f",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "58002.46",
+                                    "Attributes": [
+                                        {
+                                            "Value": "da109209-4a25-4dbb-a95a-335fe3b37c6f",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Employer NI",
+                                    "Attributes": [
+                                        {
+                                            "Value": "58108583-12bb-497d-b5fe-f493e49d1ed9",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "16451.78",
+                                    "Attributes": [
+                                        {
+                                            "Value": "58108583-12bb-497d-b5fe-f493e49d1ed9",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Employer pension",
+                                    "Attributes": [
+                                        {
+                                            "Value": "47ac6210-6d1c-407b-8b3e-ee1dde85007a",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "1624.71",
+                                    "Attributes": [
+                                        {
+                                            "Value": "47ac6210-6d1c-407b-8b3e-ee1dde85007a",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Insurance (Professional & Public)",
+                                    "Attributes": [
+                                        {
+                                            "Value": "3a84ebdb-125d-4660-96db-0fc2d6b8eba4",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "2953.36",
+                                    "Attributes": [
+                                        {
+                                            "Value": "3a84ebdb-125d-4660-96db-0fc2d6b8eba4",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Legal Fees",
+                                    "Attributes": [
+                                        {
+                                            "Value": "91a68188-2885-47a1-90c6-ae5f446e28e5",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "640.00",
+                                    "Attributes": [
+                                        {
+                                            "Value": "91a68188-2885-47a1-90c6-ae5f446e28e5",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Locum  & Contractor costs",
+                                    "Attributes": [
+                                        {
+                                            "Value": "ce3a5ded-b423-4bdd-af25-079fb871d8f4",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "36564.88",
+                                    "Attributes": [
+                                        {
+                                            "Value": "ce3a5ded-b423-4bdd-af25-079fb871d8f4",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Marketing & Advertising",
+                                    "Attributes": [
+                                        {
+                                            "Value": "ea4ba19b-f38c-426f-9417-012eb2eb2b88",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "13274.24",
+                                    "Attributes": [
+                                        {
+                                            "Value": "ea4ba19b-f38c-426f-9417-012eb2eb2b88",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Office Supplies & Misc",
+                                    "Attributes": [
+                                        {
+                                            "Value": "3954e23f-d664-43bf-a2cf-f88b3111d32e",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "989.88",
+                                    "Attributes": [
+                                        {
+                                            "Value": "3954e23f-d664-43bf-a2cf-f88b3111d32e",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Other Misc",
+                                    "Attributes": [
+                                        {
+                                            "Value": "16137aa0-4ee5-44f1-8628-1fd32aae3f18",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "2832.98",
+                                    "Attributes": [
+                                        {
+                                            "Value": "16137aa0-4ee5-44f1-8628-1fd32aae3f18",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Regulatory, Subscriptions & Licensing Fees",
+                                    "Attributes": [
+                                        {
+                                            "Value": "cfbcd18f-34aa-442d-b0c2-fe68ceb8a623",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "15676.60",
+                                    "Attributes": [
+                                        {
+                                            "Value": "cfbcd18f-34aa-442d-b0c2-fe68ceb8a623",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Rent",
+                                    "Attributes": [
+                                        {
+                                            "Value": "5e68dac0-d33a-42db-9b4f-7eb9b32e5f12",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "83063.25",
+                                    "Attributes": [
+                                        {
+                                            "Value": "5e68dac0-d33a-42db-9b4f-7eb9b32e5f12",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Repairs and Maintenance including fees",
+                                    "Attributes": [
+                                        {
+                                            "Value": "d25e6bf1-54ef-4888-b9eb-b52b549585ed",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "60.00",
+                                    "Attributes": [
+                                        {
+                                            "Value": "d25e6bf1-54ef-4888-b9eb-b52b549585ed",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Staff Training & CPD",
+                                    "Attributes": [
+                                        {
+                                            "Value": "2ee91d28-f028-4a69-bac1-67d60deb343f",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "165.00",
+                                    "Attributes": [
+                                        {
+                                            "Value": "2ee91d28-f028-4a69-bac1-67d60deb343f",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Staff wages",
+                                    "Attributes": [
+                                        {
+                                            "Value": "db8d6452-eecb-42f6-b2b5-040f8e91e0b1",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "173770.03",
+                                    "Attributes": [
+                                        {
+                                            "Value": "db8d6452-eecb-42f6-b2b5-040f8e91e0b1",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Utilities",
+                                    "Attributes": [
+                                        {
+                                            "Value": "ddae3c91-52cd-4cae-9cfc-3bda26b2bc94",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "153.12",
+                                    "Attributes": [
+                                        {
+                                            "Value": "ddae3c91-52cd-4cae-9cfc-3bda26b2bc94",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Waste Disposal",
+                                    "Attributes": [
+                                        {
+                                            "Value": "7ddf493c-98e6-42f3-88d7-b40e1c293d6c",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Value": "238.56",
+                                    "Attributes": [
+                                        {
+                                            "Value": "7ddf493c-98e6-42f3-88d7-b40e1c293d6c",
+                                            "Id": "account"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "RowType": "SummaryRow",
+                            "Cells": [
+                                {
+                                    "Value": "Total Operating Expenses"
+                                },
+                                {
+                                    "Value": "410294.48"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "RowType": "Section",
+                    "Title": "",
+                    "Rows": [
+                        {
+                            "RowType": "Row",
+                            "Cells": [
+                                {
+                                    "Value": "Net Profit"
+                                },
+                                {
+                                    "Value": "617829.79"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}

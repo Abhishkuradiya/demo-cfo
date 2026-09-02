@@ -254,11 +254,11 @@ export default function OverviewPage() {
   const bankOverviewData = useMemo(() => {
     const list = data.bankAccounts || [];
     const totalBalance = list.reduce((sum: number, acc: any) => sum + (acc.balance || 0), 0);
-    
+
     const accounts = list.map((acc: any, index: number) => {
       // First account is healthy (0 pending), second is attention (5 pending), etc.
       const pendingReconciliation = index === 0 ? 0 : (index === 1 ? 5 : (index % 2 === 0 ? 0 : 3));
-      
+
       let status: 'healthy' | 'attention' | 'disconnected' = 'healthy';
       if (acc.status === 'DELETED' || acc.status === 'ARCHIVED') {
         status = 'disconnected';
@@ -311,7 +311,7 @@ export default function OverviewPage() {
     }
     return `${currencyCode} ${new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(amount)}`;
   };
- 
+
   const formatDateString = (dateStr: string) => {
     if (!dateStr) return '—';
     try {
@@ -402,7 +402,7 @@ export default function OverviewPage() {
     return () => {
       window.removeEventListener('xero-sync-complete', handleSyncComplete);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Refs for ECharts initialization
@@ -959,19 +959,19 @@ export default function OverviewPage() {
 
                   {/* Bottom Sparkline */}
                   <div className="absolute bottom-0 left-0 right-0 px-1 pointer-events-none">
-                    <Sparkline 
+                    <Sparkline
                       dataPoints={
-                        idx === 1 ? [] : 
-                        idx === 2 ? data.chartCash : 
-                        idx === 3 ? data.chartAR : 
-                        idx === 4 ? data.chartAP : []
-                      } 
+                        idx === 1 ? [] :
+                          idx === 2 ? data.chartCash :
+                            idx === 3 ? data.chartAR :
+                              idx === 4 ? data.chartAP : []
+                      }
                       color={
-                        idx === 1 ? "#10b981" : 
-                        idx === 2 ? "#10b981" : 
-                        idx === 3 ? "#0064eb" : 
-                        idx === 4 ? "#a855f7" : "#0064eb"
-                      } 
+                        idx === 1 ? "#10b981" :
+                          idx === 2 ? "#10b981" :
+                            idx === 3 ? "#0064eb" :
+                              idx === 4 ? "#a855f7" : "#0064eb"
+                      }
                     />
                   </div>
                 </div>
@@ -997,7 +997,7 @@ export default function OverviewPage() {
                       fill="none"
                       className={cn(
                         (!data.connected || !reconciliation || reconciliation.pendingTransactions === 0) ? "text-emerald-500" :
-                        reconciliation.pendingTransactions <= 50 ? "text-amber-500" : "text-rose-500"
+                          reconciliation.pendingTransactions <= 50 ? "text-amber-500" : "text-rose-500"
                       )}
                       strokeWidth="3.5"
                       strokeDasharray={`${(data.connected ? (reconciliation?.reconciliationPercentage || 0) : 0)}, 100`}
@@ -1015,7 +1015,7 @@ export default function OverviewPage() {
                 <p className="text-[11px] font-semibold mt-1 leading-none whitespace-nowrap">
                   <span className={cn(
                     (!data.connected || !reconciliation || reconciliation.pendingTransactions === 0) ? "text-[#10b981]" :
-                    reconciliation.pendingTransactions <= 50 ? "text-amber-500" : "text-rose-500"
+                      reconciliation.pendingTransactions <= 50 ? "text-amber-500" : "text-rose-500"
                   )}>
                     {data.connected ? (reconciliation ? `${reconciliation.pendingTransactions} pending` : "0 pending") : "0 pending"}
                   </span>
@@ -1195,16 +1195,16 @@ export default function OverviewPage() {
               <div className="relative flex flex-col items-center justify-center flex-1 min-h-[125px]">
                 {/* Single stable gauge canvas node to prevent DOM swapping and rendering size glitches */}
                 <div ref={healthGaugeRef} className={cn("w-full h-32", !healthScore && "opacity-30")} />
-                
+
                 {healthScore ? (
                   <div className="text-center mt-1">
                     <span className={cn(
                       "text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider border",
                       healthScore.label === 'EXCELLENT' || healthScore.label === 'GOOD' ? 'bg-emerald-50 border-emerald-100 text-emerald-600' :
-                      healthScore.label === 'FAIR' ? 'bg-amber-50 border-amber-100 text-amber-600' :
-                      healthScore.label === 'WARNING' ? 'bg-orange-50 border-orange-100 text-orange-600' :
-                      healthScore.label === 'OFFLINE' || healthScore.label === 'DISCONNECTED' ? 'bg-slate-55 border-slate-200 text-slate-500' :
-                      'bg-red-50 border-red-100 text-red-600'
+                        healthScore.label === 'FAIR' ? 'bg-amber-50 border-amber-100 text-amber-600' :
+                          healthScore.label === 'WARNING' ? 'bg-orange-50 border-orange-100 text-orange-600' :
+                            healthScore.label === 'OFFLINE' || healthScore.label === 'DISCONNECTED' ? 'bg-slate-55 border-slate-200 text-slate-500' :
+                              'bg-red-50 border-red-100 text-red-600'
                     )}>{healthScore.label}</span>
                     <p className="text-[11px] text-slate-500 font-medium mt-1.5 leading-normal">{healthScore.description}</p>
                   </div>
@@ -1450,7 +1450,7 @@ export default function OverviewPage() {
             <div className="lg:col-span-6 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs overflow-hidden select-none">
               <div className="border-b border-slate-100 pb-3 mb-4 flex items-center justify-between">
                 <h3 className="text-[13.5px] font-bold text-slate-800">Top Overdue Invoices</h3>
-                <Link href="/invoices" className="text-[11px] text-primary hover:underline font-bold flex items-center gap-0.5">
+                <Link href="/invoices/overdue" className="text-[11px] text-primary hover:underline font-bold flex items-center gap-0.5">
                   <span>View All</span>
                   <ArrowRight className="h-3 w-3" />
                 </Link>
@@ -1512,7 +1512,7 @@ export default function OverviewPage() {
             <div className="lg:col-span-3 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between select-none">
               <div className="border-b border-slate-100 pb-3 mb-3 flex items-center justify-between">
                 <h3 className="text-[13.5px] font-bold text-slate-800">Bank Accounts</h3>
-                <Link href="/cash-flow" className="text-[11px] text-primary hover:underline font-bold flex items-center gap-0.5">
+                <Link href="/banking/accounts" className="text-[11px] text-primary hover:underline font-bold flex items-center gap-0.5">
                   <span>View All</span>
                   <ArrowRight className="h-3 w-3" />
                 </Link>
@@ -1601,24 +1601,24 @@ export default function OverviewPage() {
                     }
 
                     return (
-                      <div key={idx} className="flex items-center justify-between py-3 border-b border-slate-100 last:border-0 hover:bg-slate-50/50 transition-colors">
-                        <div className="flex items-center gap-3">
+                      <div key={idx} className="flex items-center justify-between py-2.5 border-b border-slate-100 last:border-0 hover:bg-slate-50/50 transition-colors min-w-0">
+                        <div className="flex items-center gap-2.5 min-w-0 flex-1 pr-2">
                           {logo}
-                          <div className="flex flex-col min-w-0">
-                            <span className="font-bold text-slate-700 text-[11.5px] truncate">{bank.accountName}</span>
-                            <span className="text-[9px] text-slate-455 font-bold leading-none mt-0.5">CODE: {bank.accountCode || 'BANK'}</span>
+                          <div className="flex flex-col min-w-0 flex-1">
+                            <span className="font-bold text-slate-700 text-[11px] truncate block" title={bank.accountName}>{bank.accountName}</span>
+                            <span className="text-[9px] text-slate-400 font-bold leading-none mt-0.5">CODE: {bank.accountCode || 'BANK'}</span>
                           </div>
                         </div>
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center shrink-0">
                           <span className={cn(
-                            "font-bold text-[11.5px] select-all",
+                            "font-bold text-[11px] select-all shrink-0 whitespace-nowrap",
                             isNegative ? "text-red-500" : "text-slate-800"
                           )}>
                             {bank.balance !== null ? (
                               <FormattedAmount
                                 amount={bank.balance}
                                 currencyCode={bank.currency}
-                                className="font-bold text-[11.5px]"
+                                className="font-bold text-[11px]"
                               />
                             ) : (
                               '—'

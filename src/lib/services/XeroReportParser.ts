@@ -23,6 +23,17 @@ export class XeroReportParser {
                 if (val !== null) return val;
               }
             }
+
+            // 1b. Check if the Section's Summary label itself matches the target
+            // e.g., Section title = "Turnover", Summary.Cells[0] = "Total Turnover"
+            if (item.Summary) {
+              const summaryLabel = this.extractCellLabel(item.Summary);
+              if (summaryLabel === normalizedTarget) {
+                const val = this.extractCellValue(item.Summary);
+                if (val !== null) return val;
+              }
+            }
+
             if (item.Rows) {
               const res = recurse(item.Rows);
               if (res !== null) return res;

@@ -19,6 +19,7 @@ import {
   Cpu,
   Settings,
   ChevronDown,
+  ChevronLeft,
   HelpCircle,
   Menu,
   X
@@ -51,7 +52,15 @@ export function Sidebar() {
   }, []);
 
   useEffect(() => {
-    if (pathname.startsWith('/reports/') || pathname === '/overview') {
+    if (
+      pathname.startsWith('/reports/') ||
+      pathname === '/overview' ||
+      pathname.startsWith('/banking') ||
+      pathname === '/tracking-categories' ||
+      pathname === '/chart-of-accounts' ||
+      pathname === '/customers' ||
+      pathname === '/products'
+    ) {
       setExpandedMenus(prev => ({ ...prev, 'Xero Analytics': true }));
     }
   }, [pathname]);
@@ -79,25 +88,32 @@ export function Sidebar() {
       hasDropdown: true,
       subItems: [
         { name: 'Xero Dashboard', href: '/overview' },
+        { name: 'Chart of Accounts', href: '/chart-of-accounts' },
+        { name: 'Invoice Status Summary', href: '/invoices' },
+        { name: 'Top Overdue Invoices', href: '/invoices/overdue' },
+        { name: 'Bill Status Summary', href: '/bills' },
+        { name: 'Bank Accounts', href: '/banking/accounts' },
         { name: 'Balance Sheet', href: '/reports/balance-sheet' },
         { name: 'Profit & Loss', href: '/reports/profit-and-loss' },
         { name: 'Cash Flow', href: '/reports/cash-flow' },
         { name: 'Trial Balance', href: '/reports/trial-balance' },
         { name: 'Budget vs Actual', href: '/reports/budget-actual' },
         { name: 'Tax Center', href: '/reports/tax-center' },
-        { name: 'Contacts', href: '/customers' },
+        { name: 'Tracking Categories', href: '/tracking-categories' },
+        { name: 'Customers', href: '/reports/customers' },
+        { name: 'Vendors', href: '/reports/vendors' },
+        { name: 'Contacts', href: '/contacts' },
         { name: 'Inventory', href: '/products' }
       ]
     },
     { name: 'Sales Dashboard', href: '/sales', icon: BarChart3 },
-    { name: 'Purchases', href: '/revenue', icon: ShoppingBag, hasDropdown: true },
-    { name: 'Banking', href: '/cash-flow', icon: Landmark, hasDropdown: true },
-    { name: 'Accounting', href: '/reports', icon: BookOpen, hasDropdown: true },
-    { name: 'Reports', href: '/reports', icon: FileText, hasDropdown: true },
-    { name: 'Analytics', href: '/revenue', icon: LineChart, hasDropdown: true },
+    { name: 'Purchases', href: '/bills', icon: ShoppingBag },
+    { name: 'Accounting', href: '/reports', icon: BookOpen },
+    { name: 'Reports', href: '/reports', icon: FileText },
+    { name: 'Analytics', href: '/revenue', icon: LineChart },
     { name: 'Connectors', href: '/data-sources', icon: Database },
-    { name: 'Automation', href: '/automation', icon: Cpu, hasDropdown: true },
-    { name: 'Settings', href: '/settings', icon: Settings, hasDropdown: true },
+    { name: 'Automation', href: '/automation', icon: Cpu },
+    { name: 'Settings', href: '/settings', icon: Settings },
   ];
 
   const sidebarContent = (
@@ -115,7 +131,7 @@ export function Sidebar() {
           className={cn("flex items-center gap-3 font-semibold text-white", isCollapsed && "cursor-pointer")}
           title={isCollapsed ? "Expand Sidebar" : undefined}
         >
-          {/* Cyan Circular Xero-style logo */}
+          {/* Cyan Circular Xero Logo */}
           <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#00b7e2] shrink-0 shadow-sm hover:scale-105 transition-transform duration-200">
             <span className="font-sans text-[13px] font-light tracking-tighter text-white lowercase">xero</span>
           </div>
@@ -141,12 +157,23 @@ export function Sidebar() {
       <nav className="flex-1 px-3 py-4 space-y-1">
         {menuItems.map((item) => {
           const Icon = item.icon;
+
+          const isXeroAnalyticsActive = (
+            pathname === '/overview' ||
+            pathname.startsWith('/reports/') ||
+            pathname === '/invoices' ||
+            pathname === '/bills' ||
+            pathname === '/chart-of-accounts' ||
+            pathname === '/customers' ||
+            pathname === '/products'
+          );
+
           // Exact match for active styling
           const isActive = item.name === 'Overview' 
             ? (pathname === '/overview' && !expandedMenus['Xero Analytics'])
             : item.name === 'Xero Analytics'
-              ? (pathname === '/overview' || pathname.startsWith('/reports/'))
-              : pathname === item.href;
+              ? isXeroAnalyticsActive
+              : (pathname === item.href && !isXeroAnalyticsActive);
  
           if (isCollapsed) {
             return (

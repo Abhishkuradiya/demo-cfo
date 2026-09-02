@@ -344,6 +344,12 @@ export async function GET(req: NextRequest) {
         difference: dpoDifference,
         history: dpoHistory
       }
+    }, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+      }
     });
 
   } catch (err: any) {

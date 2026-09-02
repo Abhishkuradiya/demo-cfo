@@ -247,3 +247,18 @@
   scrollbar-width: thin;
   scrollbar-color: #94a3b8 transparent;
 }
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.shimmer-effect {
+  background: linear-gradient(90deg, #f1f5f9 0%, #cbd5e1 50%, #f1f5f9 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite linear;
+}
