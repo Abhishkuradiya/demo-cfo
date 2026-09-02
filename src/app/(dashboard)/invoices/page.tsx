@@ -385,62 +385,7 @@ export default function ConsistentAccountReceivablePage() {
         </div>
       </div>
 
-      {/* ========================================================================= */}
-      {/* CASH RUNWAY ACCELERATION SIMULATOR */}
-      {/* ========================================================================= */}
-      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-xl p-4 text-white shadow-md border border-indigo-950/80">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div className="space-y-0.5 max-w-xl">
-            <div className="flex items-center gap-2 text-[10px] font-black text-cyan-400 uppercase tracking-wider">
-              <Calculator className="h-3.5 w-3.5 animate-pulse" />
-              <span>INTERACTIVE CASH RUNWAY SIMULATOR</span>
-            </div>
-            <h2 className="text-base font-black text-white">What-if Cash Collection Acceleration</h2>
-            <p className="text-[11.5px] text-slate-300 font-medium leading-relaxed">
-              Drag the target collection slider to simulate how recovering overdue receivables boosts working capital.
-            </p>
-          </div>
 
-          {/* Slider & Math Output */}
-          <div className="flex-1 max-w-lg bg-slate-950/80 p-3 rounded-lg border border-slate-800 space-y-2">
-            <div className="flex justify-between items-center text-xs font-bold">
-              <span className="text-slate-400">Target Recovery Rate:</span>
-              <span className="text-cyan-400 font-black text-sm">{targetCollectionPct}% of Overdue</span>
-            </div>
-
-            <input
-              type="range"
-              min="0"
-              max="100"
-              value={targetCollectionPct}
-              onChange={(e) => setTargetCollectionPct(Number(e.target.value))}
-              className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-400"
-            />
-
-            <div className="flex items-center justify-between text-xs">
-              <div>
-                <span className="text-[9.5px] text-slate-400 font-bold block uppercase">Unlocked Cash</span>
-                <span className="text-sm font-black text-emerald-400">{formatAmount(simulatedCashUnlocked)}</span>
-              </div>
-              <div className="text-right">
-                <span className="text-[9.5px] text-slate-400 font-bold block uppercase">Runway Impact</span>
-                <span className="text-sm font-black text-cyan-400 flex items-center gap-1">
-                  <Zap className="h-3.5 w-3.5 text-amber-400" /> +{simulatedRunwayBoostDays} Days Cash Boost
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <button
-            onClick={() => {
-              toast.success(`Simulation applied: Reminders queued for target ${targetCollectionPct}% recovery!`);
-            }}
-            className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-black rounded-lg text-xs shadow-md transition cursor-pointer shrink-0"
-          >
-            Simulate Reminders
-          </button>
-        </div>
-      </div>
 
       {/* ========================================================================= */}
       {/* 4 PRIMARY METRIC CARDS */}
