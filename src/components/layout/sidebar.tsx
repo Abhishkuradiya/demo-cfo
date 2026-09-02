@@ -91,7 +91,7 @@ export function Sidebar() {
         { name: 'Chart of Accounts', href: '/chart-of-accounts' },
         { name: 'Account Receivable', href: '/invoices' },
         { name: 'Top Overdue Invoices', href: '/invoices/overdue' },
-        { name: 'Bill Status Summary', href: '/bills' },
+        { name: 'Account Payable', href: '/bills' },
         { name: 'Aged Receivables Detail', href: '/reports/account-receivable' },
         { name: 'Aged Receivables Summary', href: '/reports/aged-receivables' },
         { name: 'Bank Accounts', href: '/banking/accounts' },

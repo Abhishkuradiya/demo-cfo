@@ -1,1037 +1,1250 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from 'react';
-import Link from 'next/link';
-import { useSearchParams, useRouter } from 'next/navigation';
-import * as echarts from 'echarts';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import ReactECharts from 'echarts-for-react';
 import {
-  Calendar,
-  FileText,
+  CreditCard,
   Clock,
-  Hourglass,
-  CheckCircle2,
-  FileCheck,
-  ArrowRight,
-  Landmark,
-  Building2,
-  ChevronDown,
+  AlertTriangle,
+  ShieldAlert,
   Search,
   Filter,
-  MoreHorizontal,
-  ChevronLeft,
+  RefreshCw,
+  FileSpreadsheet,
+  BarChart3,
+  User,
   ChevronRight,
-  Download,
-  ArrowUpDown
+  ChevronDown,
+  FileText,
+  Building2,
+  Calendar,
+  DollarSign,
+  ArrowUpDown,
+  ExternalLink,
+  CheckCircle2,
+  AlertCircle
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { FormattedDatePicker } from '@/components/ui/formatted-date-picker';
 
-interface BillItem {
-  id: string;
-  invoiceNumber: string;
-  vendorName: string;
-  status: string;
-  type: string;
-  date: string | null;
-  dueDate: string | null;
-  total: number;
-  amountDue: number;
-  amountPaid: number;
-  currency: string;
-}
+// Standardized Currency Formatter
+const formatAmount = (val: number, currencyStr: string = 'GBP') => {
+  const sym = currencyStr === 'USD' ? '$' : currencyStr === 'EUR' ? '€' : '£';
+  return `${sym}${val.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
 
-interface VendorSummary {
-  name: string;
-  amountDue: number;
-}
+const formatToDDMMYYYY = (dateStr: string | null | undefined): string => {
+  if (!dateStr) return '—';
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    return `${day}/${month}/${year}`;
+  } catch (e) {
+    return dateStr;
+  }
+};
 
-interface SummaryData {
-  totalBills: number;
-  draft: { count: number; pct: string };
-  awaitingApproval: { count: number; pct: string };
-  awaitingPayment: { count: number; pct: string };
-  paid: { count: number; pct: string };
-}
+// Stripe-style Initial Avatar
+const StripeAvatar = ({ name }: { name: string }) => {
+  const initials = name
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map(n => n[0].toUpperCase())
+    .join('') || 'VN';
 
-interface ChartData {
-  draft: number;
-  awaitingApproval: number;
-  awaitingPayment: number;
-  paid: number;
-}
+  const colors = [
+    'bg-blue-100 text-blue-700 border-blue-200',
+    'bg-indigo-100 text-indigo-700 border-indigo-200',
+    'bg-purple-100 text-purple-700 border-purple-200',
+    'bg-amber-100 text-amber-700 border-amber-200',
+    'bg-rose-100 text-rose-700 border-rose-200'
+  ];
+  const colorClass = colors[name.length % colors.length];
 
-interface PaginationData {
-  totalItems: number;
-  totalPages: number;
-  currentPage: number;
-  limit: number;
-  startIndex: number;
-  endIndex: number;
-}
+  return (
+    <div className={cn("h-7 w-7 rounded-lg border font-black text-[10px] flex items-center justify-center shrink-0 shadow-2xs", colorClass)}>
+      {initials}
+    </div>
+  );
+};
 
-export default function BillStatusSummaryPage() {
-  const searchParams = useSearchParams();
-  const router = useRouter();
+// SVG Sparkline Component
+const StripeSparkline = ({ color = '#2563eb' }: { color?: string }) => (
+  <svg className="w-full h-8 overflow-visible" viewBox="0 0 100 25" preserveAspectRatio="none">
+    <defs>
+      <linearGradient id={`grad-${color.replace('#', '')}`} x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stopColor={color} stopOpacity="0.25" />
+        <stop offset="100%" stopColor={color} stopOpacity="0.0" />
+      </linearGradient>
+    </defs>
+    <path
+      d="M0,22 Q15,18 30,12 T60,15 T80,5 T100,10 L100,25 L0,25 Z"
+      fill={`url(#grad-${color.replace('#', '')})`}
+    />
+    <path
+      d="M0,22 Q15,18 30,12 T60,15 T80,5 T100,10"
+      fill="none"
+      stroke={color}
+      strokeWidth="2.5"
+      strokeLinecap="round"
+    />
+  </svg>
+);
 
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedStatus, setSelectedStatus] = useState<string>(searchParams.get('status') || 'ALL');
-  const [selectedVendor, setSelectedVendor] = useState<string>('ALL');
+export default function AccountPayableDashboard() {
+  const [loading, setLoading] = useState<boolean>(true);
+  const [data, setData] = useState<any>(null);
+
+  // Filter States
+  const [asOnDate, setAsOnDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  const [activeTab, setActiveTab] = useState<'overview' | 'vendors' | 'overdue' | 'ageing'>('overview');
+  const [selectedBucketFilter, setSelectedBucketFilter] = useState<string>('ALL');
+  const [selectedRiskFilter, setSelectedRiskFilter] = useState<string>('ALL');
+  const [searchTerm, setSearchTerm] = useState<string>('');
+
+  // Table Sorting State
+  const [sortCol, setSortCol] = useState<'overdue' | 'total' | 'name' | 'pct'>('total');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  
+  // Interactive Vendor Expansion State
+  const [expandedVendor, setExpandedVendor] = useState<string | null>(null);
+
+  // Overdue Card View Switcher (Vendors vs Bills)
+  const [overdueView, setOverdueView] = useState<'vendors' | 'bills'>('vendors');
+
+  // Pagination
   const [currentPage, setCurrentPage] = useState<number>(1);
-  const [pageSize, setPageSize] = useState<number>(10);
-  const [timeframe, setTimeframe] = useState<string>('This Period');
+  const pageSize = 10;
 
-  // Page-level Date Range Filter state
-  const defaultFrom = searchParams.get('from_date') || '2026-08-01';
-  const defaultTo = searchParams.get('to_date') || '2026-08-31';
-
-  const [fromDate, setFromDate] = useState<string>(defaultFrom);
-  const [toDate, setToDate] = useState<string>(defaultTo);
-  const [tempFromDate, setTempFromDate] = useState<string>(defaultFrom);
-  const [tempToDate, setTempToDate] = useState<string>(defaultTo);
-  const [showDatePicker, setShowDatePicker] = useState<boolean>(false);
-  const datePickerRef = useRef<HTMLDivElement>(null);
-
-  const [loading, setLoading] = useState(true);
-  const [initialLoading, setInitialLoading] = useState(true);
-  const [tableLoading, setTableLoading] = useState(false);
-
-  const [summary, setSummary] = useState<SummaryData>({
-    totalBills: 0,
-    draft: { count: 0, pct: '0' },
-    awaitingApproval: { count: 0, pct: '0' },
-    awaitingPayment: { count: 0, pct: '0' },
-    paid: { count: 0, pct: '0' }
-  });
-
-  const [chartData, setChartData] = useState<ChartData>({
-    draft: 0,
-    awaitingApproval: 0,
-    awaitingPayment: 0,
-    paid: 0
-  });
-
-  const [pagination, setPagination] = useState<PaginationData>({
-    totalItems: 0,
-    totalPages: 1,
-    currentPage: 1,
-    limit: 10,
-    startIndex: 0,
-    endIndex: 0
-  });
-
-  const [bills, setBills] = useState<BillItem[]>([]);
-  const [topVendors, setTopVendors] = useState<VendorSummary[]>([]);
-  const [vendorsList, setVendorsList] = useState<string[]>([]);
-  const [currency, setCurrency] = useState<string>('USD');
-
-  const barChartRef = useRef<HTMLDivElement>(null);
-  const donutChartRef = useRef<HTMLDivElement>(null);
-
-  // Close Date Picker when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (datePickerRef.current && !datePickerRef.current.contains(e.target as Node)) {
-        setShowDatePicker(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  // Read status URL parameter on mount
-  useEffect(() => {
-    const statusParam = searchParams.get('status');
-    if (statusParam) {
-      setSelectedStatus(statusParam);
-    }
-    const fromParam = searchParams.get('from_date');
-    const toParam = searchParams.get('to_date');
-    if (fromParam) {
-      setFromDate(fromParam);
-      setTempFromDate(fromParam);
-    }
-    if (toParam) {
-      setToDate(toParam);
-      setTempToDate(toParam);
-    }
-  }, [searchParams]);
-
+  // Fetch API Data
   const fetchData = async () => {
+    setLoading(true);
     try {
-      if (initialLoading) {
-        setLoading(true);
-      }
-      setTableLoading(true);
-      const params = new URLSearchParams();
-      if (searchTerm) params.append('search', searchTerm);
-      if (selectedStatus !== 'ALL') params.append('status', selectedStatus);
-      if (selectedVendor !== 'ALL') params.append('vendor', selectedVendor);
-      if (fromDate) params.append('from_date', fromDate);
-      if (toDate) params.append('to_date', toDate);
-
-      params.append('page', String(currentPage));
-      params.append('limit', String(pageSize));
-
-      const res = await fetch(`/api/dashboard/bills-summary?${params.toString()}`);
-      if (res.ok) {
-        const json = await res.json();
-        setSummary(json.summary);
-        setChartData(json.chartData);
-        setBills(json.bills || json.recentBills || []);
-        setPagination(json.pagination || {
-          totalItems: (json.bills || json.recentBills || []).length,
-          totalPages: 1,
-          currentPage: 1,
-          limit: pageSize,
-          startIndex: 1,
-          endIndex: (json.bills || json.recentBills || []).length
-        });
-        setTopVendors(json.topVendors || []);
-        if (json.meta?.currency) setCurrency(json.meta.currency);
-        if (json.meta?.vendors) setVendorsList(json.meta.vendors);
-      }
-    } catch (err) {
-      console.error('Failed to fetch bill summary data:', err);
+      const res = await fetch(`/api/dashboard/account-payable?as_on_date=${asOnDate}`);
+      if (!res.ok) throw new Error('Failed to fetch Account Payable data');
+      const json = await res.json();
+      setData(json);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to load payables summary');
     } finally {
       setLoading(false);
-      setInitialLoading(false);
-      setTableLoading(false);
     }
   };
 
   useEffect(() => {
     fetchData();
-  }, [searchTerm, selectedStatus, selectedVendor, currentPage, pageSize, fromDate, toDate]);
+  }, [asOnDate]);
 
-  // ECharts Initialization for Vertical Bar Chart (Bills by Status)
-  useEffect(() => {
-    if (!barChartRef.current || loading) return;
-    const chartInstance = echarts.init(barChartRef.current);
+  // CSV Export Handler
+  const handleExportCSV = () => {
+    if (!data?.vendorSummary) return;
+    const headers = ['Vendor Name', 'Total Bills', 'Total Payables', 'Current (Not Due)', '1-30 Days', '31-60 Days', '61-90 Days', '90+ Days', 'Total Overdue', '% Overdue'];
+    const rows = data.vendorSummary.map((v: any) => [
+      `"${v.vendorName}"`,
+      v.totalBills,
+      v.totalPayables.toFixed(2),
+      v.currentNotDue.toFixed(2),
+      v.days1to30.toFixed(2),
+      v.days31to60.toFixed(2),
+      v.days61to90.toFixed(2),
+      v.days90Plus.toFixed(2),
+      (v.days1to30 + v.days31to60 + v.days61to90 + v.days90Plus).toFixed(2),
+      `${v.pctOverdue}%`
+    ]);
 
-    const option = {
-      grid: {
-        left: '3%',
-        right: '3%',
-        top: '10%',
-        bottom: '12%',
-        containLabel: true
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((r: any) => r.join(','))].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `Account_Payable_Summary_${asOnDate}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success('Report exported as CSV');
+  };
+
+  // Filter & Sort Vendor Summary
+  const vendorList = data?.vendorSummary || [];
+  const filteredVendors = useMemo(() => {
+    let list = vendorList.filter((v: any) => {
+      const matchesSearch = v.vendorName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        v.bills.some((b: any) => b.billNumber.toLowerCase().includes(searchTerm.toLowerCase()));
+      
+      let matchesBucket = true;
+      if (selectedBucketFilter === 'current') matchesBucket = v.currentNotDue > 0;
+      else if (selectedBucketFilter === '1-30') matchesBucket = v.days1to30 > 0;
+      else if (selectedBucketFilter === '31-60') matchesBucket = v.days31to60 > 0;
+      else if (selectedBucketFilter === '61-90') matchesBucket = v.days61to90 > 0;
+      else if (selectedBucketFilter === '90+') matchesBucket = v.days90Plus > 0;
+
+      let matchesRisk = true;
+      if (selectedRiskFilter === 'HIGH') matchesRisk = v.pctOverdue >= 40;
+      else if (selectedRiskFilter === 'CRITICAL') matchesRisk = v.days90Plus > 0;
+      else if (selectedRiskFilter === 'LOW') matchesRisk = v.pctOverdue < 15;
+
+      return matchesSearch && matchesBucket && matchesRisk;
+    });
+
+    return [...list].sort((a: any, b: any) => {
+      const aOverdue = a.days1to30 + a.days31to60 + a.days61to90 + a.days90Plus;
+      const bOverdue = b.days1to30 + b.days31to60 + b.days61to90 + b.days90Plus;
+
+      let res = 0;
+      if (sortCol === 'overdue') res = bOverdue - aOverdue;
+      else if (sortCol === 'total') res = b.totalPayables - a.totalPayables;
+      else if (sortCol === 'name') res = a.vendorName.localeCompare(b.vendorName);
+      else if (sortCol === 'pct') res = b.pctOverdue - a.pctOverdue;
+
+      return sortDir === 'desc' ? res : -res;
+    });
+  }, [vendorList, searchTerm, selectedBucketFilter, selectedRiskFilter, sortCol, sortDir]);
+
+  const totalPages = Math.ceil(filteredVendors.length / pageSize) || 1;
+  const paginatedVendors = filteredVendors.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
+  // Bills for Overdue Tab
+  const overdueBillsList = useMemo(() => {
+    if (!data?.allPayableBills) return [];
+    return data.allPayableBills.filter((inv: any) => inv.daysOverdue > 0).sort((a: any, b: any) => b.daysOverdue - a.daysOverdue);
+  }, [data]);
+
+  // Key KPI Figures
+  const totalPayablesVal = data?.summary?.totalPayables?.amount || 0;
+  const currentNotDueVal = data?.summary?.currentNotDue?.amount || 0;
+  const overdueTotalVal = (data?.summary?.days1to30?.amount || 0) + 
+                          (data?.summary?.days31to60?.amount || 0) + 
+                          (data?.summary?.days61to90?.amount || 0) + 
+                          (data?.summary?.days90Plus?.amount || 0);
+  const highRiskVal = data?.summary?.days90Plus?.amount || 0;
+  const overdueCountVal = data?.summary?.overdueBills?.count || 0;
+
+  // ECharts Options: Ageing Donut Chart
+  const doughnutOption = useMemo(() => {
+    const dist = data?.ageingDistribution || [];
+    return {
+      tooltip: {
+        trigger: 'item',
+        formatter: '{b}: <b>{c}</b> ({d}%)'
       },
+      legend: {
+        orient: 'vertical',
+        right: '5%',
+        top: 'center',
+        icon: 'circle',
+        textStyle: { fontSize: 11, color: '#475569', fontWeight: 600 }
+      },
+      color: ['#2563eb', '#eab308', '#f97316', '#ef4444', '#991b1b'],
+      series: [
+        {
+          name: 'Ageing Distribution',
+          type: 'pie',
+          radius: ['52%', '78%'],
+          center: ['35%', '50%'],
+          avoidLabelOverlap: false,
+          itemStyle: {
+            borderRadius: 6,
+            borderColor: '#fff',
+            borderWidth: 2
+          },
+          label: {
+            show: false
+          },
+          emphasis: {
+            label: {
+              show: true,
+              fontSize: 12,
+              fontWeight: 'bold'
+            }
+          },
+          data: dist.map((d: any) => ({
+            name: d.label,
+            value: d.amount
+          }))
+        }
+      ]
+    };
+  }, [data]);
+
+  // ECharts Options: Payables Trend Line Chart
+  const trendLineOption = useMemo(() => {
+    const trend = data?.trend || { labels: [], series: { current: [], days1to30: [], days31to60: [], days61to90: [], days90Plus: [] } };
+    return {
       tooltip: {
         trigger: 'axis',
-        axisPointer: { type: 'shadow' },
-        backgroundColor: '#ffffff',
-        borderColor: '#e2e8f0',
-        borderWidth: 1,
-        padding: [8, 12],
-        textStyle: { color: '#334155', fontSize: 11, fontFamily: 'sans-serif' },
-        extraCssText: 'box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05); border-radius: 8px;'
+        axisPointer: { type: 'cross' }
+      },
+      legend: {
+        bottom: 0,
+        icon: 'circle',
+        textStyle: { fontSize: 10, color: '#64748b' }
+      },
+      grid: {
+        top: '10%',
+        left: '3%',
+        right: '4%',
+        bottom: '15%',
+        containLabel: true
       },
       xAxis: {
         type: 'category',
-        data: ['Draft Bills', 'Awaiting Approval', 'Awaiting Payment', 'Paid Bills'],
-        axisLine: { show: false },
-        axisTick: { show: false },
-        axisLabel: { color: '#64748b', fontSize: 11, fontWeight: 'bold' }
+        boundaryGap: false,
+        data: trend.labels,
+        axisLine: { lineStyle: { color: '#cbd5e1' } },
+        axisLabel: { color: '#64748b', fontSize: 10 }
       },
       yAxis: {
         type: 'value',
         axisLine: { show: false },
-        axisTick: { show: false },
-        splitLine: { lineStyle: { color: '#f1f5f9', type: 'dashed' } },
+        splitLine: { lineStyle: { color: '#f1f5f9' } },
         axisLabel: {
-          color: '#94a3b8',
+          color: '#64748b',
           fontSize: 10,
-          formatter: (value: number) => {
-            if (value >= 1000) return `${(value / 1000).toFixed(value % 1000 === 0 ? 0 : 2)}K`;
-            return value;
-          }
+          formatter: (val: number) => `£${val >= 1000 ? (val / 1000).toFixed(0) + 'k' : val}`
         }
       },
       series: [
         {
-          type: 'bar',
-          barWidth: '32%',
-          itemStyle: {
-            borderRadius: [6, 6, 0, 0],
-            color: (params: any) => {
-              const colors = ['#f43f5e', '#a855f7', '#f97316', '#10b981'];
-              return colors[params.dataIndex] || '#3b82f6';
-            }
-          },
-          label: {
-            show: true,
-            position: 'top',
-            color: '#1e293b',
-            fontSize: 11,
-            fontWeight: 'bold'
-          },
-          data: [chartData.draft, chartData.awaitingApproval, chartData.awaitingPayment, chartData.paid]
-        }
-      ]
-    };
-
-    chartInstance.setOption(option);
-
-    const handleResize = () => chartInstance.resize();
-    window.addEventListener('resize', handleResize);
-
-    return () => {
-      window.removeEventListener('resize', handleResize);
-      chartInstance.dispose();
-    };
-  }, [chartData, loading]);
-
-  // ECharts Initialization for Payables Status Overview Donut Chart (With Rich Hover Tooltips)
-  useEffect(() => {
-    if (!donutChartRef.current || loading) return;
-    const chartInstance = echarts.init(donutChartRef.current);
-
-    const option = {
-      tooltip: {
-        trigger: 'item',
-        backgroundColor: '#ffffff',
-        borderColor: '#cbd5e1',
-        borderWidth: 1,
-        padding: [10, 14],
-        textStyle: { color: '#1e293b', fontSize: 12, fontFamily: 'sans-serif' },
-        extraCssText: 'box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1); border-radius: 10px;',
-        formatter: (params: any) => {
-          return `<div style="display: flex; align-items: center; gap: 8px; font-weight: 700; color: #0f172a; margin-bottom: 4px;">
-                    <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background-color: ${params.color};"></span>
-                    <span>${params.name}</span>
-                  </div>
-                  <div style="font-size: 11px; color: #475569; padding-left: 18px;">Bills: <b style="color: #0f172a; font-weight: 800;">${params.value}</b></div>
-                  <div style="font-size: 11px; color: #475569; padding-left: 18px;">Share: <b style="color: #0f172a; font-weight: 800;">${params.percent}%</b></div>`;
-        }
-      },
-      series: [
+          name: 'Current',
+          type: 'line',
+          smooth: true,
+          showSymbol: false,
+          lineStyle: { width: 2.5, color: '#2563eb' },
+          data: trend.series.current
+        },
         {
-          name: 'Payables Status Overview',
-          type: 'pie',
-          radius: ['64%', '84%'],
-          center: ['50%', '50%'],
-          avoidLabelOverlap: false,
-          itemStyle: {
-            borderRadius: 5,
-            borderColor: '#ffffff',
-            borderWidth: 2.5
-          },
-          label: { show: false },
-          emphasis: {
-            scale: true,
-            scaleSize: 6
-          },
-          labelLine: { show: false },
-          data: [
-            { value: summary.paid.count, name: 'Paid Bills', itemStyle: { color: '#10b981' } },
-            { value: summary.awaitingPayment.count, name: 'Awaiting Payment', itemStyle: { color: '#f97316' } },
-            { value: summary.draft.count, name: 'Draft Bills', itemStyle: { color: '#f43f5e' } },
-            { value: summary.awaitingApproval.count, name: 'Awaiting Approval', itemStyle: { color: '#a855f7' } }
-          ]
+          name: '1-30 Days',
+          type: 'line',
+          smooth: true,
+          showSymbol: false,
+          lineStyle: { width: 2.5, color: '#eab308' },
+          data: trend.series.days1to30
+        },
+        {
+          name: '31-60 Days',
+          type: 'line',
+          smooth: true,
+          showSymbol: false,
+          lineStyle: { width: 2.5, color: '#f97316' },
+          data: trend.series.days31to60
+        },
+        {
+          name: '61-90 Days',
+          type: 'line',
+          smooth: true,
+          showSymbol: false,
+          lineStyle: { width: 2.5, color: '#ef4444' },
+          data: trend.series.days61to90
+        },
+        {
+          name: '90+ Days',
+          type: 'line',
+          smooth: true,
+          showSymbol: false,
+          lineStyle: { width: 2.5, color: '#991b1b' },
+          data: trend.series.days90Plus
         }
       ]
     };
+  }, [data]);
 
-    chartInstance.setOption(option);
-
-    chartInstance.on('click', (params: any) => {
-      if (params.name) {
-        setSelectedStatus(params.name.replace(' Bills', '').toUpperCase());
-        setCurrentPage(1);
-      }
-    });
-
-    const handleResize = () => chartInstance.resize();
-    window.addEventListener('resize', handleResize);
-
-    return () => {
-      window.removeEventListener('resize', handleResize);
-      chartInstance.dispose();
-    };
-  }, [summary, loading]);
-
-  const applyPreset = (preset: 'this_month' | 'last_month' | 'last_3_months' | 'this_year') => {
-    let from = '2026-08-01';
-    let to = '2026-08-31';
-
-    if (preset === 'this_month') {
-      from = '2026-08-01';
-      to = '2026-08-31';
-    } else if (preset === 'last_month') {
-      from = '2026-07-01';
-      to = '2026-07-31';
-    } else if (preset === 'last_3_months') {
-      from = '2026-06-01';
-      to = '2026-08-31';
-    } else if (preset === 'this_year') {
-      from = '2026-01-01';
-      to = '2026-12-31';
-    }
-
-    setFromDate(from);
-    setToDate(to);
-    setTempFromDate(from);
-    setTempToDate(to);
-    setShowDatePicker(false);
-    setCurrentPage(1);
-
-    const params = new URLSearchParams(window.location.search);
-    params.set('from_date', from);
-    params.set('to_date', to);
-    router.push(`${window.location.pathname}?${params.toString()}`);
-  };
-
-  const applyCustomRange = () => {
-    if (!tempFromDate || !tempToDate) return;
-    setFromDate(tempFromDate);
-    setToDate(tempToDate);
-    setShowDatePicker(false);
-    setCurrentPage(1);
-
-    const params = new URLSearchParams(window.location.search);
-    params.set('from_date', tempFromDate);
-    params.set('to_date', tempToDate);
-    router.push(`${window.location.pathname}?${params.toString()}`);
-  };
-
-  const formatCurrency = (val: number, customCurr = '') => {
-    const c = customCurr || currency;
-    if (c === 'INR') return '₹' + new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2 }).format(val);
-    if (c === 'GBP') return '£' + new Intl.NumberFormat('en-GB', { minimumFractionDigits: 2 }).format(val);
-    if (c === 'EUR') return '€' + new Intl.NumberFormat('de-DE', { minimumFractionDigits: 2 }).format(val);
-    return '$' + new Intl.NumberFormat('en-US', { minimumFractionDigits: 2 }).format(val);
-  };
-
-  const formatDateLabel = (dStr: string) => {
-    try {
-      const d = new Date(dStr);
-      return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-    } catch {
-      return dStr;
-    }
-  };
-
-  const formatDate = (dateStr: string | null) => {
-    if (!dateStr) return '—';
-    try {
-      return new Date(dateStr).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-    } catch {
-      return dateStr;
-    }
-  };
-
-  const getStatusBadge = (st: string) => {
-    const s = st.toUpperCase();
-    if (s === 'PAID') {
-      return 'bg-emerald-50 text-emerald-600 border-emerald-200/60';
-    }
-    if (s === 'AWAITING PAYMENT' || s === 'AUTHORISED') {
-      return 'bg-amber-50 text-amber-600 border-amber-200/60';
-    }
-    if (s === 'AWAITING APPROVAL' || s === 'SUBMITTED') {
-      return 'bg-purple-50 text-purple-600 border-purple-200/60';
-    }
-    return 'bg-rose-50 text-rose-600 border-rose-200/60';
-  };
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[450px] space-y-3">
+        <RefreshCw className="h-8 w-8 text-blue-600 animate-spin" />
+        <span className="text-xs font-extrabold text-slate-500 tracking-wide">Syncing Account Payable Ledger...</span>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6 max-w-full pb-10 select-none">
-      {/* Top Header Bar & Page-Level Date Selector Dropdown */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          {/* Breadcrumb */}
-          <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-400 mb-1">
-            <Link href="/overview" className="hover:text-slate-700 transition">Dashboard</Link>
-            <span>&gt;</span>
-            <span className="text-slate-700 font-bold">Bill Status Summary</span>
-          </div>
-          <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">Bill Status Summary</h1>
-          <p className="text-[12px] text-slate-500 font-medium mt-0.5">
-            Track all your vendor bills and payment obligations in one place.
-          </p>
-        </div>
-
-        {/* Page-Level Interactive Date Selector Dropdown */}
-        <div className="relative shrink-0" ref={datePickerRef}>
+    <div className="space-y-5 max-w-full pb-12 select-none font-sans text-slate-800">
+      
+      {/* ========================================================================= */}
+      {/* EXECUTIVE SEGMENTED TAB TOOLBAR & ACTION BAR */}
+      {/* ========================================================================= */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-200/80 pb-3 mb-2">
+        {/* Left: Premium Segmented Pill Switcher */}
+        <div className="flex items-center gap-1.5 bg-slate-100/90 p-1.5 rounded-xl border border-slate-200/60 shadow-2xs">
           <button
-            onClick={() => setShowDatePicker(!showDatePicker)}
-            className="flex items-center gap-2 px-3.5 py-2 bg-white border border-slate-200 rounded-lg shadow-2xs text-[11.5px] font-bold text-slate-700 hover:bg-slate-50 transition cursor-pointer outline-none"
+            onClick={() => setActiveTab('overview')}
+            className={cn(
+              "px-3.5 py-1.5 rounded-lg text-xs transition cursor-pointer flex items-center gap-2 font-bold",
+              activeTab === 'overview'
+                ? "bg-white text-blue-600 font-extrabold shadow-sm border border-slate-200/80"
+                : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/50"
+            )}
           >
-            <Calendar className="h-4 w-4 text-rose-600" />
-            <span>{formatDateLabel(fromDate)} – {formatDateLabel(toDate)}</span>
-            <ChevronDown className={cn("h-3.5 w-3.5 text-slate-400 transition-transform", showDatePicker && "rotate-180")} />
+            <BarChart3 className="h-3.5 w-3.5 text-blue-600" />
+            <span>Overview</span>
           </button>
 
-          {/* Dropdown Menu */}
-          {showDatePicker && (
-            <div className="absolute right-0 mt-2 w-72 bg-white rounded-xl border border-slate-200 shadow-xl p-3.5 z-50 animate-in fade-in zoom-in-95 duration-150">
-              <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block mb-2 px-1">Quick Select</span>
-              <div className="grid grid-cols-2 gap-1.5 mb-3">
-                <button
-                  onClick={() => applyPreset('this_month')}
-                  className="px-3 py-1.5 text-[11px] font-bold bg-slate-50 hover:bg-rose-50 hover:text-rose-600 rounded-lg text-slate-700 text-left transition"
-                >
-                  This Month
-                </button>
-                <button
-                  onClick={() => applyPreset('last_month')}
-                  className="px-3 py-1.5 text-[11px] font-bold bg-slate-50 hover:bg-rose-50 hover:text-rose-600 rounded-lg text-slate-700 text-left transition"
-                >
-                  Last Month
-                </button>
-                <button
-                  onClick={() => applyPreset('last_3_months')}
-                  className="px-3 py-1.5 text-[11px] font-bold bg-slate-50 hover:bg-rose-50 hover:text-rose-600 rounded-lg text-slate-700 text-left transition"
-                >
-                  Last 3 Months
-                </button>
-                <button
-                  onClick={() => applyPreset('this_year')}
-                  className="px-3 py-1.5 text-[11px] font-bold bg-slate-50 hover:bg-rose-50 hover:text-rose-600 rounded-lg text-slate-700 text-left transition"
-                >
-                  This Year
-                </button>
-              </div>
+          <button
+            onClick={() => setActiveTab('vendors')}
+            className={cn(
+              "px-3.5 py-1.5 rounded-lg text-xs transition cursor-pointer flex items-center gap-2 font-bold",
+              activeTab === 'vendors'
+                ? "bg-white text-blue-600 font-extrabold shadow-sm border border-slate-200/80"
+                : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/50"
+            )}
+          >
+            <User className="h-3.5 w-3.5 text-slate-500" />
+            <span>Vendor Ledger</span>
+            <span className={cn(
+              "px-2 py-0.5 rounded-full text-[10px] font-black",
+              activeTab === 'vendors' ? "bg-blue-100 text-blue-700" : "bg-slate-200 text-slate-700"
+            )}>
+              {filteredVendors.length}
+            </span>
+          </button>
 
-              <div className="border-t border-slate-100 pt-3 space-y-2.5">
-                <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block px-1">Custom Range</span>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-[9.5px] font-bold text-slate-400 block mb-1">From Date</label>
-                    <input
-                      type="date"
-                      value={tempFromDate}
-                      onChange={(e) => setTempFromDate(e.target.value)}
-                      className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-[11px] font-medium text-slate-700 focus:outline-none focus:border-rose-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[9.5px] font-bold text-slate-400 block mb-1">To Date</label>
-                    <input
-                      type="date"
-                      value={tempToDate}
-                      onChange={(e) => setTempToDate(e.target.value)}
-                      className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-[11px] font-medium text-slate-700 focus:outline-none focus:border-rose-500"
-                    />
-                  </div>
-                </div>
-                <button
-                  onClick={applyCustomRange}
-                  className="w-full py-2 mt-1 bg-rose-600 hover:bg-rose-700 text-white font-bold text-[11.5px] rounded-lg shadow-2xs transition cursor-pointer"
-                >
-                  Apply Date Range
-                </button>
-              </div>
-            </div>
-          )}
+          <button
+            onClick={() => setActiveTab('overdue')}
+            className={cn(
+              "px-3.5 py-1.5 rounded-lg text-xs transition cursor-pointer flex items-center gap-2 font-bold",
+              activeTab === 'overdue'
+                ? "bg-white text-red-600 font-extrabold shadow-sm border border-red-200/80"
+                : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/50"
+            )}
+          >
+            <ShieldAlert className="h-3.5 w-3.5 text-red-500" />
+            <span>Overdue Bills</span>
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-red-500 text-white shadow-2xs">
+              {overdueCountVal}
+            </span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('ageing')}
+            className={cn(
+              "px-3.5 py-1.5 rounded-lg text-xs transition cursor-pointer flex items-center gap-2 font-bold",
+              activeTab === 'ageing'
+                ? "bg-white text-blue-600 font-extrabold shadow-sm border border-slate-200/80"
+                : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/50"
+            )}
+          >
+            <Clock className="h-3.5 w-3.5 text-slate-500" />
+            <span>Ageing Breakdown</span>
+          </button>
+        </div>
+
+        {/* Right: Action Controls */}
+        <div className="flex items-center gap-2.5">
+          {/* As On Date Selector (Formatted DD/MM/YYYY) */}
+          <FormattedDatePicker
+            value={asOnDate}
+            onChange={setAsOnDate}
+            label="As On:"
+          />
+
+          {/* Refresh Button */}
+          <button
+            onClick={fetchData}
+            disabled={loading}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 hover:bg-slate-50 transition cursor-pointer shadow-2xs"
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5 text-blue-600", loading && "animate-spin")} />
+            <span>Refresh</span>
+          </button>
+
+          {/* CSV Export Button */}
+          <button
+            onClick={handleExportCSV}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-extrabold hover:bg-blue-700 transition cursor-pointer shadow-2xs"
+          >
+            <FileSpreadsheet className="h-3.5 w-3.5" />
+            <span>Export CSV</span>
+          </button>
         </div>
       </div>
 
-      {/* Top 5 KPI Summary Cards (With Shimmer Effect) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
-        {initialLoading ? (
-          Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs flex flex-col justify-between min-h-[120px] animate-pulse">
-              <div className="flex items-center justify-between">
-                <div className="h-3 w-24 bg-slate-200/80 rounded" />
-                <div className="h-8 w-8 rounded-lg bg-slate-100" />
-              </div>
-              <div className="mt-3">
-                <div className="h-7 w-16 bg-slate-200 rounded" />
-                <div className="h-2.5 w-10 bg-slate-100 rounded mt-1.5" />
-                <div className="h-1.5 w-full bg-slate-100 rounded-full mt-2.5" />
-              </div>
-            </div>
-          ))
-        ) : (
-          <>
-            {/* Card 1: Total Payables (Red Gradient Card) */}
-            <div className="bg-gradient-to-r from-red-500 to-rose-600 rounded-xl p-4 shadow-sm text-white flex items-start justify-between min-h-[120px] relative overflow-hidden">
-              <div className="relative z-10">
-                <span className="text-[11px] font-bold text-rose-100">Total Payables</span>
-                <span className="text-3xl font-black text-white mt-1 block">{summary.totalBills.toLocaleString()}</span>
-                <span className="text-[10.5px] font-semibold text-rose-100 mt-1 block">Total Bills</span>
-              </div>
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/20 text-white shrink-0 relative z-10 backdrop-blur-xs">
-                <FileText className="h-6 w-6 stroke-[1.8]" />
-              </div>
-              {/* Subtle background watermark icon */}
-              <div className="absolute -right-3 -bottom-3 text-white/10 pointer-events-none">
-                <Landmark className="h-24 w-24 stroke-[1]" />
-              </div>
-            </div>
-
-            {/* Card 2: Draft Bills */}
-            <div
-              onClick={() => { setSelectedStatus(selectedStatus === 'DRAFT' ? 'ALL' : 'DRAFT'); setCurrentPage(1); }}
-              className={cn(
-                "bg-white rounded-xl border p-4 shadow-2xs flex flex-col justify-between cursor-pointer transition-all duration-200 hover:shadow-xs min-h-[120px]",
-                selectedStatus === 'DRAFT' ? "border-rose-400 ring-2 ring-rose-400/20" : "border-slate-200/80 hover:border-slate-300"
-              )}
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-slate-500">Draft Bills</span>
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-rose-50 text-rose-600 border border-rose-100">
-                  <FileCheck className="h-4 w-4" />
-                </div>
-              </div>
-              <div>
-                <span className="text-2xl font-black text-slate-900">{summary.draft.count}</span>
-                <p className="text-[10px] font-semibold text-slate-400 mt-0.5">{summary.draft.pct}% of total</p>
-              </div>
-            </div>
-
-            {/* Card 3: Awaiting Approval */}
-            <div
-              onClick={() => { setSelectedStatus(selectedStatus === 'AWAITING APPROVAL' ? 'ALL' : 'AWAITING APPROVAL'); setCurrentPage(1); }}
-              className={cn(
-                "bg-white rounded-xl border p-4 shadow-2xs flex flex-col justify-between cursor-pointer transition-all duration-200 hover:shadow-xs min-h-[120px]",
-                selectedStatus === 'AWAITING APPROVAL' ? "border-purple-400 ring-2 ring-purple-400/20" : "border-slate-200/80 hover:border-slate-300"
-              )}
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-slate-500">Awaiting Approval</span>
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-purple-50 text-purple-600 border border-purple-100">
-                  <Hourglass className="h-4 w-4" />
-                </div>
-              </div>
-              <div>
-                <span className="text-2xl font-black text-slate-900">{summary.awaitingApproval.count}</span>
-                <p className="text-[10px] font-semibold text-slate-400 mt-0.5">{summary.awaitingApproval.pct}% of total</p>
-              </div>
-            </div>
-
-            {/* Card 4: Awaiting Payment */}
-            <div
-              onClick={() => { setSelectedStatus(selectedStatus === 'AWAITING PAYMENT' ? 'ALL' : 'AWAITING PAYMENT'); setCurrentPage(1); }}
-              className={cn(
-                "bg-white rounded-xl border p-4 shadow-2xs flex flex-col justify-between cursor-pointer transition-all duration-200 hover:shadow-xs min-h-[120px]",
-                selectedStatus === 'AWAITING PAYMENT' ? "border-orange-500 ring-2 ring-orange-500/20" : "border-slate-200/80 hover:border-slate-300"
-              )}
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-slate-500">Awaiting Payment</span>
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-orange-50 text-orange-600 border border-orange-100">
-                  <Clock className="h-4 w-4" />
-                </div>
-              </div>
-              <div>
-                <span className="text-2xl font-black text-slate-900">{summary.awaitingPayment.count}</span>
-                <p className="text-[10px] font-semibold text-slate-400 mt-0.5">{summary.awaitingPayment.pct}% of total</p>
-              </div>
-            </div>
-
-            {/* Card 5: Paid Bills */}
-            <div
-              onClick={() => { setSelectedStatus(selectedStatus === 'PAID' ? 'ALL' : 'PAID'); setCurrentPage(1); }}
-              className={cn(
-                "bg-white rounded-xl border p-4 shadow-2xs flex flex-col justify-between cursor-pointer transition-all duration-200 hover:shadow-xs min-h-[120px]",
-                selectedStatus === 'PAID' ? "border-emerald-500 ring-2 ring-emerald-500/20" : "border-slate-200/80 hover:border-slate-300"
-              )}
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-slate-500">Paid Bills</span>
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-100">
-                  <CheckCircle2 className="h-4 w-4" />
-                </div>
-              </div>
-              <div>
-                <span className="text-2xl font-black text-slate-900">{summary.paid.count}</span>
-                <p className="text-[10px] font-semibold text-slate-400 mt-0.5">{summary.paid.pct}% of total</p>
-              </div>
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* Middle Row: Charts (Payables Status Overview Donut + Bills by Status Bar Chart) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        {/* Left: Donut Chart (Payables Status Overview) */}
-        <div className="lg:col-span-5 bg-white rounded-xl border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between min-h-[300px]">
-          <h3 className="text-[13.5px] font-bold text-slate-800 border-b border-slate-100 pb-3">Payables Status Overview</h3>
-
-          {initialLoading ? (
-            <div className="flex items-center justify-between py-6 animate-pulse">
-              <div className="h-40 w-40 rounded-full border-8 border-slate-100 bg-slate-50 flex items-center justify-center shrink-0">
-                <div className="h-10 w-16 bg-slate-200/70 rounded" />
-              </div>
-              <div className="flex-1 pl-6 space-y-4">
-                {Array.from({ length: 4 }).map((_, i) => (
-                  <div key={i} className="flex justify-between items-center">
-                    <div className="h-3 w-28 bg-slate-200/80 rounded" />
-                    <div className="h-3 w-10 bg-slate-100 rounded" />
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="flex items-center justify-between py-4">
-              {/* Interactive ECharts Donut */}
-              <div className="relative flex items-center justify-center h-44 w-44 shrink-0">
-                <div ref={donutChartRef} className="w-full h-full cursor-pointer" />
-                <div className="absolute text-center flex flex-col items-center pointer-events-none">
-                  <span className="text-2xl font-black text-slate-900 leading-none">{summary.totalBills.toLocaleString()}</span>
-                  <span className="text-[9px] font-extrabold text-slate-400 uppercase mt-0.5 leading-none tracking-wider">Total Bills</span>
-                </div>
-              </div>
-
-              {/* Interactive Legends Breakdown List */}
-              <div className="flex-1 pl-6 space-y-2 text-[11px]">
-                <div 
-                  onClick={() => { setSelectedStatus('PAID'); setCurrentPage(1); }}
-                  className="flex items-center justify-between p-1.5 rounded-lg hover:bg-slate-50 transition cursor-pointer"
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                    <span className="font-semibold text-slate-700">Paid Bills</span>
-                  </div>
-                  <span className="font-extrabold text-slate-800">{summary.paid.count} ({summary.paid.pct}%)</span>
-                </div>
-
-                <div 
-                  onClick={() => { setSelectedStatus('AWAITING PAYMENT'); setCurrentPage(1); }}
-                  className="flex items-center justify-between p-1.5 rounded-lg hover:bg-slate-50 transition cursor-pointer"
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="h-2.5 w-2.5 rounded-full bg-orange-500" />
-                    <span className="font-semibold text-slate-700">Awaiting Payment</span>
-                  </div>
-                  <span className="font-extrabold text-slate-800">{summary.awaitingPayment.count} ({summary.awaitingPayment.pct}%)</span>
-                </div>
-
-                <div 
-                  onClick={() => { setSelectedStatus('DRAFT'); setCurrentPage(1); }}
-                  className="flex items-center justify-between p-1.5 rounded-lg hover:bg-slate-50 transition cursor-pointer"
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="h-2.5 w-2.5 rounded-full bg-rose-500" />
-                    <span className="font-semibold text-slate-700">Draft Bills</span>
-                  </div>
-                  <span className="font-extrabold text-slate-800">{summary.draft.count} ({summary.draft.pct}%)</span>
-                </div>
-
-                <div 
-                  onClick={() => { setSelectedStatus('AWAITING APPROVAL'); setCurrentPage(1); }}
-                  className="flex items-center justify-between p-1.5 rounded-lg hover:bg-slate-50 transition cursor-pointer"
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="h-2.5 w-2.5 rounded-full bg-purple-500" />
-                    <span className="font-semibold text-slate-700">Awaiting Approval</span>
-                  </div>
-                  <span className="font-extrabold text-slate-800">{summary.awaitingApproval.count} ({summary.awaitingApproval.pct}%)</span>
-                </div>
-              </div>
-            </div>
+      {/* ========================================================================= */}
+      {/* 4 PRIMARY METRIC CARDS */}
+      {/* ========================================================================= */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        
+        {/* Card 1: Total Payables */}
+        <div 
+          onClick={() => {
+            setSelectedBucketFilter('ALL');
+            setSelectedRiskFilter('ALL');
+            setActiveTab('vendors');
+            toast.info('Showing all payables');
+          }}
+          className={cn(
+            "bg-white rounded-xl border p-4 shadow-2xs hover:border-emerald-400 transition-all cursor-pointer flex flex-col justify-between group",
+            selectedBucketFilter === 'ALL' ? "border-emerald-500 ring-1 ring-emerald-500/20" : "border-slate-200/80"
           )}
-        </div>
-
-        {/* Right: Vertical Bar Chart (Bills by Status) */}
-        <div className="lg:col-span-7 bg-white rounded-xl border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between min-h-[300px]">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-            <h3 className="text-[13.5px] font-bold text-slate-800">Bills by Status</h3>
-            <select
-              value={timeframe}
-              onChange={(e) => setTimeframe(e.target.value)}
-              className="px-2.5 py-1 text-[11px] font-semibold bg-slate-50 border border-slate-200 rounded-lg text-slate-700 outline-none cursor-pointer"
-            >
-              <option value="This Period">This Period</option>
-              <option value="Last Month">Last Month</option>
-              <option value="This Year">This Year</option>
-            </select>
+        >
+          <div>
+            <div className="flex items-center justify-between text-slate-400">
+              <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">TOTAL PAYABLES</span>
+              <CreditCard className="h-4 w-4 text-emerald-600 group-hover:scale-110 transition-transform" />
+            </div>
+            <div className="text-2xl font-extrabold text-slate-900 mt-1.5 tracking-tight">
+              {formatAmount(totalPayablesVal)}
+            </div>
+            <span className="text-[11px] text-emerald-600 font-semibold mt-1 block">Click to view all payables →</span>
           </div>
+          <div className="mt-2 -mx-4 -mb-4">
+            <StripeSparkline color="#10b981" />
+          </div>
+        </div>
 
-          {initialLoading ? (
-            <div className="h-56 w-full mt-4 flex items-end justify-between gap-6 px-8 pb-2 animate-pulse">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="flex-1 flex flex-col items-center gap-2">
-                  <div className="w-full bg-slate-100 rounded-t" style={{ height: `${20 + (i * 25) % 75}%` }} />
-                  <div className="h-2.5 w-16 bg-slate-200/70 rounded" />
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="h-56 w-full mt-2">
-              <div ref={barChartRef} className="w-full h-full" />
-            </div>
+        {/* Card 2: Current (Not Due) */}
+        <div 
+          onClick={() => {
+            setSelectedBucketFilter('current');
+            setActiveTab('vendors');
+            toast.info('Filtered: Current Not Due');
+          }}
+          className={cn(
+            "bg-white rounded-xl border p-4 shadow-2xs hover:border-blue-400 transition-all cursor-pointer flex flex-col justify-between group",
+            selectedBucketFilter === 'current' ? "border-blue-500 ring-1 ring-blue-500/20" : "border-slate-200/80"
           )}
+        >
+          <div>
+            <div className="flex items-center justify-between text-slate-400">
+              <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wider">CURRENT (NOT DUE)</span>
+              <Clock className="h-4 w-4 text-blue-600 group-hover:scale-110 transition-transform" />
+            </div>
+            <div className="text-2xl font-extrabold text-slate-900 mt-1.5 tracking-tight">
+              {formatAmount(currentNotDueVal)}
+            </div>
+            <span className="text-[11px] text-blue-600 font-semibold mt-1 block">
+              {data?.summary?.currentNotDue?.pct || '0'}% (Click to drill down) →
+            </span>
+          </div>
+          <div className="mt-2 -mx-4 -mb-4">
+            <StripeSparkline color="#2563eb" />
+          </div>
+        </div>
+
+        {/* Card 3: Total Overdue */}
+        <div 
+          onClick={() => {
+            setActiveTab('overdue');
+            toast.warning('Viewing overdue bills');
+          }}
+          className={cn(
+            "bg-white rounded-xl border p-4 shadow-2xs hover:border-amber-400 transition-all cursor-pointer flex flex-col justify-between group",
+            activeTab === 'overdue' ? "border-amber-500 ring-1 ring-amber-500/20" : "border-slate-200/80"
+          )}
+        >
+          <div>
+            <div className="flex items-center justify-between text-slate-400">
+              <span className="text-[10px] font-bold text-amber-600 uppercase tracking-wider">TOTAL OVERDUE</span>
+              <AlertTriangle className="h-4 w-4 text-amber-600 group-hover:scale-110 transition-transform" />
+            </div>
+            <div className="text-2xl font-extrabold text-slate-900 mt-1.5 tracking-tight">
+              {formatAmount(overdueTotalVal)}
+            </div>
+            <span className="text-[11px] text-amber-600 font-semibold mt-1 block">
+              {overdueCountVal} Bills (Click to inspect) →
+            </span>
+          </div>
+          <div className="mt-2 -mx-4 -mb-4">
+            <StripeSparkline color="#f59e0b" />
+          </div>
+        </div>
+
+        {/* Card 4: 90+ Days Overdue */}
+        <div 
+          onClick={() => {
+            setSelectedBucketFilter('90+');
+            setActiveTab('ageing');
+            toast.warning('Filtered: High Risk 90+ Days Overdue');
+          }}
+          className={cn(
+            "bg-white rounded-xl border p-4 shadow-2xs hover:border-red-500 transition-all cursor-pointer flex flex-col justify-between group",
+            selectedBucketFilter === '90+' ? "border-red-500 ring-1 ring-red-500/20" : "border-slate-200/80"
+          )}
+        >
+          <div>
+            <div className="flex items-center justify-between text-slate-400">
+              <span className="text-[10px] font-bold text-red-600 uppercase tracking-wider">90+ DAYS OVERDUE</span>
+              <ShieldAlert className="h-4 w-4 text-red-600 group-hover:scale-110 transition-transform" />
+            </div>
+            <div className="text-2xl font-extrabold text-red-600 mt-1.5 tracking-tight">
+              {formatAmount(highRiskVal)}
+            </div>
+            <span className="text-[11px] text-red-600 font-semibold mt-1 block">
+              {data?.summary?.days90Plus?.pct || '0'}% (High Risk Drill-down) →
+            </span>
+          </div>
+          <div className="mt-2 -mx-4 -mb-4">
+            <StripeSparkline color="#ef4444" />
+          </div>
         </div>
       </div>
 
-      {/* Main Vendor Bills Full Data Table Container (DataTables.net Style UI) */}
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-2xs overflow-hidden">
-        {/* Top Header Controls Bar (DataTables.net Style) */}
-        <div className="p-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3 bg-slate-50/40">
-          <div className="flex flex-wrap items-center gap-3 flex-1 min-w-[280px]">
-            {/* Show Entries Dropdown (DataTables.net Style) */}
-            <div className="flex items-center gap-2 text-[11.5px] font-semibold text-slate-600">
-              <span>Show</span>
-              <select
-                value={pageSize}
-                onChange={(e) => {
-                  setPageSize(Number(e.target.value));
-                  setCurrentPage(1);
+      {/* ========================================================================= */}
+      {/* 5 EXECUTIVE AGEING DRILL-DOWN FILTER CARDS */}
+      {/* ========================================================================= */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between px-1">
+          <div className="flex items-center gap-1.5 text-xs font-extrabold text-slate-700 uppercase tracking-wider">
+            <Filter className="h-3.5 w-3.5 text-blue-600" />
+            <span>Ageing Portfolio Filter</span>
+          </div>
+          {selectedBucketFilter !== 'ALL' && (
+            <button
+              onClick={() => setSelectedBucketFilter('ALL')}
+              className="text-xs font-bold text-blue-600 hover:text-blue-800 transition cursor-pointer flex items-center gap-1 bg-blue-50 px-2.5 py-0.5 rounded-md border border-blue-200 shadow-2xs"
+            >
+              <span>Showing: <strong>{selectedBucketFilter}</strong></span>
+              <span className="text-blue-600 font-black ml-1">✕ Reset Filter</span>
+            </button>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          {data?.ageingDistribution?.map((item: any) => {
+            const isSelected = selectedBucketFilter === item.key;
+            
+            let themeStyles = "bg-blue-50/40 border-blue-200/80 text-blue-900 hover:bg-blue-50 hover:border-blue-300";
+            let badgeBg = "bg-blue-100 text-blue-700 border-blue-200";
+            let barColor = "bg-blue-600";
+            let iconDot = "bg-blue-600";
+
+            if (item.key === '1-30') {
+              themeStyles = "bg-amber-50/40 border-amber-200/80 text-amber-900 hover:bg-amber-50 hover:border-amber-300";
+              badgeBg = "bg-amber-100 text-amber-800 border-amber-200";
+              barColor = "bg-amber-500";
+              iconDot = "bg-amber-500";
+            } else if (item.key === '31-60') {
+              themeStyles = "bg-orange-50/40 border-orange-200/80 text-orange-900 hover:bg-orange-50 hover:border-orange-300";
+              badgeBg = "bg-orange-100 text-orange-800 border-orange-200";
+              barColor = "bg-orange-500";
+              iconDot = "bg-orange-500";
+            } else if (item.key === '61-90') {
+              themeStyles = "bg-rose-50/40 border-rose-200/80 text-rose-900 hover:bg-rose-50 hover:border-rose-300";
+              badgeBg = "bg-rose-100 text-rose-800 border-rose-200";
+              barColor = "bg-rose-500";
+              iconDot = "bg-rose-500";
+            } else if (item.key === '90+') {
+              themeStyles = "bg-red-50/50 border-red-250 text-red-950 hover:bg-red-50 hover:border-red-400";
+              badgeBg = "bg-red-100 text-red-800 border-red-200 font-extrabold";
+              barColor = "bg-red-600";
+              iconDot = "bg-red-600";
+            }
+
+            return (
+              <div 
+                key={item.key}
+                onClick={() => {
+                  setSelectedBucketFilter(isSelected ? 'ALL' : item.key);
+                  setActiveTab('vendors');
+                  toast.info(`Filter updated: ${item.label}`);
                 }}
-                className="px-2.5 py-1 text-[11.5px] font-bold bg-white border border-slate-200 rounded-lg text-slate-800 outline-none cursor-pointer shadow-2xs focus:border-rose-500"
+                className={cn(
+                  "p-3 rounded-xl border transition-all duration-200 cursor-pointer flex flex-col justify-between space-y-2.5 shadow-2xs group select-none",
+                  themeStyles,
+                  isSelected
+                    ? "ring-2 ring-blue-600 border-blue-600 shadow-md scale-[1.02] bg-white"
+                    : ""
+                )}
               >
-                <option value={10}>10</option>
-                <option value={25}>25</option>
-                <option value={50}>50</option>
-                <option value={100}>100</option>
-              </select>
-              <span>entries</span>
+                {/* Header: Dot + Label */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className={cn("h-2.5 w-2.5 rounded-full shrink-0 shadow-2xs", iconDot)} />
+                    <span className="text-xs font-black tracking-tight truncate">
+                      {item.label}
+                    </span>
+                  </div>
+                  {isSelected && (
+                    <span className="text-[10px] font-black uppercase tracking-wider px-1.5 py-0.2 rounded bg-blue-600 text-white shadow-2xs">
+                      Active
+                    </span>
+                  )}
+                </div>
+
+                {/* Amount */}
+                <div className="text-base font-black text-slate-900 tracking-tight">
+                  {formatAmount(item.amount).split(' ')[0]}
+                </div>
+
+                {/* Bottom Row: Percentage Badge + Proportion Bar */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-[10px] font-bold">
+                    <span className={cn("px-1.5 py-0.2 rounded border text-[9.5px]", badgeBg)}>
+                      {item.pct}% Share
+                    </span>
+                    <span className="text-slate-400 text-[9.5px]">Filter →</span>
+                  </div>
+
+                  <div className="w-full bg-slate-200/60 h-1 rounded-full overflow-hidden">
+                    <div 
+                      className={cn("h-full rounded-full transition-all duration-500", barColor)}
+                      style={{ width: `${Math.max(parseFloat(item.pct || '0'), 3)}%` }} 
+                    />
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ========================================================================= */}
+      {/* TAB CONTENT 1: OVERVIEW TAB */}
+      {/* ========================================================================= */}
+      {activeTab === 'overview' && (
+        <div className="space-y-5">
+          {/* Visual Charts Grid */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
+            
+            {/* Ageing Distribution (4 cols) */}
+            <div className="lg:col-span-4 bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2.5 mb-2">
+                  <h3 className="text-sm font-extrabold text-slate-900">Ageing Distribution</h3>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Click slice to filter</span>
+                </div>
+                <div className="h-[260px] w-full">
+                  <ReactECharts option={doughnutOption} style={{ height: '100%', width: '100%' }} />
+                </div>
+              </div>
+              <button 
+                onClick={() => setActiveTab('ageing')}
+                className="text-xs font-bold text-blue-600 hover:underline flex items-center gap-1 cursor-pointer pt-2 border-t border-slate-100"
+              >
+                View Ageing Breakdown →
+              </button>
             </div>
 
-            {/* Search Input Filter */}
-            <div className="relative flex-1 min-w-[200px] max-w-sm">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-              <input
-                type="text"
-                placeholder="Search bills by number, vendor..."
-                value={searchTerm}
-                onChange={(e) => {
-                  setSearchTerm(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="w-full pl-9 pr-3 py-1.5 text-[11.5px] bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-rose-500 shadow-2xs transition"
-              />
+            {/* Payables Trend (5 cols) */}
+            <div className="lg:col-span-5 bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs flex flex-col justify-between">
+              <div className="flex flex-col h-full">
+                <div className="flex items-center justify-between mb-1">
+                  <h3 className="text-sm font-extrabold text-slate-900">Payables Trend</h3>
+                  <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                    Last 6 Months
+                  </span>
+                </div>
+                
+                <div className="h-[320px] w-full flex-1">
+                  <ReactECharts option={trendLineOption} style={{ height: '100%', width: '100%' }} />
+                </div>
+              </div>
             </div>
 
-            {/* Status Filter Dropdown */}
-            <select
-              value={selectedStatus}
-              onChange={(e) => {
-                setSelectedStatus(e.target.value);
-                setCurrentPage(1);
-              }}
-              className="px-3 py-1.5 text-[11.5px] font-semibold bg-white border border-slate-200 rounded-lg text-slate-700 outline-none cursor-pointer shadow-2xs focus:border-rose-500"
-            >
-              <option value="ALL">All Statuses</option>
-              <option value="DRAFT">Draft Bills</option>
-              <option value="AWAITING APPROVAL">Awaiting Approval</option>
-              <option value="AWAITING PAYMENT">Awaiting Payment</option>
-              <option value="PAID">Paid Bills</option>
-            </select>
+            {/* Top Payables Accounts & Bills Dual Card (3 cols) */}
+            <div className="lg:col-span-3 bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs flex flex-col justify-between h-full">
+              <div className="flex flex-col h-full justify-between">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-2">
+                  {/* Segmented Control Header: Vendors vs Bills */}
+                  <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg text-[10.5px] font-bold">
+                    <button
+                      onClick={() => setOverdueView('vendors')}
+                      className={cn(
+                        "px-2.5 py-0.5 rounded transition cursor-pointer flex items-center gap-1",
+                        overdueView === 'vendors' ? "bg-white text-blue-600 shadow-2xs font-extrabold" : "text-slate-500 hover:text-slate-900"
+                      )}
+                    >
+                      <User className="h-3 w-3" />
+                      <span>Top Vendors</span>
+                    </button>
+                    <button
+                      onClick={() => setOverdueView('bills')}
+                      className={cn(
+                        "px-2.5 py-0.5 rounded transition cursor-pointer flex items-center gap-1",
+                        overdueView === 'bills' ? "bg-white text-blue-600 shadow-2xs font-extrabold" : "text-slate-500 hover:text-slate-900"
+                      )}
+                    >
+                      <FileText className="h-3 w-3" />
+                      <span>Top Bills</span>
+                    </button>
+                  </div>
 
-            {/* Vendors Filter Dropdown */}
-            <select
-              value={selectedVendor}
-              onChange={(e) => {
-                setSelectedVendor(e.target.value);
-                setCurrentPage(1);
-              }}
-              className="px-3 py-1.5 text-[11.5px] font-semibold bg-white border border-slate-200 rounded-lg text-slate-700 outline-none cursor-pointer shadow-2xs focus:border-rose-500 max-w-[170px] truncate"
-            >
-              <option value="ALL">All Vendors</option>
-              {vendorsList.map((v) => (
-                <option key={v} value={v}>{v}</option>
-              ))}
-            </select>
+                  <button 
+                    onClick={() => setActiveTab(overdueView === 'bills' ? 'overdue' : 'vendors')}
+                    className="text-[11px] font-bold text-blue-600 hover:underline flex items-center gap-0.5 cursor-pointer shrink-0"
+                  >
+                    View All <ChevronRight className="h-3 w-3" />
+                  </button>
+                </div>
+
+                <div className="flex-1 flex flex-col justify-between space-y-1.5">
+                  {overdueView === 'vendors' ? (
+                    data?.topOverdueVendors?.length > 0 ? (
+                      data.topOverdueVendors.map((vendor: any) => (
+                        <div 
+                          key={vendor.vendorName}
+                          onClick={() => {
+                            setExpandedVendor(vendor.vendorName);
+                            setActiveTab('vendors');
+                            toast.info(`Drilled down to vendor: ${vendor.vendorName}`);
+                          }}
+                          className="relative overflow-hidden p-2.5 rounded-lg border border-slate-200/80 hover:border-slate-300 transition cursor-pointer flex items-center justify-between gap-2 group bg-white shadow-2xs"
+                        >
+                          {/* Full Card Embedded Translucent Progress Fill */}
+                          <div 
+                            className={cn(
+                              "absolute left-0 top-0 bottom-0 transition-all duration-500 pointer-events-none opacity-15",
+                              vendor.pctOverdue >= 80 ? "bg-red-500" : vendor.pctOverdue >= 30 ? "bg-amber-500" : "bg-emerald-500"
+                            )} 
+                            style={{ width: `${Math.max(vendor.pctOverdue, 0)}%` }} 
+                          />
+
+                          {/* Left Colored Accent Bar */}
+                          <div 
+                            className={cn(
+                              "absolute left-0 top-0 bottom-0 w-1 transition-all duration-300",
+                              vendor.pctOverdue >= 80 ? "bg-red-500" : vendor.pctOverdue >= 30 ? "bg-amber-500" : "bg-emerald-500"
+                            )}
+                          />
+
+                          <div className="relative z-10 flex items-center gap-2 min-w-0 pl-1.5">
+                            <StripeAvatar name={vendor.vendorName} />
+                            <div className="min-w-0">
+                              <div className="text-[11px] font-extrabold text-slate-900 truncate">{vendor.vendorName}</div>
+                              <div className="text-[9.5px] text-slate-500 truncate">
+                                {vendor.totalBills} {vendor.totalBills === 1 ? 'Bill' : 'Bills'} • {vendor.overdueCount > 0 ? <span className="font-bold text-red-600">{formatAmount(vendor.overdueAmount).split(' ')[0]} Overdue</span> : <span className="font-semibold text-emerald-600">All Current</span>}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="relative z-10 text-right shrink-0">
+                            <div className="text-[11px] font-black text-slate-900">
+                              {formatAmount(vendor.totalPayables).split(' ')[0]}
+                            </div>
+                            <span className={cn(
+                              "text-[8.5px] font-bold px-1.5 py-0.2 rounded border inline-block mt-0.5",
+                              vendor.pctOverdue >= 80 ? "bg-red-50 text-red-700 border-red-200" : vendor.pctOverdue >= 30 ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                            )}>
+                              {vendor.pctOverdue}% Risk
+                            </span>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="py-8 text-center text-xs text-slate-400 font-medium">No top vendors</div>
+                    )
+                  ) : (
+                    data?.topOverdueBills?.length > 0 ? (
+                      data.topOverdueBills.map((inv: any) => (
+                        <div 
+                          key={inv.id}
+                          onClick={() => {
+                            setExpandedVendor(inv.vendorName);
+                            setActiveTab('vendors');
+                            toast.info(`Drilled down to vendor: ${inv.vendorName}`);
+                          }}
+                          className="p-2.5 rounded-lg border border-slate-100 hover:border-slate-300 hover:bg-slate-50 transition cursor-pointer flex items-center justify-between gap-2"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <StripeAvatar name={inv.vendorName} />
+                            <div className="min-w-0">
+                              <div className="text-[11px] font-bold text-slate-900 truncate">{inv.billNumber}</div>
+                              <div className="text-[9.5px] text-slate-500 truncate">{inv.vendorName}</div>
+                            </div>
+                          </div>
+
+                          <div className="text-right shrink-0">
+                            <div className="text-[11px] font-extrabold text-red-600">
+                              {formatAmount(inv.amountDue).split(' ')[0]}
+                            </div>
+                            <span className="text-[8.5px] font-bold text-red-500 bg-red-50 px-1 py-0.2 rounded border border-red-100 inline-block mt-0.5">
+                              {inv.daysOverdue} days
+                            </span>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="py-8 text-center text-xs text-slate-400 font-medium">No overdue bills</div>
+                    )
+                  )}
+                </div>
+              </div>
+            </div>
+
           </div>
 
-          {/* Export Buttons */}
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => toast.info('Exporting Bills to CSV...')}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-[11.5px] font-bold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg shadow-2xs transition cursor-pointer"
-            >
-              <Download className="h-3.5 w-3.5 text-slate-500" />
-              <span>Export CSV</span>
-            </button>
+          {/* Vendor Summary Overview Table (Drill-Down Container) */}
+          <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-sm font-extrabold text-slate-900">Vendor Summary Overview</h3>
+                <p className="text-[11px] text-slate-400 font-medium">Click any vendor row to view detailed bill logs inline</p>
+              </div>
 
-            <button
-              onClick={() => {
-                setSelectedStatus('ALL');
-                setSelectedVendor('ALL');
-                setSearchTerm('');
-                setCurrentPage(1);
-              }}
-              className="flex items-center gap-1 px-4 py-1.5 text-[11.5px] font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg shadow-2xs transition cursor-pointer"
-            >
-              <span>View All Bills</span>
-              <ArrowRight className="h-3.5 w-3.5" />
-            </button>
+              {/* Controls: Search & Risk Matrix */}
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Search vendors..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="pl-8 pr-3 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 w-44"
+                  />
+                </div>
+
+                <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg text-[10.5px] font-bold">
+                  <button
+                    onClick={() => setSelectedRiskFilter('ALL')}
+                    className={cn(
+                      "px-2 py-0.5 rounded transition cursor-pointer",
+                      selectedRiskFilter === 'ALL' ? "bg-white text-slate-900 shadow-2xs" : "text-slate-500 hover:text-slate-900"
+                    )}
+                  >
+                    All Risk
+                  </button>
+                  <button
+                    onClick={() => setSelectedRiskFilter('HIGH')}
+                    className={cn(
+                      "px-2 py-0.5 rounded transition cursor-pointer",
+                      selectedRiskFilter === 'HIGH' ? "bg-amber-500 text-white shadow-2xs" : "text-slate-500 hover:text-slate-900"
+                    )}
+                  >
+                    High Risk
+                  </button>
+                  <button
+                    onClick={() => setSelectedRiskFilter('CRITICAL')}
+                    className={cn(
+                      "px-2 py-0.5 rounded transition cursor-pointer",
+                      selectedRiskFilter === 'CRITICAL' ? "bg-red-600 text-white shadow-2xs" : "text-slate-500 hover:text-slate-900"
+                    )}
+                  >
+                    90+ Critical
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Table */}
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-100 text-[10px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50/50">
+                    <th 
+                      onClick={() => { setSortCol('name'); setSortDir(sortCol === 'name' && sortDir === 'asc' ? 'desc' : 'asc'); }}
+                      className="py-2 px-3 cursor-pointer hover:text-slate-700 select-none"
+                    >
+                      VENDOR {sortCol === 'name' ? (sortDir === 'desc' ? '↓' : '↑') : ''}
+                    </th>
+                    <th className="py-2 px-3 text-center">BILLS</th>
+                    <th 
+                      onClick={() => { setSortCol('total'); setSortDir(sortCol === 'total' && sortDir === 'desc' ? 'asc' : 'desc'); }}
+                      className="py-2 px-3 text-right cursor-pointer hover:text-slate-700 select-none"
+                    >
+                      TOTAL PAYABLES {sortCol === 'total' ? (sortDir === 'desc' ? '↓' : '↑') : ''}
+                    </th>
+                    <th className="py-2 px-3 text-right">CURRENT</th>
+                    <th className="py-2 px-3 text-right">1 - 30 DAYS</th>
+                    <th className="py-2 px-3 text-right">31 - 60 DAYS</th>
+                    <th className="py-2 px-3 text-right">61 - 90 DAYS</th>
+                    <th className="py-2 px-3 text-right">90+ DAYS</th>
+                    <th 
+                      onClick={() => { setSortCol('overdue'); setSortDir(sortCol === 'overdue' && sortDir === 'desc' ? 'asc' : 'desc'); }}
+                      className="py-2 px-3 text-right text-red-600 cursor-pointer hover:text-red-800 select-none font-black"
+                    >
+                      TOTAL OVERDUE {sortCol === 'overdue' ? (sortDir === 'desc' ? '↓' : '↑') : ''}
+                    </th>
+                    <th 
+                      onClick={() => { setSortCol('pct'); setSortDir(sortCol === 'pct' && sortDir === 'desc' ? 'asc' : 'desc'); }}
+                      className="py-2 px-3 text-right cursor-pointer hover:text-slate-700 select-none"
+                    >
+                      % OVERDUE {sortCol === 'pct' ? (sortDir === 'desc' ? '↓' : '↑') : ''}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-[11.5px]">
+                  {paginatedVendors.map((vendor: any, i: number) => {
+                    const totalOverdueVal = vendor.days1to30 + vendor.days31to60 + vendor.days61to90 + vendor.days90Plus;
+                    const isExpanded = expandedVendor === vendor.vendorName;
+                    return (
+                      <React.Fragment key={i}>
+                        <tr 
+                          onClick={() => setExpandedVendor(isExpanded ? null : vendor.vendorName)}
+                          className={cn(
+                            "hover:bg-slate-50 transition cursor-pointer",
+                            isExpanded && "bg-blue-50/40"
+                          )}
+                        >
+                          <td className="py-2.5 px-3 font-bold text-slate-900 flex items-center gap-2">
+                            <ChevronRight className={cn("h-3.5 w-3.5 text-slate-400 transition-transform", isExpanded && "rotate-90 text-blue-600")} />
+                            <StripeAvatar name={vendor.vendorName} />
+                            <span className="truncate max-w-[200px]">{vendor.vendorName}</span>
+                          </td>
+                          <td className="py-2.5 px-3 text-center font-bold text-slate-600">{vendor.totalBills}</td>
+                          <td className="py-2.5 px-3 text-right font-extrabold text-slate-900">
+                            {formatAmount(vendor.totalPayables).split(' ')[0]}
+                          </td>
+                          <td className="py-2.5 px-3 text-right text-slate-500">
+                            {vendor.currentNotDue > 0 ? formatAmount(vendor.currentNotDue).split(' ')[0] : '—'}
+                          </td>
+                          <td className="py-2.5 px-3 text-right text-amber-600 font-semibold">
+                            {vendor.days1to30 > 0 ? formatAmount(vendor.days1to30).split(' ')[0] : '—'}
+                          </td>
+                          <td className="py-2.5 px-3 text-right text-orange-600 font-semibold">
+                            {vendor.days31to60 > 0 ? formatAmount(vendor.days31to60).split(' ')[0] : '—'}
+                          </td>
+                          <td className="py-2.5 px-3 text-right text-red-500 font-semibold">
+                            {vendor.days61to90 > 0 ? formatAmount(vendor.days61to90).split(' ')[0] : '—'}
+                          </td>
+                          <td className="py-2.5 px-3 text-right text-red-700 font-bold">
+                            {vendor.days90Plus > 0 ? formatAmount(vendor.days90Plus).split(' ')[0] : '—'}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-black text-red-600">
+                            {totalOverdueVal > 0 ? formatAmount(totalOverdueVal).split(' ')[0] : '—'}
+                          </td>
+                          <td className="py-2.5 px-3 text-right">
+                            <span className={cn(
+                              "px-2 py-0.5 rounded text-[10px] font-bold border",
+                              vendor.pctOverdue >= 50 ? "bg-red-50 text-red-700 border-red-200" :
+                              vendor.pctOverdue >= 20 ? "bg-amber-50 text-amber-700 border-amber-200" :
+                              "bg-slate-100 text-slate-600 border-slate-200"
+                            )}>
+                              {vendor.pctOverdue}%
+                            </span>
+                          </td>
+                        </tr>
+
+                        {/* Expanded Vendor Bill Log Sub-Table */}
+                        {isExpanded && (
+                          <tr className="bg-slate-50/80 border-y border-blue-100">
+                            <td colSpan={10} className="p-3 pl-10">
+                              <div className="bg-white rounded-lg border border-slate-200 p-3 shadow-2xs space-y-2">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs font-black text-slate-800">
+                                    Bills Log for {vendor.vendorName} ({vendor.bills?.length || 0})
+                                  </span>
+                                  <span className="text-[10px] font-bold text-slate-400 uppercase">Click bill to view details</span>
+                                </div>
+                                <div className="overflow-x-auto">
+                                  <table className="w-full text-left text-[11px]">
+                                    <thead>
+                                      <tr className="border-b border-slate-100 text-[9.5px] font-bold text-slate-400 uppercase">
+                                        <th className="py-1.5 px-2">BILL #</th>
+                                        <th className="py-1.5 px-2">BILL DATE</th>
+                                        <th className="py-1.5 px-2">DUE DATE</th>
+                                        <th className="py-1.5 px-2">STATUS</th>
+                                        <th className="py-1.5 px-2 text-right">AMOUNT DUE</th>
+                                        <th className="py-1.5 px-2 text-right">OVERDUE DAYS</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                      {vendor.bills?.map((b: any, bIdx: number) => (
+                                        <tr key={bIdx} className="hover:bg-slate-50">
+                                          <td className="py-1.5 px-2 font-bold text-blue-600">{b.billNumber}</td>
+                                          <td className="py-1.5 px-2 text-slate-600">{formatToDDMMYYYY(b.date)}</td>
+                                          <td className="py-1.5 px-2 text-slate-600">{formatToDDMMYYYY(b.dueDate)}</td>
+                                          <td className="py-1.5 px-2">
+                                            <span className={cn(
+                                              "px-1.5 py-0.2 rounded text-[9px] font-bold border",
+                                              b.daysOverdue > 0 ? "bg-red-50 text-red-600 border-red-200" : "bg-blue-50 text-blue-600 border-blue-200"
+                                            )}>
+                                              {b.status}
+                                            </span>
+                                          </td>
+                                          <td className="py-1.5 px-2 text-right font-black text-slate-900">{formatAmount(b.amountDue).split(' ')[0]}</td>
+                                          <td className="py-1.5 px-2 text-right font-bold text-red-600">
+                                            {b.daysOverdue > 0 ? `${b.daysOverdue} days` : 'Current'}
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination Controls */}
+            <div className="flex items-center justify-between border-t border-slate-100 pt-3 text-xs font-semibold text-slate-500">
+              <span>Showing {paginatedVendors.length} of {filteredVendors.length} vendors</span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  disabled={currentPage === 1}
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  className="px-2.5 py-1 border rounded bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  Previous
+                </button>
+                <span className="px-2 py-1 bg-slate-100 rounded text-slate-700 font-bold">{currentPage} / {totalPages}</span>
+                <button
+                  disabled={currentPage >= totalPages}
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  className="px-2.5 py-1 border rounded bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+
           </div>
         </div>
+      )}
 
-        {/* Data Table (DataTables.net Style UI) */}
-        <div className="overflow-x-auto w-full">
-          <table className="w-full text-left border-collapse text-[11.5px]">
-            <thead>
-              <tr className="border-b border-slate-200 bg-slate-100/60 text-slate-500 font-extrabold uppercase tracking-wider text-[10px]">
-                <th className="py-3 px-4">
-                  <div className="flex items-center gap-1 cursor-pointer select-none">
-                    <span>BILL #</span>
-                    <ArrowUpDown className="h-3 w-3 text-slate-400" />
-                  </div>
-                </th>
-                <th className="py-3 px-4">
-                  <div className="flex items-center gap-1 cursor-pointer select-none">
-                    <span>VENDOR NAME</span>
-                    <ArrowUpDown className="h-3 w-3 text-slate-400" />
-                  </div>
-                </th>
-                <th className="py-3 px-4">
-                  <div className="flex items-center gap-1 cursor-pointer select-none">
-                    <span>STATUS</span>
-                  </div>
-                </th>
-                <th className="py-3 px-4">TYPE</th>
-                <th className="py-3 px-4">
-                  <div className="flex items-center gap-1 cursor-pointer select-none">
-                    <span>BILL DATE</span>
-                    <ArrowUpDown className="h-3 w-3 text-slate-400" />
-                  </div>
-                </th>
-                <th className="py-3 px-4">
-                  <div className="flex items-center gap-1 cursor-pointer select-none">
-                    <span>DUE DATE</span>
-                    <ArrowUpDown className="h-3 w-3 text-slate-400" />
-                  </div>
-                </th>
-                <th className="py-3 px-4 text-right">
-                  <div className="flex items-center justify-end gap-1 cursor-pointer select-none">
-                    <span>TOTAL</span>
-                    <ArrowUpDown className="h-3 w-3 text-slate-400" />
-                  </div>
-                </th>
-                <th className="py-3 px-4 text-right">
-                  <div className="flex items-center justify-end gap-1 cursor-pointer select-none">
-                    <span>AMOUNT DUE</span>
-                    <ArrowUpDown className="h-3 w-3 text-slate-400" />
-                  </div>
-                </th>
-                <th className="py-3 px-4 text-center">ACTION</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {tableLoading || initialLoading ? (
-                Array.from({ length: 8 }).map((_, i) => (
-                  <tr key={i} className="animate-pulse">
-                    <td className="py-3.5 px-4"><div className="h-3.5 w-20 bg-slate-200/80 rounded" /></td>
-                    <td className="py-3.5 px-4"><div className="h-3.5 w-36 bg-slate-200/80 rounded" /></td>
-                    <td className="py-3.5 px-4"><div className="h-5 w-24 bg-slate-100 rounded-md" /></td>
-                    <td className="py-3.5 px-4"><div className="h-3.5 w-12 bg-slate-100 rounded" /></td>
-                    <td className="py-3.5 px-4"><div className="h-3.5 w-20 bg-slate-100 rounded" /></td>
-                    <td className="py-3.5 px-4"><div className="h-3.5 w-20 bg-slate-100 rounded" /></td>
-                    <td className="py-3.5 px-4 text-right"><div className="h-3.5 w-20 bg-slate-200/80 rounded ml-auto" /></td>
-                    <td className="py-3.5 px-4 text-right"><div className="h-3.5 w-20 bg-slate-200/80 rounded ml-auto" /></td>
-                    <td className="py-3.5 px-4 text-center"><div className="h-4 w-4 bg-slate-100 rounded mx-auto" /></td>
-                  </tr>
-                ))
-              ) : bills.length === 0 ? (
-                <tr>
-                  <td colSpan={9} className="py-16 text-center">
-                    <div className="flex flex-col items-center justify-center max-w-sm mx-auto">
-                      <div className="h-12 w-12 rounded-full bg-rose-50 border border-rose-100 flex items-center justify-center text-rose-500 mb-3 shadow-2xs">
-                        <FileText className="h-6 w-6 stroke-[1.5]" />
-                      </div>
-                      <h4 className="text-[13px] font-bold text-slate-700">No Bills Found in PostgreSQL</h4>
-                      <p className="text-[11px] text-slate-400 font-medium mt-1">
-                        No vendor bills matched your selected search, status, or date range parameters in your database.
-                      </p>
-                    </div>
-                  </td>
+      {/* ========================================================================= */}
+      {/* TAB CONTENT 2: VENDOR LEDGER TAB */}
+      {/* ========================================================================= */}
+      {activeTab === 'vendors' && (
+        <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div>
+              <h3 className="text-base font-extrabold text-slate-900">Vendor Payables Ledger</h3>
+              <p className="text-xs text-slate-400 font-medium">Consolidated view of all vendor payables and outstanding bill balances</p>
+            </div>
+            <span className="text-xs font-black text-blue-600 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200">
+              Total Vendors: {filteredVendors.length}
+            </span>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="border-b border-slate-200 text-[10.5px] font-black text-slate-400 uppercase bg-slate-50/50">
+                  <th className="py-2.5 px-3">VENDOR NAME</th>
+                  <th className="py-2.5 px-3 text-center">BILLS</th>
+                  <th className="py-2.5 px-3 text-right">TOTAL PAYABLES</th>
+                  <th className="py-2.5 px-3 text-right">CURRENT</th>
+                  <th className="py-2.5 px-3 text-right">1-30 DAYS</th>
+                  <th className="py-2.5 px-3 text-right">31-60 DAYS</th>
+                  <th className="py-2.5 px-3 text-right">61-90 DAYS</th>
+                  <th className="py-2.5 px-3 text-right">90+ DAYS</th>
+                  <th className="py-2.5 px-3 text-right text-red-600">OVERDUE</th>
                 </tr>
-              ) : (
-                bills.map((row) => (
-                  <tr key={row.id} className="hover:bg-rose-50/30 transition-colors">
-                    <td className="py-3.5 px-4 font-bold text-rose-600 hover:underline cursor-pointer">{row.invoiceNumber}</td>
-                    <td className="py-3.5 px-4 font-bold text-slate-800">
-                      <div className="flex items-center gap-2">
-                        <div className="h-6 w-6 rounded bg-slate-100 border border-slate-200 flex items-center justify-center text-[10px] font-bold text-slate-600 shrink-0">
-                          {row.vendorName.charAt(0).toUpperCase()}
-                        </div>
-                        <span className="truncate max-w-[180px]">{row.vendorName}</span>
-                      </div>
-                    </td>
-                    <td className="py-3.5 px-4">
-                      <span className={cn("px-2 py-0.5 text-[9.5px] font-extrabold uppercase rounded border tracking-wider", getStatusBadge(row.status))}>
-                        {row.status}
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filteredVendors.map((v: any, i: number) => {
+                  const ov = v.days1to30 + v.days31to60 + v.days61to90 + v.days90Plus;
+                  return (
+                    <tr key={i} className="hover:bg-slate-50 transition">
+                      <td className="py-3 px-3 font-bold text-slate-900 flex items-center gap-2">
+                        <StripeAvatar name={v.vendorName} />
+                        <span>{v.vendorName}</span>
+                      </td>
+                      <td className="py-3 px-3 text-center font-bold text-slate-600">{v.totalBills}</td>
+                      <td className="py-3 px-3 text-right font-black text-slate-900">{formatAmount(v.totalPayables).split(' ')[0]}</td>
+                      <td className="py-3 px-3 text-right text-slate-600">{v.currentNotDue > 0 ? formatAmount(v.currentNotDue).split(' ')[0] : '—'}</td>
+                      <td className="py-3 px-3 text-right text-amber-600 font-semibold">{v.days1to30 > 0 ? formatAmount(v.days1to30).split(' ')[0] : '—'}</td>
+                      <td className="py-3 px-3 text-right text-orange-600 font-semibold">{v.days31to60 > 0 ? formatAmount(v.days31to60).split(' ')[0] : '—'}</td>
+                      <td className="py-3 px-3 text-right text-red-500 font-semibold">{v.days61to90 > 0 ? formatAmount(v.days61to90).split(' ')[0] : '—'}</td>
+                      <td className="py-3 px-3 text-right text-red-700 font-bold">{v.days90Plus > 0 ? formatAmount(v.days90Plus).split(' ')[0] : '—'}</td>
+                      <td className="py-3 px-3 text-right font-black text-red-600">{ov > 0 ? formatAmount(ov).split(' ')[0] : '—'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB CONTENT 3: OVERDUE BILLS TAB */}
+      {/* ========================================================================= */}
+      {activeTab === 'overdue' && (
+        <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div>
+              <h3 className="text-base font-extrabold text-slate-900">Overdue Vendor Bills Log</h3>
+              <p className="text-xs text-slate-400 font-medium">All unpaid vendor bills past their due date requiring payment settlement</p>
+            </div>
+            <span className="text-xs font-black text-red-600 bg-red-50 px-2.5 py-1 rounded-lg border border-red-200">
+              Overdue Count: {overdueBillsList.length}
+            </span>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="border-b border-slate-200 text-[10.5px] font-black text-slate-400 uppercase bg-slate-50/50">
+                  <th className="py-2.5 px-3">BILL #</th>
+                  <th className="py-2.5 px-3">VENDOR NAME</th>
+                  <th className="py-2.5 px-3">BILL DATE</th>
+                  <th className="py-2.5 px-3">DUE DATE</th>
+                  <th className="py-2.5 px-3">STATUS</th>
+                  <th className="py-2.5 px-3 text-right">AMOUNT DUE</th>
+                  <th className="py-2.5 px-3 text-right">DAYS OVERDUE</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {overdueBillsList.map((inv: any, i: number) => (
+                  <tr key={i} className="hover:bg-slate-50 transition">
+                    <td className="py-3 px-3 font-bold text-blue-600">{inv.billNumber}</td>
+                    <td className="py-3 px-3 font-bold text-slate-900">{inv.vendorName}</td>
+                    <td className="py-3 px-3 text-slate-600">{formatToDDMMYYYY(inv.date)}</td>
+                    <td className="py-3 px-3 text-slate-600">{formatToDDMMYYYY(inv.dueDate)}</td>
+                    <td className="py-3 px-3">
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-red-50 text-red-600 border border-red-200">
+                        {inv.status}
                       </span>
                     </td>
-                    <td className="py-3.5 px-4 font-bold text-slate-400 text-[10.5px]">ACCPAY</td>
-                    <td className="py-3.5 px-4 text-slate-500 font-semibold">{formatDate(row.date)}</td>
-                    <td className="py-3.5 px-4 text-slate-500 font-semibold">{formatDate(row.dueDate)}</td>
-                    <td className="py-3.5 px-4 text-right font-extrabold text-slate-900">
-                      {formatCurrency(row.total, row.currency)}
-                    </td>
-                    <td className="py-3.5 px-4 text-right font-extrabold text-rose-600">
-                      {formatCurrency(row.amountDue, row.currency)}
-                    </td>
-                    <td className="py-3.5 px-4 text-center">
-                      <button className="text-slate-400 hover:text-slate-700 p-1 rounded hover:bg-slate-100 transition cursor-pointer">
-                        <MoreHorizontal className="h-4 w-4" />
-                      </button>
-                    </td>
+                    <td className="py-3 px-3 text-right font-black text-slate-900">{formatAmount(inv.amountDue).split(' ')[0]}</td>
+                    <td className="py-3 px-3 text-right font-bold text-red-600">{inv.daysOverdue} days</td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Footer Pagination Bar (DataTables.net Style UI) */}
-        <div className="p-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3 text-[11.5px] bg-slate-50/40">
-          <div className="text-slate-500 font-semibold">
-            Showing <span className="font-bold text-slate-800">{pagination.startIndex}</span> to{' '}
-            <span className="font-bold text-slate-800">{pagination.endIndex}</span> of{' '}
-            <span className="font-bold text-slate-800">{pagination.totalItems}</span> entries
-          </div>
-
-          <div className="flex items-center gap-1">
-            <button
-              disabled={pagination.currentPage <= 1}
-              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-              className="h-8 px-3 flex items-center justify-center rounded border border-slate-200 bg-white text-slate-600 disabled:opacity-40 hover:bg-slate-50 cursor-pointer font-bold transition shadow-2xs"
-            >
-              Previous
-            </button>
-
-            {Array.from({ length: Math.min(5, pagination.totalPages) }).map((_, idx) => {
-              const pageNum = idx + 1;
-              return (
-                <button
-                  key={pageNum}
-                  onClick={() => setCurrentPage(pageNum)}
-                  className={cn(
-                    "h-8 w-8 flex items-center justify-center rounded text-[11px] font-extrabold transition cursor-pointer shadow-2xs",
-                    pagination.currentPage === pageNum
-                      ? "border border-rose-600 bg-rose-600 text-white"
-                      : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                  )}
-                >
-                  {pageNum}
-                </button>
-              );
-            })}
-
-            {pagination.totalPages > 5 && (
-              <>
-                <span className="px-1 text-slate-400 font-bold">...</span>
-                <button
-                  onClick={() => setCurrentPage(pagination.totalPages)}
-                  className={cn(
-                    "h-8 w-8 flex items-center justify-center rounded text-[11px] font-extrabold transition cursor-pointer shadow-2xs",
-                    pagination.currentPage === pagination.totalPages
-                      ? "border border-rose-600 bg-rose-600 text-white"
-                      : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                  )}
-                >
-                  {pagination.totalPages}
-                </button>
-              </>
-            )}
-
-            <button
-              disabled={pagination.currentPage >= pagination.totalPages}
-              onClick={() => setCurrentPage(prev => Math.min(pagination.totalPages, prev + 1))}
-              className="h-8 px-3 flex items-center justify-center rounded border border-slate-200 bg-white text-slate-600 disabled:opacity-40 hover:bg-slate-50 cursor-pointer font-bold transition shadow-2xs"
-            >
-              Next
-            </button>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
-      </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB CONTENT 4: AGEING BREAKDOWN TAB */}
+      {/* ========================================================================= */}
+      {activeTab === 'ageing' && (
+        <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs space-y-5">
+          <div>
+            <h3 className="text-base font-extrabold text-slate-900">Comprehensive Payables Ageing Analysis</h3>
+            <p className="text-xs text-slate-400 font-medium">Detailed breakdown of vendor payables portfolio across 30, 60, and 90+ day ageing buckets</p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div className="p-4 bg-slate-50/60 rounded-xl border border-slate-200">
+              <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider mb-3">Portfolio Risk Distribution</h4>
+              <div className="h-[280px]">
+                <ReactECharts option={doughnutOption} style={{ height: '100%', width: '100%' }} />
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50/60 rounded-xl border border-slate-200 flex flex-col justify-between">
+              <div>
+                <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider mb-3">Payables Ageing Summary Table</h4>
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-slate-400 text-[10px] font-bold uppercase">
+                      <th className="py-2">BUCKET</th>
+                      <th className="py-2 text-right">AMOUNT DUE</th>
+                      <th className="py-2 text-right">% OF TOTAL</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200/60 font-semibold">
+                    {data?.ageingDistribution?.map((d: any) => (
+                      <tr key={d.key}>
+                        <td className="py-2.5 flex items-center gap-2">
+                          <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: d.color }} />
+                          <span className="text-slate-800">{d.label}</span>
+                        </td>
+                        <td className="py-2.5 text-right font-black text-slate-900">{formatAmount(d.amount).split(' ')[0]}</td>
+                        <td className="py-2.5 text-right text-slate-600">{d.pct}%</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

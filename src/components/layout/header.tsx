@@ -233,6 +233,14 @@ export function Header() {
           title: "Account Receivable",
           subtitle: "Real-time overview of your outstanding invoices and collections"
         };
+      case '/bills':
+      case '/reports/account-payable':
+      case '/reports/aged-payables':
+      case '/reports/bill-status-summary':
+        return {
+          title: "Account Payable",
+          subtitle: "Real-time overview of your vendor bills and payment obligations"
+        };
       case '/products':
         return {
           title: "Inventory & Products",
