@@ -744,18 +744,18 @@ export default function ConsistentAccountReceivablePage() {
                             <div className="min-w-0">
                               <div className="text-[11px] font-bold text-slate-900 truncate">{cust.customerName}</div>
                               <div className="text-[9.5px] text-slate-500 truncate">
-                                {cust.overdueCount} Overdue {cust.overdueCount === 1 ? 'Invoice' : 'Invoices'}
+                                {cust.overdueCount} Overdue {cust.overdueCount === 1 ? 'Invoice' : 'Invoices'} • <span className="font-semibold text-amber-700">{cust.pctOverdue}% Risk</span>
                               </div>
                             </div>
                           </div>
 
                           <div className="text-right shrink-0">
                             <div className="text-[11px] font-extrabold text-red-600">
-                              {formatAmount(cust.overdueAmount).split(' ')[0]}
+                              {formatAmount(cust.overdueAmount).split(' ')[0]} <span className="text-[9px] font-semibold text-red-500">Overdue</span>
                             </div>
-                            <span className="text-[8.5px] font-bold text-amber-700 bg-amber-50 px-1 py-0.2 rounded border border-amber-200 inline-block mt-0.5">
-                              {cust.pctOverdue}% Overdue Risk
-                            </span>
+                            <div className="text-[9px] font-semibold text-slate-400">
+                              Total: {formatAmount(cust.totalReceivables).split(' ')[0]}
+                            </div>
                           </div>
                         </div>
                       ))
@@ -792,44 +792,42 @@ export default function ConsistentAccountReceivablePage() {
                     <th className="py-2 px-3 text-right">31 - 60 DAYS</th>
                     <th className="py-2 px-3 text-right">61 - 90 DAYS</th>
                     <th className="py-2 px-3 text-right">90+ DAYS</th>
-                    <th className="py-2 px-3 text-center">OVERDUE</th>
+                    <th className="py-2 px-3 text-right text-red-600">TOTAL OVERDUE</th>
                     <th className="py-2 px-3 text-right">% OVERDUE</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-[11.5px]">
-                  {paginatedCustomers.map((cust: any, i: number) => (
-                    <tr 
-                      key={i} 
-                      onClick={() => {
-                        setExpandedCustomer(cust.customerName);
-                        setActiveTab('customers');
-                      }}
-                      className="hover:bg-slate-50 transition cursor-pointer"
-                    >
-                      <td className="py-2.5 px-3">
-                        <div className="flex items-center gap-2">
-                          <StripeAvatar name={cust.customerName} />
-                          <span className="font-bold text-blue-600 hover:underline">{cust.customerName}</span>
-                        </div>
-                      </td>
-                      <td className="py-2.5 px-3 text-center font-semibold text-slate-700">{cust.totalInvoices}</td>
-                      <td className="py-2.5 px-3 text-right font-extrabold text-slate-900">{formatAmount(cust.totalReceivables).split(' ')[0]}</td>
-                      <td className="py-2.5 px-3 text-right font-medium text-slate-600">{cust.currentNotDue > 0 ? formatAmount(cust.currentNotDue).split(' ')[0] : '—'}</td>
-                      <td className="py-2.5 px-3 text-right font-medium text-amber-600">{cust.days1to30 > 0 ? formatAmount(cust.days1to30).split(' ')[0] : '—'}</td>
-                      <td className="py-2.5 px-3 text-right font-medium text-orange-600">{cust.days31to60 > 0 ? formatAmount(cust.days31to60).split(' ')[0] : '—'}</td>
-                      <td className="py-2.5 px-3 text-right font-medium text-rose-600">{cust.days61to90 > 0 ? formatAmount(cust.days61to90).split(' ')[0] : '—'}</td>
-                      <td className="py-2.5 px-3 text-right font-extrabold text-red-700">{cust.days90Plus > 0 ? formatAmount(cust.days90Plus).split(' ')[0] : '—'}</td>
-                      <td className="py-2.5 px-3 text-center">
-                        <span className={cn(
-                          "px-2 py-0.5 rounded text-[10px] font-bold",
-                          cust.overdueCount > 0 ? "bg-red-50 text-red-600 border border-red-200" : "bg-slate-100 text-slate-500"
-                        )}>
-                          {cust.overdueCount}
-                        </span>
-                      </td>
-                      <td className="py-2.5 px-3 text-right font-bold text-slate-800">{cust.pctOverdue}%</td>
-                    </tr>
-                  ))}
+                  {paginatedCustomers.map((cust: any, i: number) => {
+                    const totalOverdueVal = cust.days1to30 + cust.days31to60 + cust.days61to90 + cust.days90Plus;
+                    return (
+                      <tr 
+                        key={i} 
+                        onClick={() => {
+                          setExpandedCustomer(cust.customerName);
+                          setActiveTab('customers');
+                        }}
+                        className="hover:bg-slate-50 transition cursor-pointer"
+                      >
+                        <td className="py-2.5 px-3">
+                          <div className="flex items-center gap-2">
+                            <StripeAvatar name={cust.customerName} />
+                            <span className="font-bold text-blue-600 hover:underline">{cust.customerName}</span>
+                          </div>
+                        </td>
+                        <td className="py-2.5 px-3 text-center font-semibold text-slate-700">{cust.totalInvoices}</td>
+                        <td className="py-2.5 px-3 text-right font-extrabold text-slate-900">{formatAmount(cust.totalReceivables).split(' ')[0]}</td>
+                        <td className="py-2.5 px-3 text-right font-medium text-slate-600">{cust.currentNotDue > 0 ? formatAmount(cust.currentNotDue).split(' ')[0] : '—'}</td>
+                        <td className="py-2.5 px-3 text-right font-medium text-amber-600">{cust.days1to30 > 0 ? formatAmount(cust.days1to30).split(' ')[0] : '—'}</td>
+                        <td className="py-2.5 px-3 text-right font-medium text-orange-600">{cust.days31to60 > 0 ? formatAmount(cust.days31to60).split(' ')[0] : '—'}</td>
+                        <td className="py-2.5 px-3 text-right font-medium text-rose-600">{cust.days61to90 > 0 ? formatAmount(cust.days61to90).split(' ')[0] : '—'}</td>
+                        <td className="py-2.5 px-3 text-right font-extrabold text-red-700">{cust.days90Plus > 0 ? formatAmount(cust.days90Plus).split(' ')[0] : '—'}</td>
+                        <td className="py-2.5 px-3 text-right font-extrabold text-red-600">
+                          {totalOverdueVal > 0 ? formatAmount(totalOverdueVal).split(' ')[0] : '—'}
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-bold text-slate-800">{cust.pctOverdue}%</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
