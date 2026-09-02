@@ -107,6 +107,9 @@ export default function ConsistentAccountReceivablePage() {
   // Interactive Customer Expansion State
   const [expandedCustomer, setExpandedCustomer] = useState<string | null>(null);
 
+  // Overdue Card View Switcher (Invoices vs Customers)
+  const [overdueView, setOverdueView] = useState<'invoices' | 'customers'>('invoices');
+
   // Cash Acceleration Simulator Slider (0 - 100%)
   const [targetCollectionPct, setTargetCollectionPct] = useState<number>(40);
 
@@ -654,51 +657,111 @@ export default function ConsistentAccountReceivablePage() {
               </div>
             </div>
 
-            {/* Top Overdue Accounts (3 cols) */}
+            {/* Top Overdue Accounts & Invoices Dual Card (3 cols) */}
             <div className="lg:col-span-3 bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs flex flex-col justify-between">
               <div>
-                <div className="flex items-center justify-between border-b border-slate-100 pb-2.5 mb-2.5">
-                  <h3 className="text-sm font-extrabold text-slate-900">Top Overdue Invoices</h3>
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-2.5">
+                  {/* Segmented Control Header: Invoices vs Customers */}
+                  <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg text-[10.5px] font-bold">
+                    <button
+                      onClick={() => setOverdueView('invoices')}
+                      className={cn(
+                        "px-2.5 py-0.5 rounded transition cursor-pointer flex items-center gap-1",
+                        overdueView === 'invoices' ? "bg-white text-blue-600 shadow-2xs font-extrabold" : "text-slate-500 hover:text-slate-900"
+                      )}
+                    >
+                      <FileText className="h-3 w-3" />
+                      <span>Top Invoices</span>
+                    </button>
+                    <button
+                      onClick={() => setOverdueView('customers')}
+                      className={cn(
+                        "px-2.5 py-0.5 rounded transition cursor-pointer flex items-center gap-1",
+                        overdueView === 'customers' ? "bg-white text-blue-600 shadow-2xs font-extrabold" : "text-slate-500 hover:text-slate-900"
+                      )}
+                    >
+                      <User className="h-3 w-3" />
+                      <span>Top Customers</span>
+                    </button>
+                  </div>
+
                   <button 
-                    onClick={() => setActiveTab('overdue')}
-                    className="text-[11px] font-bold text-blue-600 hover:underline flex items-center gap-0.5 cursor-pointer"
+                    onClick={() => setActiveTab(overdueView === 'invoices' ? 'overdue' : 'customers')}
+                    className="text-[11px] font-bold text-blue-600 hover:underline flex items-center gap-0.5 cursor-pointer shrink-0"
                   >
                     View All <ChevronRight className="h-3 w-3" />
                   </button>
                 </div>
 
                 <div className="space-y-2">
-                  {data?.topOverdueInvoices?.length > 0 ? (
-                    data.topOverdueInvoices.map((inv: any) => (
-                      <div 
-                        key={inv.id}
-                        onClick={() => {
-                          setExpandedCustomer(inv.contactName);
-                          setActiveTab('customers');
-                          toast.info(`Drilled down to customer: ${inv.contactName}`);
-                        }}
-                        className="p-2 rounded-lg border border-slate-100 hover:border-slate-300 hover:bg-slate-50 transition cursor-pointer flex items-center justify-between gap-2"
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <StripeAvatar name={inv.contactName} />
-                          <div className="min-w-0">
-                            <div className="text-[11px] font-bold text-slate-900 truncate">{inv.invoiceNumber}</div>
-                            <div className="text-[9.5px] text-slate-500 truncate">{inv.contactName}</div>
+                  {overdueView === 'invoices' ? (
+                    data?.topOverdueInvoices?.length > 0 ? (
+                      data.topOverdueInvoices.map((inv: any) => (
+                        <div 
+                          key={inv.id}
+                          onClick={() => {
+                            setExpandedCustomer(inv.contactName);
+                            setActiveTab('customers');
+                            toast.info(`Drilled down to customer: ${inv.contactName}`);
+                          }}
+                          className="p-2 rounded-lg border border-slate-100 hover:border-slate-300 hover:bg-slate-50 transition cursor-pointer flex items-center justify-between gap-2"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <StripeAvatar name={inv.contactName} />
+                            <div className="min-w-0">
+                              <div className="text-[11px] font-bold text-slate-900 truncate">{inv.invoiceNumber}</div>
+                              <div className="text-[9.5px] text-slate-500 truncate">{inv.contactName}</div>
+                            </div>
                           </div>
-                        </div>
 
-                        <div className="text-right shrink-0">
-                          <div className="text-[11px] font-extrabold text-red-600">
-                            {formatAmount(inv.amountDue).split(' ')[0]}
+                          <div className="text-right shrink-0">
+                            <div className="text-[11px] font-extrabold text-red-600">
+                              {formatAmount(inv.amountDue).split(' ')[0]}
+                            </div>
+                            <span className="text-[8.5px] font-bold text-red-500 bg-red-50 px-1 py-0.2 rounded border border-red-100 inline-block mt-0.5">
+                              {inv.daysOverdue} days
+                            </span>
                           </div>
-                          <span className="text-[8.5px] font-bold text-red-500 bg-red-50 px-1 py-0.2 rounded border border-red-100 inline-block mt-0.5">
-                            {inv.daysOverdue} days
-                          </span>
                         </div>
-                      </div>
-                    ))
+                      ))
+                    ) : (
+                      <div className="py-8 text-center text-xs text-slate-400 font-medium">No overdue invoices</div>
+                    )
                   ) : (
-                    <div className="py-8 text-center text-xs text-slate-400 font-medium">No overdue invoices</div>
+                    data?.topOverdueCustomers?.length > 0 ? (
+                      data.topOverdueCustomers.map((cust: any) => (
+                        <div 
+                          key={cust.customerName}
+                          onClick={() => {
+                            setExpandedCustomer(cust.customerName);
+                            setActiveTab('customers');
+                            toast.info(`Drilled down to customer: ${cust.customerName}`);
+                          }}
+                          className="p-2 rounded-lg border border-slate-100 hover:border-slate-300 hover:bg-slate-50 transition cursor-pointer flex items-center justify-between gap-2"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <StripeAvatar name={cust.customerName} />
+                            <div className="min-w-0">
+                              <div className="text-[11px] font-bold text-slate-900 truncate">{cust.customerName}</div>
+                              <div className="text-[9.5px] text-slate-500 truncate">
+                                {cust.overdueCount} Overdue {cust.overdueCount === 1 ? 'Invoice' : 'Invoices'}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="text-right shrink-0">
+                            <div className="text-[11px] font-extrabold text-red-600">
+                              {formatAmount(cust.overdueAmount).split(' ')[0]}
+                            </div>
+                            <span className="text-[8.5px] font-bold text-amber-700 bg-amber-50 px-1 py-0.2 rounded border border-amber-200 inline-block mt-0.5">
+                              {cust.pctOverdue}% Overdue Risk
+                            </span>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="py-8 text-center text-xs text-slate-400 font-medium">No overdue customers</div>
+                    )
                   )}
                 </div>
               </div>

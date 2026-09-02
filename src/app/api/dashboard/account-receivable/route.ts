@@ -305,6 +305,26 @@ export async function GET(req: NextRequest) {
       }
     ];
 
+    // Top Overdue Customers (Sorted by total overdue amount descending)
+    const topOverdueCustomers = customerSummaryList
+      .map(cust => {
+        const overdueAmount = cust.days1to30 + cust.days31to60 + cust.days61to90 + cust.days90Plus;
+        const maxOverdueDays = cust.invoices && cust.invoices.length > 0
+          ? Math.max(0, ...cust.invoices.filter((inv: any) => inv.daysOverdue > 0).map((inv: any) => inv.daysOverdue))
+          : 0;
+        return {
+          customerName: cust.customerName,
+          overdueAmount,
+          totalReceivables: cust.totalReceivables,
+          overdueCount: cust.overdueCount,
+          pctOverdue: cust.pctOverdue,
+          maxOverdueDays
+        };
+      })
+      .filter(cust => cust.overdueAmount > 0)
+      .sort((a, b) => b.overdueAmount - a.overdueAmount)
+      .slice(0, 5);
+
     return NextResponse.json({
       asOnDate: asOnDateStr,
       meta: { currency, totalActiveInvoices: activeReceivables.length },
@@ -321,6 +341,7 @@ export async function GET(req: NextRequest) {
         series: trendSeries
       },
       topOverdueInvoices,
+      topOverdueCustomers,
       customerSummary: customerSummaryList,
       allReceivableInvoices: activeReceivables,
       collectionEfficiency: {
