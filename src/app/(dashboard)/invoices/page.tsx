@@ -110,8 +110,8 @@ export default function ConsistentAccountReceivablePage() {
   // Interactive Customer Expansion State
   const [expandedCustomer, setExpandedCustomer] = useState<string | null>(null);
 
-  // Overdue Card View Switcher (Invoices vs Customers)
-  const [overdueView, setOverdueView] = useState<'invoices' | 'customers'>('invoices');
+  // Overdue Card View Switcher (Customers vs Invoices)
+  const [overdueView, setOverdueView] = useState<'customers' | 'invoices'>('customers');
 
   // Cash Acceleration Simulator Slider (0 - 100%)
   const [targetCollectionPct, setTargetCollectionPct] = useState<number>(40);
@@ -674,21 +674,11 @@ export default function ConsistentAccountReceivablePage() {
             </div>
 
             {/* Top Overdue Accounts & Invoices Dual Card (3 cols) */}
-            <div className="lg:col-span-3 bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-2.5">
-                  {/* Segmented Control Header: Invoices vs Customers */}
+            <div className="lg:col-span-3 bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs flex flex-col justify-between h-full">
+              <div className="flex flex-col h-full justify-between">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-2">
+                  {/* Segmented Control Header: Customers vs Invoices */}
                   <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg text-[10.5px] font-bold">
-                    <button
-                      onClick={() => setOverdueView('invoices')}
-                      className={cn(
-                        "px-2.5 py-0.5 rounded transition cursor-pointer flex items-center gap-1",
-                        overdueView === 'invoices' ? "bg-white text-blue-600 shadow-2xs font-extrabold" : "text-slate-500 hover:text-slate-900"
-                      )}
-                    >
-                      <FileText className="h-3 w-3" />
-                      <span>Top Invoices</span>
-                    </button>
                     <button
                       onClick={() => setOverdueView('customers')}
                       className={cn(
@@ -698,6 +688,16 @@ export default function ConsistentAccountReceivablePage() {
                     >
                       <User className="h-3 w-3" />
                       <span>Top Customers</span>
+                    </button>
+                    <button
+                      onClick={() => setOverdueView('invoices')}
+                      className={cn(
+                        "px-2.5 py-0.5 rounded transition cursor-pointer flex items-center gap-1",
+                        overdueView === 'invoices' ? "bg-white text-blue-600 shadow-2xs font-extrabold" : "text-slate-500 hover:text-slate-900"
+                      )}
+                    >
+                      <FileText className="h-3 w-3" />
+                      <span>Top Invoices</span>
                     </button>
                   </div>
 
@@ -709,8 +709,56 @@ export default function ConsistentAccountReceivablePage() {
                   </button>
                 </div>
 
-                <div className="space-y-2">
-                  {overdueView === 'invoices' ? (
+                <div className="flex-1 flex flex-col justify-between space-y-1.5">
+                  {overdueView === 'customers' ? (
+                    data?.topOverdueCustomers?.length > 0 ? (
+                      data.topOverdueCustomers.map((cust: any) => (
+                        <div 
+                          key={cust.customerName}
+                          onClick={() => {
+                            setExpandedCustomer(cust.customerName);
+                            setActiveTab('customers');
+                            toast.info(`Drilled down to customer: ${cust.customerName}`);
+                          }}
+                          className="p-2.5 rounded-lg border border-slate-100 hover:border-slate-300 hover:bg-slate-50 transition cursor-pointer space-y-1.5"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <StripeAvatar name={cust.customerName} />
+                              <div className="min-w-0">
+                                <div className="text-[11px] font-bold text-slate-900 truncate">{cust.customerName}</div>
+                                <div className="text-[9.5px] text-slate-500 truncate">
+                                  {cust.totalInvoices} {cust.totalInvoices === 1 ? 'Invoice' : 'Invoices'} • {cust.overdueCount > 0 ? <span className="font-bold text-red-600">{formatAmount(cust.overdueAmount).split(' ')[0]} Overdue</span> : <span className="font-semibold text-emerald-600">All Current</span>}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="text-right shrink-0">
+                              <div className="text-[11px] font-black text-slate-900">
+                                {formatAmount(cust.totalReceivables).split(' ')[0]}
+                              </div>
+                              <span className="text-[8.5px] font-bold text-slate-600 bg-slate-100 px-1.5 py-0.2 rounded border border-slate-200 inline-block">
+                                {cust.pctOverdue}% Risk
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Calculation-based Red Risk Progress Bar */}
+                          <div className="w-full bg-slate-100 h-1 rounded-full overflow-hidden">
+                            <div 
+                              className={cn(
+                                "h-full rounded-full transition-all duration-500",
+                                cust.pctOverdue >= 80 ? "bg-red-600" : cust.pctOverdue >= 30 ? "bg-amber-500" : "bg-emerald-500"
+                              )} 
+                              style={{ width: `${Math.max(cust.pctOverdue, 2)}%` }} 
+                            />
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="py-8 text-center text-xs text-slate-400 font-medium">No top customers</div>
+                    )
+                  ) : (
                     data?.topOverdueInvoices?.length > 0 ? (
                       data.topOverdueInvoices.map((inv: any) => (
                         <div 
@@ -720,7 +768,7 @@ export default function ConsistentAccountReceivablePage() {
                             setActiveTab('customers');
                             toast.info(`Drilled down to customer: ${inv.contactName}`);
                           }}
-                          className="p-2 rounded-lg border border-slate-100 hover:border-slate-300 hover:bg-slate-50 transition cursor-pointer flex items-center justify-between gap-2"
+                          className="p-2.5 rounded-lg border border-slate-100 hover:border-slate-300 hover:bg-slate-50 transition cursor-pointer flex items-center justify-between gap-2"
                         >
                           <div className="flex items-center gap-2 min-w-0">
                             <StripeAvatar name={inv.contactName} />
@@ -742,41 +790,6 @@ export default function ConsistentAccountReceivablePage() {
                       ))
                     ) : (
                       <div className="py-8 text-center text-xs text-slate-400 font-medium">No overdue invoices</div>
-                    )
-                  ) : (
-                    data?.topOverdueCustomers?.length > 0 ? (
-                      data.topOverdueCustomers.map((cust: any) => (
-                        <div 
-                          key={cust.customerName}
-                          onClick={() => {
-                            setExpandedCustomer(cust.customerName);
-                            setActiveTab('customers');
-                            toast.info(`Drilled down to customer: ${cust.customerName}`);
-                          }}
-                          className="p-2 rounded-lg border border-slate-100 hover:border-slate-300 hover:bg-slate-50 transition cursor-pointer flex items-center justify-between gap-2"
-                        >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <StripeAvatar name={cust.customerName} />
-                            <div className="min-w-0">
-                              <div className="text-[11px] font-bold text-slate-900 truncate">{cust.customerName}</div>
-                              <div className="text-[9.5px] text-slate-500 truncate">
-                                {cust.totalInvoices} {cust.totalInvoices === 1 ? 'Invoice' : 'Invoices'} • {cust.overdueCount > 0 ? <span className="font-bold text-red-600">{formatAmount(cust.overdueAmount).split(' ')[0]} Overdue</span> : <span className="font-semibold text-emerald-600">All Current</span>}
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="text-right shrink-0">
-                            <div className="text-[11px] font-black text-slate-900">
-                              {formatAmount(cust.totalReceivables).split(' ')[0]}
-                            </div>
-                            <span className="text-[8.5px] font-bold text-slate-500 bg-slate-100 px-1 py-0.2 rounded border border-slate-200 inline-block mt-0.5">
-                              {cust.pctOverdue}% Risk
-                            </span>
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="py-8 text-center text-xs text-slate-400 font-medium">No top customers</div>
                     )
                   )}
                 </div>
