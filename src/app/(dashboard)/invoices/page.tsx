@@ -298,69 +298,79 @@ export default function ConsistentAccountReceivablePage() {
     <div className="space-y-5 max-w-full pb-12 select-none font-sans text-slate-800">
       
       {/* ========================================================================= */}
-      {/* COMPACT CONTROL STRIP (FITS NATURALLY UNDER MAIN GLOBAL APP HEADER) */}
+      {/* SEAMLESS UNDERLINED TAB STRIP & ACTION TOOLBAR */}
       {/* ========================================================================= */}
-      <div className="bg-white rounded-xl border border-slate-200/80 p-3.5 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-3">
-        {/* Left: Navigation Tabs */}
-        <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200/80 pb-0 mb-1">
+        {/* Left: Underlined Tab Switcher */}
+        <div className="flex items-center gap-6 text-xs font-bold text-slate-500">
           <button
             onClick={() => setActiveTab('overview')}
             className={cn(
-              "px-3.5 py-1.5 rounded-lg transition cursor-pointer flex items-center gap-1.5",
-              activeTab === 'overview' ? "bg-slate-900 text-white font-bold shadow-2xs" : "hover:bg-slate-100 hover:text-slate-900"
+              "pb-3 flex items-center gap-2 border-b-2 transition cursor-pointer font-extrabold",
+              activeTab === 'overview' ? "border-blue-600 text-blue-600" : "border-transparent hover:text-slate-900"
             )}
           >
-            <BarChart3 className="h-3.5 w-3.5" />
+            <BarChart3 className="h-4 w-4" />
             <span>Overview</span>
           </button>
 
           <button
             onClick={() => setActiveTab('customers')}
             className={cn(
-              "px-3.5 py-1.5 rounded-lg transition cursor-pointer flex items-center gap-1.5",
-              activeTab === 'customers' ? "bg-slate-900 text-white font-bold shadow-2xs" : "hover:bg-slate-100 hover:text-slate-900"
+              "pb-3 flex items-center gap-2 border-b-2 transition cursor-pointer font-extrabold",
+              activeTab === 'customers' ? "border-blue-600 text-blue-600" : "border-transparent hover:text-slate-900"
             )}
           >
-            <User className="h-3.5 w-3.5" />
+            <User className="h-4 w-4" />
             <span>Customer Ledger</span>
-            <span className="ml-1 text-[10px] px-1.5 py-0.2 rounded-full bg-slate-700 text-white">{filteredCustomers.length}</span>
+            <span className={cn(
+              "px-2 py-0.5 rounded-full text-[10px] font-black",
+              activeTab === 'customers' ? "bg-blue-100 text-blue-700" : "bg-slate-100 text-slate-600"
+            )}>
+              {filteredCustomers.length}
+            </span>
           </button>
 
           <button
             onClick={() => setActiveTab('overdue')}
             className={cn(
-              "px-3.5 py-1.5 rounded-lg transition cursor-pointer flex items-center gap-1.5",
-              activeTab === 'overdue' ? "bg-slate-900 text-white font-bold shadow-2xs" : "hover:bg-slate-100 hover:text-slate-900"
+              "pb-3 flex items-center gap-2 border-b-2 transition cursor-pointer font-extrabold",
+              activeTab === 'overdue' ? "border-red-600 text-red-600" : "border-transparent hover:text-slate-900"
             )}
           >
-            <ShieldAlert className="h-3.5 w-3.5 text-red-400" />
+            <ShieldAlert className="h-4 w-4 text-red-500" />
             <span>Overdue Invoices</span>
-            <span className="ml-1 text-[10px] px-1.5 py-0.2 rounded-full bg-red-600 text-white">{overdueCountVal}</span>
+            <span className={cn(
+              "px-2 py-0.5 rounded-full text-[10px] font-black",
+              activeTab === 'overdue' ? "bg-red-100 text-red-700" : "bg-red-50 text-red-600 border border-red-200"
+            )}>
+              {overdueCountVal}
+            </span>
           </button>
 
           <button
             onClick={() => setActiveTab('ageing')}
             className={cn(
-              "px-3.5 py-1.5 rounded-lg transition cursor-pointer flex items-center gap-1.5",
-              activeTab === 'ageing' ? "bg-slate-900 text-white font-bold shadow-2xs" : "hover:bg-slate-100 hover:text-slate-900"
+              "pb-3 flex items-center gap-2 border-b-2 transition cursor-pointer font-extrabold",
+              activeTab === 'ageing' ? "border-blue-600 text-blue-600" : "border-transparent hover:text-slate-900"
             )}
           >
-            <Clock className="h-3.5 w-3.5" />
+            <Clock className="h-4 w-4" />
             <span>Ageing Breakdown</span>
           </button>
         </div>
 
         {/* Right: Action Controls */}
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5 pb-3">
           {/* As On Date Selector */}
-          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-700">
+          <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 shadow-2xs">
             <Calendar className="h-3.5 w-3.5 text-blue-600" />
             <span className="text-slate-400 text-[11px]">As On:</span>
             <input
               type="date"
               value={asOnDate}
               onChange={(e) => setAsOnDate(e.target.value)}
-              className="bg-transparent text-slate-900 font-bold outline-none cursor-pointer text-xs"
+              className="bg-transparent text-slate-900 font-extrabold outline-none cursor-pointer text-xs"
             />
           </div>
 
@@ -368,7 +378,7 @@ export default function ConsistentAccountReceivablePage() {
           <button
             onClick={fetchData}
             disabled={loading}
-            className="flex items-center gap-1.5 px-3 py-1 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-50 transition cursor-pointer shadow-2xs"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 hover:bg-slate-50 transition cursor-pointer shadow-2xs"
           >
             <RefreshCw className={cn("h-3.5 w-3.5 text-blue-600", loading && "animate-spin")} />
             <span>Refresh</span>
@@ -377,7 +387,7 @@ export default function ConsistentAccountReceivablePage() {
           {/* CSV Export Button */}
           <button
             onClick={handleExportCSV}
-            className="flex items-center gap-1.5 px-3.5 py-1 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 transition cursor-pointer shadow-2xs"
+            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-extrabold hover:bg-blue-700 transition cursor-pointer shadow-2xs"
           >
             <FileSpreadsheet className="h-3.5 w-3.5" />
             <span>Export CSV</span>
