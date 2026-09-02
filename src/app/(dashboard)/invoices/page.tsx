@@ -104,7 +104,7 @@ export default function ConsistentAccountReceivablePage() {
   const [selectedRiskFilter, setSelectedRiskFilter] = useState<string>('ALL');
   const [searchTerm, setSearchTerm] = useState<string>('');
   // Customer Summary Table Sorting State
-  const [sortCol, setSortCol] = useState<'overdue' | 'total' | 'name' | 'pct'>('overdue');
+  const [sortCol, setSortCol] = useState<'overdue' | 'total' | 'name' | 'pct'>('total');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   
   // Interactive Customer Expansion State
@@ -760,23 +760,23 @@ export default function ConsistentAccountReceivablePage() {
                             <div className="min-w-0">
                               <div className="text-[11px] font-bold text-slate-900 truncate">{cust.customerName}</div>
                               <div className="text-[9.5px] text-slate-500 truncate">
-                                {cust.overdueCount} Overdue {cust.overdueCount === 1 ? 'Invoice' : 'Invoices'} • <span className="font-semibold text-amber-700">{cust.pctOverdue}% Risk</span>
+                                {cust.totalInvoices} {cust.totalInvoices === 1 ? 'Invoice' : 'Invoices'} • {cust.overdueCount > 0 ? <span className="font-bold text-red-600">{formatAmount(cust.overdueAmount).split(' ')[0]} Overdue</span> : <span className="font-semibold text-emerald-600">All Current</span>}
                               </div>
                             </div>
                           </div>
 
                           <div className="text-right shrink-0">
-                            <div className="text-[11px] font-extrabold text-red-600">
-                              {formatAmount(cust.overdueAmount).split(' ')[0]} <span className="text-[9px] font-semibold text-red-500">Overdue</span>
+                            <div className="text-[11px] font-black text-slate-900">
+                              {formatAmount(cust.totalReceivables).split(' ')[0]}
                             </div>
-                            <div className="text-[9px] font-semibold text-slate-400">
-                              Total: {formatAmount(cust.totalReceivables).split(' ')[0]}
-                            </div>
+                            <span className="text-[8.5px] font-bold text-slate-500 bg-slate-100 px-1 py-0.2 rounded border border-slate-200 inline-block mt-0.5">
+                              {cust.pctOverdue}% Risk
+                            </span>
                           </div>
                         </div>
                       ))
                     ) : (
-                      <div className="py-8 text-center text-xs text-slate-400 font-medium">No overdue customers</div>
+                      <div className="py-8 text-center text-xs text-slate-400 font-medium">No top customers</div>
                     )
                   )}
                 </div>
