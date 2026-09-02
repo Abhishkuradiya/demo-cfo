@@ -43,8 +43,24 @@ export async function GET(req: NextRequest) {
           'Invoices',
           'where=(Type=="ACCPAY" OR Type=="ACCPAYCRED")'
         );
-        if (Array.isArray(xeroBills) && xeroBills.length > 0) {
-          rawInvoicesList = xeroBills;
+        let xeroCreditNotes: any[] = [];
+        try {
+          xeroCreditNotes = await fetchXeroResource(
+            tokenInfo.accessToken,
+            tokenInfo.xeroTenantId,
+            'CreditNotes',
+            'where=(Type=="ACCPAYCRED")'
+          );
+        } catch (e) {
+          console.error('Failed to fetch CreditNotes resource:', e);
+        }
+
+        const combined = [
+          ...(Array.isArray(xeroBills) ? xeroBills : []),
+          ...(Array.isArray(xeroCreditNotes) ? xeroCreditNotes : [])
+        ];
+        if (combined.length > 0) {
+          rawInvoicesList = combined;
         }
       } catch (err: any) {
         console.error('Failed to fetch Xero ACCPAY bills & credit notes:', err.message);
@@ -167,7 +183,7 @@ export async function GET(req: NextRequest) {
       if (inv.daysOverdue <= 0) {
         currentNotDue += inv.amountDue;
       } else {
-        overdueBillsCount++;
+        if (inv.amountDue > 0) overdueBillsCount++;
         if (inv.daysOverdue <= 30) days1to30 += inv.amountDue;
         else if (inv.daysOverdue <= 60) days31to60 += inv.amountDue;
         else if (inv.daysOverdue <= 90) days61to90 += inv.amountDue;
@@ -218,11 +234,11 @@ export async function GET(req: NextRequest) {
 
     // Top Overdue Bills (Sorted by daysOverdue descending)
     const topOverdueBills = activePayables
-      .filter(inv => inv.daysOverdue > 0)
+      .filter(inv => inv.daysOverdue > 0 && inv.amountDue > 0)
       .sort((a, b) => b.daysOverdue - a.daysOverdue)
       .slice(0, 5);
 
-    // Vendor Aggregation Table
+    // Vendor Aggregation Table (Exact Ageing Bucket Netting)
     const vendorMap = new Map<string, {
       vendorName: string;
       totalBills: number;
@@ -257,14 +273,20 @@ export async function GET(req: NextRequest) {
       vendor.totalPayables += inv.amountDue;
       vendor.bills.push(inv);
 
-      if (inv.daysOverdue <= 0) {
-        vendor.currentNotDue += inv.amountDue;
-      } else {
+      if (inv.daysOverdue > 0 && inv.amountDue > 0) {
         vendor.overdueCount++;
-        if (inv.daysOverdue <= 30) vendor.days1to30 += inv.amountDue;
-        else if (inv.daysOverdue <= 60) vendor.days31to60 += inv.amountDue;
-        else if (inv.daysOverdue <= 90) vendor.days61to90 += inv.amountDue;
-        else vendor.days90Plus += inv.amountDue;
+      }
+
+      if (inv.ageingBucket === 'current') {
+        vendor.currentNotDue += inv.amountDue;
+      } else if (inv.ageingBucket === '1-30') {
+        vendor.days1to30 += inv.amountDue;
+      } else if (inv.ageingBucket === '31-60') {
+        vendor.days31to60 += inv.amountDue;
+      } else if (inv.ageingBucket === '61-90') {
+        vendor.days61to90 += inv.amountDue;
+      } else if (inv.ageingBucket === '90+') {
+        vendor.days90Plus += inv.amountDue;
       }
     });
 

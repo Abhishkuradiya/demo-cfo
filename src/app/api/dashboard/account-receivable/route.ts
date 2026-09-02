@@ -223,7 +223,7 @@ export async function GET(req: NextRequest) {
       .sort((a, b) => b.daysOverdue - a.daysOverdue)
       .slice(0, 5);
 
-    // Customer Aggregation Table
+    // Customer Aggregation Table (Exact Ageing Bucket Netting)
     const customerMap = new Map<string, {
       customerName: string;
       totalInvoices: number;
@@ -258,14 +258,20 @@ export async function GET(req: NextRequest) {
       cust.totalReceivables += inv.amountDue;
       cust.invoices.push(inv);
 
-      if (inv.daysOverdue <= 0) {
-        cust.currentNotDue += inv.amountDue;
-      } else {
+      if (inv.daysOverdue > 0 && inv.amountDue > 0) {
         cust.overdueCount++;
-        if (inv.daysOverdue <= 30) cust.days1to30 += inv.amountDue;
-        else if (inv.daysOverdue <= 60) cust.days31to60 += inv.amountDue;
-        else if (inv.daysOverdue <= 90) cust.days61to90 += inv.amountDue;
-        else cust.days90Plus += inv.amountDue;
+      }
+
+      if (inv.ageingBucket === 'current') {
+        cust.currentNotDue += inv.amountDue;
+      } else if (inv.ageingBucket === '1-30') {
+        cust.days1to30 += inv.amountDue;
+      } else if (inv.ageingBucket === '31-60') {
+        cust.days31to60 += inv.amountDue;
+      } else if (inv.ageingBucket === '61-90') {
+        cust.days61to90 += inv.amountDue;
+      } else if (inv.ageingBucket === '90+') {
+        cust.days90Plus += inv.amountDue;
       }
     });
 
