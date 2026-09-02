@@ -33,19 +33,9 @@ export async function GET(req: NextRequest) {
     }
     const currency = orgReport?.raw_data?.BaseCurrency || orgReport?.BaseCurrency || orgReport?.CurrencyCode || 'GBP';
 
-    // 2. Fetch Bills from PostgreSQL / Xero API
+    // 2. Fetch Bills from Xero API or Database
     let rawInvoicesList: any[] = [];
-    const pgInvoices = await db.getInvoices(tenantId);
-    if (Array.isArray(pgInvoices) && pgInvoices.length > 0) {
-      rawInvoicesList = pgInvoices;
-    } else {
-      const reportInvoices = await db.getReport(tenantId, 'Invoices');
-      if (Array.isArray(reportInvoices) && reportInvoices.length > 0) {
-        rawInvoicesList = reportInvoices;
-      }
-    }
-
-    if (rawInvoicesList.length === 0 && isConnected) {
+    if (isConnected) {
       try {
         const xeroBills = await fetchXeroResource(
           tokenInfo.accessToken,
@@ -54,12 +44,28 @@ export async function GET(req: NextRequest) {
           'where=(Type=="ACCPAY")'
         );
         if (Array.isArray(xeroBills) && xeroBills.length > 0) {
-          await db.saveCachedRecords(tenantId, 'invoices', xeroBills);
-          await db.saveReport(tenantId, 'Invoices', xeroBills);
-          rawInvoicesList = await db.getInvoices(tenantId);
+          rawInvoicesList = xeroBills;
         }
       } catch (err: any) {
-        console.error('Failed to fetch Xero bills:', err.message);
+        console.error('Failed to fetch Xero ACCPAY bills:', err.message);
+      }
+    }
+
+    if (rawInvoicesList.length === 0) {
+      const pgInvoices = await db.getInvoices(tenantId);
+      if (Array.isArray(pgInvoices) && pgInvoices.length > 0) {
+        rawInvoicesList = pgInvoices.filter((inv: any) => {
+          const t = (inv.Type || inv.type || '').toUpperCase();
+          return t === 'ACCPAY';
+        });
+      } else {
+        const reportInvoices = await db.getReport(tenantId, 'Invoices');
+        if (Array.isArray(reportInvoices) && reportInvoices.length > 0) {
+          rawInvoicesList = reportInvoices.filter((inv: any) => {
+            const t = (inv.Type || inv.type || '').toUpperCase();
+            return t === 'ACCPAY';
+          });
+        }
       }
     }
 
@@ -68,7 +74,7 @@ export async function GET(req: NextRequest) {
 
     // Filter strictly to Vendor Bills / Payables (ACCPAY) issued ON or BEFORE asOnDate
     const accpayBills = rawInvoicesList.filter((inv: any) => {
-      const t = (inv.Type || inv.type || 'ACCPAY').toUpperCase();
+      const t = (inv.Type || inv.type || '').toUpperCase();
       if (t !== 'ACCPAY') return false;
 
       const invDate = parseXeroDate(inv.Date || inv.invoice_date);
