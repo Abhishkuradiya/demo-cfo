@@ -542,27 +542,21 @@ export default function ConsistentAccountReceivablePage() {
       </div>
 
       {/* ========================================================================= */}
-      {/* INSTANT AGEING BUCKET DRILL MATRIX BAR */}
+      {/* 5 EXECUTIVE AGEING DRILL-DOWN FILTER CARDS */}
       {/* ========================================================================= */}
-      <div className="bg-white rounded-2xl border border-slate-200/80 p-4 shadow-2xs space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="h-6 w-6 rounded-lg bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600">
-              <Filter className="h-3.5 w-3.5" />
-            </div>
-            <div>
-              <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">Instant Ageing Bucket Drill Filter</h3>
-              <p className="text-[11px] text-slate-400 font-semibold">Click any bucket card below to filter the customer ledger instantly</p>
-            </div>
+      <div className="space-y-2">
+        <div className="flex items-center justify-between px-1">
+          <div className="flex items-center gap-1.5 text-xs font-extrabold text-slate-700 uppercase tracking-wider">
+            <Filter className="h-3.5 w-3.5 text-blue-600" />
+            <span>Ageing Portfolio Filter</span>
           </div>
-
           {selectedBucketFilter !== 'ALL' && (
             <button
               onClick={() => setSelectedBucketFilter('ALL')}
-              className="px-2.5 py-1 bg-blue-50 border border-blue-200 text-blue-700 rounded-lg text-xs font-bold hover:bg-blue-100 transition cursor-pointer flex items-center gap-1"
+              className="text-xs font-bold text-blue-600 hover:text-blue-800 transition cursor-pointer flex items-center gap-1 bg-blue-50 px-2.5 py-0.5 rounded-md border border-blue-200 shadow-2xs"
             >
-              <span>Showing: {selectedBucketFilter}</span>
-              <span className="text-blue-500 font-extrabold ml-1">✕ Reset</span>
+              <span>Showing: <strong>{selectedBucketFilter}</strong></span>
+              <span className="text-blue-600 font-black ml-1">✕ Reset Filter</span>
             </button>
           )}
         </div>
@@ -570,6 +564,35 @@ export default function ConsistentAccountReceivablePage() {
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
           {data?.ageingDistribution?.map((item: any) => {
             const isSelected = selectedBucketFilter === item.key;
+            
+            // Tailored theme styling per bucket
+            let themeStyles = "bg-blue-50/40 border-blue-200/80 text-blue-900 hover:bg-blue-50 hover:border-blue-300";
+            let badgeBg = "bg-blue-100 text-blue-700 border-blue-200";
+            let barColor = "bg-blue-600";
+            let iconDot = "bg-blue-600";
+
+            if (item.key === '1-30') {
+              themeStyles = "bg-amber-50/40 border-amber-200/80 text-amber-900 hover:bg-amber-50 hover:border-amber-300";
+              badgeBg = "bg-amber-100 text-amber-800 border-amber-200";
+              barColor = "bg-amber-500";
+              iconDot = "bg-amber-500";
+            } else if (item.key === '31-60') {
+              themeStyles = "bg-orange-50/40 border-orange-200/80 text-orange-900 hover:bg-orange-50 hover:border-orange-300";
+              badgeBg = "bg-orange-100 text-orange-800 border-orange-200";
+              barColor = "bg-orange-500";
+              iconDot = "bg-orange-500";
+            } else if (item.key === '61-90') {
+              themeStyles = "bg-rose-50/40 border-rose-200/80 text-rose-900 hover:bg-rose-50 hover:border-rose-300";
+              badgeBg = "bg-rose-100 text-rose-800 border-rose-200";
+              barColor = "bg-rose-500";
+              iconDot = "bg-rose-500";
+            } else if (item.key === '90+') {
+              themeStyles = "bg-red-50/50 border-red-250 text-red-950 hover:bg-red-50 hover:border-red-400";
+              badgeBg = "bg-red-100 text-red-800 border-red-200 font-extrabold";
+              barColor = "bg-red-600";
+              iconDot = "bg-red-600";
+            }
+
             return (
               <div 
                 key={item.key}
@@ -579,44 +602,48 @@ export default function ConsistentAccountReceivablePage() {
                   toast.info(`Filter updated: ${item.label}`);
                 }}
                 className={cn(
-                  "relative overflow-hidden p-3 rounded-xl border transition-all cursor-pointer flex flex-col justify-between space-y-2 group shadow-2xs",
+                  "p-3 rounded-xl border transition-all duration-200 cursor-pointer flex flex-col justify-between space-y-2.5 shadow-2xs group select-none",
+                  themeStyles,
                   isSelected
-                    ? "bg-slate-900 text-white border-slate-900 ring-2 ring-blue-500/40 shadow-md"
-                    : "bg-white border-slate-200/80 hover:border-slate-300 hover:shadow-xs"
+                    ? "ring-2 ring-blue-600 border-blue-600 shadow-md scale-[1.02] bg-white"
+                    : ""
                 )}
               >
-                {/* Top Indicator & Label */}
+                {/* Header: Dot + Label */}
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5 min-w-0">
-                    <div className="h-2.5 w-2.5 rounded-full shrink-0 shadow-2xs" style={{ backgroundColor: item.color }} />
-                    <span className={cn("text-[11.5px] font-extrabold truncate", isSelected ? "text-white" : "text-slate-700")}>
+                    <span className={cn("h-2.5 w-2.5 rounded-full shrink-0 shadow-2xs", iconDot)} />
+                    <span className="text-xs font-black tracking-tight truncate">
                       {item.label}
                     </span>
                   </div>
-                  {isSelected && <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 animate-ping shrink-0" />}
-                </div>
-
-                {/* Amount & Percentage */}
-                <div>
-                  <div className={cn("text-base font-black tracking-tight", isSelected ? "text-white" : "text-slate-900")}>
-                    {formatAmount(item.amount).split(' ')[0]}
-                  </div>
-                  <div className="flex items-center justify-between mt-0.5">
-                    <span className={cn("text-[10px] font-bold", isSelected ? "text-slate-300" : "text-slate-400")}>
-                      {item.pct}% of total
+                  {isSelected && (
+                    <span className="text-[10px] font-black uppercase tracking-wider px-1.5 py-0.2 rounded bg-blue-600 text-white shadow-2xs">
+                      Active
                     </span>
-                  </div>
+                  )}
                 </div>
 
-                {/* Mini Portfolio Proportion Progress Bar */}
-                <div className={cn("w-full h-1 rounded-full overflow-hidden mt-1", isSelected ? "bg-slate-800" : "bg-slate-100")}>
-                  <div 
-                    className="h-full rounded-full transition-all duration-500"
-                    style={{ 
-                      width: `${Math.max(parseFloat(item.pct || '0'), 3)}%`,
-                      backgroundColor: item.color 
-                    }} 
-                  />
+                {/* Amount */}
+                <div className="text-base font-black text-slate-900 tracking-tight">
+                  {formatAmount(item.amount).split(' ')[0]}
+                </div>
+
+                {/* Bottom Row: Percentage Badge + Proportion Bar */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-[10px] font-bold">
+                    <span className={cn("px-1.5 py-0.2 rounded border text-[9.5px]", badgeBg)}>
+                      {item.pct}% Share
+                    </span>
+                    <span className="text-slate-400 text-[9.5px]">Filter →</span>
+                  </div>
+
+                  <div className="w-full bg-slate-200/60 h-1 rounded-full overflow-hidden">
+                    <div 
+                      className={cn("h-full rounded-full transition-all duration-500", barColor)}
+                      style={{ width: `${Math.max(parseFloat(item.pct || '0'), 3)}%` }} 
+                    />
+                  </div>
                 </div>
               </div>
             );
