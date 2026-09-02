@@ -35,24 +35,47 @@ import { FormattedDatePicker, formatToDDMMYYYY } from '@/components/ui/formatted
 
 const ReactECharts = dynamic(() => import('echarts-for-react'), { ssr: false });
 
-// Clean Mini Sparkline
-function StripeSparkline({ color, height = 36 }: { color: string; height?: number }) {
+// Dynamic SVG Sparkline Component driven by real monthly metrics
+const DynamicSparkline = ({ data = [], color = '#2563eb' }: { data?: number[]; color?: string }) => {
   const cleanColor = color.replace('#', '');
+  const width = 160;
+  const height = 36;
+  const padding = 8; // Top & bottom safety padding so stroke curve never flat-clips!
+
+  const pointsList = data.length >= 2 ? data : [10, 18, 14, 25, 20, 30];
+  const minVal = Math.min(...pointsList);
+  const maxVal = Math.max(...pointsList);
+  const range = maxVal - minVal || 1;
+
+  const coords = pointsList.map((val, idx) => {
+    const x = (idx / (pointsList.length - 1)) * width;
+    const norm = (val - minVal) / range;
+    const y = height - padding - norm * (height - 2 * padding);
+    return { x: Number(x.toFixed(1)), y: Number(y.toFixed(1)) };
+  });
+
+  let pathD = `M ${coords[0].x},${coords[0].y}`;
+  for (let i = 0; i < coords.length - 1; i++) {
+    const p0 = coords[i];
+    const p1 = coords[i + 1];
+    const cpX = (p0.x + p1.x) / 2;
+    pathD += ` C ${cpX},${p0.y} ${cpX},${p1.y} ${p1.x},${p1.y}`;
+  }
+
+  const fillD = `${pathD} L ${width},${height} L 0,${height} Z`;
+
   return (
-    <div className="w-full overflow-hidden relative rounded-b-xl" style={{ height }}>
-      <svg viewBox="0 0 160 40" className="w-full h-full block" preserveAspectRatio="none">
+    <div className="w-full h-9 overflow-hidden rounded-b-xl">
+      <svg className="w-full h-full block" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
         <defs>
-          <linearGradient id={`grad-app-${cleanColor}`} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={color} stopOpacity="0.30" />
+          <linearGradient id={`grad-dyn-${cleanColor}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity="0.32" />
             <stop offset="100%" stopColor={color} stopOpacity="0.0" />
           </linearGradient>
         </defs>
+        <path d={fillD} fill={`url(#grad-dyn-${cleanColor})`} />
         <path
-          d="M 0 32 C 30 30, 55 33, 80 28 C 105 24, 120 14, 140 15 C 150 16, 156 19, 160 22 L 160 40 L 0 40 Z"
-          fill={`url(#grad-app-${cleanColor})`}
-        />
-        <path
-          d="M 0 32 C 30 30, 55 33, 80 28 C 105 24, 120 14, 140 15 C 150 16, 156 19, 160 22"
+          d={pathD}
           fill="none"
           stroke={color}
           strokeWidth="2.2"
@@ -62,7 +85,7 @@ function StripeSparkline({ color, height = 36 }: { color: string; height?: numbe
       </svg>
     </div>
   );
-}
+};
 
 // Avatar Initials Generator
 function StripeAvatar({ name }: { name: string }) {
@@ -304,7 +327,7 @@ export default function ConsistentAccountReceivablePage() {
     return data.allReceivableInvoices.filter((inv: any) => inv.daysOverdue > 0).sort((a: any, b: any) => b.daysOverdue - a.daysOverdue);
   }, [data]);
 
-  // Key KPI Figures
+  // Key KPI Figures & Dynamic Trend Series for 4 KPI Cards
   const totalReceivablesVal = data?.summary?.totalReceivables?.amount || 0;
   const currentNotDueVal = data?.summary?.currentNotDue?.amount || 0;
   const overdueTotalVal = (data?.summary?.days1to30?.amount || 0) + 
@@ -313,6 +336,30 @@ export default function ConsistentAccountReceivablePage() {
                           (data?.summary?.days90Plus?.amount || 0);
   const highRiskVal = data?.summary?.days90Plus?.amount || 0;
   const overdueCountVal = data?.summary?.overdueInvoices?.count || 0;
+
+  const totalReceivablesTrend = useMemo(() => {
+    const s = data?.trend?.series;
+    if (!s || !Array.isArray(s.current)) return [12000, 18000, 14000, 25000, 20000, 32000];
+    return s.current.map((v: number, i: number) => 
+      v + (s.days1to30[i] || 0) + (s.days31to60[i] || 0) + (s.days61to90[i] || 0) + (s.days90Plus[i] || 0)
+    );
+  }, [data]);
+
+  const currentNotDueTrend = useMemo(() => {
+    return data?.trend?.series?.current || [5000, 8000, 7000, 12000, 9000, 15000];
+  }, [data]);
+
+  const overdueTotalTrend = useMemo(() => {
+    const s = data?.trend?.series;
+    if (!s || !Array.isArray(s.days1to30)) return [8000, 12000, 9000, 18000, 15000, 22000];
+    return s.days1to30.map((v: number, i: number) => 
+      v + (s.days31to60[i] || 0) + (s.days61to90[i] || 0) + (s.days90Plus[i] || 0)
+    );
+  }, [data]);
+
+  const days90PlusTrend = useMemo(() => {
+    return data?.trend?.series?.days90Plus || [3000, 5000, 4000, 8000, 7000, 10000];
+  }, [data]);
 
   // Cash Acceleration Simulator Math
   const simulatedCashUnlocked = (overdueTotalVal * (targetCollectionPct / 100));
@@ -422,7 +469,7 @@ export default function ConsistentAccountReceivablePage() {
 
 
       {/* ========================================================================= */}
-      {/* 4 PRIMARY METRIC CARDS */}
+      {/* 4 PRIMARY METRIC CARDS WITH DYNAMIC SPARK LINES */}
       {/* ========================================================================= */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         
@@ -435,7 +482,7 @@ export default function ConsistentAccountReceivablePage() {
             toast.info('Showing all receivables');
           }}
           className={cn(
-            "bg-white rounded-xl border p-4 shadow-2xs hover:border-emerald-400 transition-all cursor-pointer flex flex-col justify-between group",
+            "bg-white rounded-xl border p-4 shadow-2xs hover:border-emerald-400 transition-all cursor-pointer flex flex-col justify-between group overflow-hidden relative",
             selectedBucketFilter === 'ALL' ? "border-emerald-500 ring-1 ring-emerald-500/20" : "border-slate-200/80"
           )}
         >
@@ -450,7 +497,7 @@ export default function ConsistentAccountReceivablePage() {
             <span className="text-[11px] text-emerald-600 font-semibold mt-1 block">Click to view all receivables →</span>
           </div>
           <div className="mt-2 -mx-4 -mb-4">
-            <StripeSparkline color="#10b981" />
+            <DynamicSparkline data={totalReceivablesTrend} color="#10b981" />
           </div>
         </div>
 
@@ -462,7 +509,7 @@ export default function ConsistentAccountReceivablePage() {
             toast.info('Filtered: Current (Not Due) Receivables');
           }}
           className={cn(
-            "bg-white rounded-xl border p-4 shadow-2xs hover:border-blue-400 transition-all cursor-pointer flex flex-col justify-between group",
+            "bg-white rounded-xl border p-4 shadow-2xs hover:border-blue-400 transition-all cursor-pointer flex flex-col justify-between group overflow-hidden relative",
             selectedBucketFilter === 'current' ? "border-blue-500 ring-1 ring-blue-500/20" : "border-slate-200/80"
           )}
         >
@@ -479,7 +526,7 @@ export default function ConsistentAccountReceivablePage() {
             </span>
           </div>
           <div className="mt-2 -mx-4 -mb-4">
-            <StripeSparkline color="#2563eb" />
+            <DynamicSparkline data={currentNotDueTrend} color="#2563eb" />
           </div>
         </div>
 
@@ -491,7 +538,7 @@ export default function ConsistentAccountReceivablePage() {
             toast.info('Filtered: All Overdue Invoices');
           }}
           className={cn(
-            "bg-white rounded-xl border p-4 shadow-2xs hover:border-amber-400 transition-all cursor-pointer flex flex-col justify-between group",
+            "bg-white rounded-xl border p-4 shadow-2xs hover:border-amber-400 transition-all cursor-pointer flex flex-col justify-between group overflow-hidden relative",
             activeTab === 'overdue' ? "border-amber-500 ring-1 ring-amber-500/20" : "border-slate-200/80"
           )}
         >
@@ -508,7 +555,7 @@ export default function ConsistentAccountReceivablePage() {
             </span>
           </div>
           <div className="mt-2 -mx-4 -mb-4">
-            <StripeSparkline color="#f59e0b" />
+            <DynamicSparkline data={overdueTotalTrend} color="#f59e0b" />
           </div>
         </div>
 
@@ -520,7 +567,7 @@ export default function ConsistentAccountReceivablePage() {
             toast.warning('Filtered: High Risk 90+ Days Overdue');
           }}
           className={cn(
-            "bg-white rounded-xl border p-4 shadow-2xs hover:border-red-500 transition-all cursor-pointer flex flex-col justify-between group",
+            "bg-white rounded-xl border p-4 shadow-2xs hover:border-red-500 transition-all cursor-pointer flex flex-col justify-between group overflow-hidden relative",
             selectedBucketFilter === '90+' ? "border-red-500 ring-1 ring-red-500/20" : "border-slate-200/80"
           )}
         >
@@ -537,7 +584,7 @@ export default function ConsistentAccountReceivablePage() {
             </span>
           </div>
           <div className="mt-2 -mx-4 -mb-4">
-            <StripeSparkline color="#ef4444" />
+            <DynamicSparkline data={days90PlusTrend} color="#ef4444" />
           </div>
         </div>
       </div>

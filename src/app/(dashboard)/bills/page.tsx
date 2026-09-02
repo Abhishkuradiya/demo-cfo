@@ -76,31 +76,57 @@ const StripeAvatar = ({ name }: { name: string }) => {
   );
 };
 
-// SVG Sparkline Component
-const StripeSparkline = ({ color = '#2563eb' }: { color?: string }) => (
-  <div className="w-full h-9 overflow-hidden rounded-b-xl">
-    <svg className="w-full h-full block" viewBox="0 0 100 35" preserveAspectRatio="none">
-      <defs>
-        <linearGradient id={`grad-${color.replace('#', '')}`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity="0.30" />
-          <stop offset="100%" stopColor={color} stopOpacity="0.0" />
-        </linearGradient>
-      </defs>
-      <path
-        d="M 0,30 C 20,28 35,31 50,27 C 65,23 75,13 86,14 C 94,15 98,18 100,21 L 100,35 L 0,35 Z"
-        fill={`url(#grad-${color.replace('#', '')})`}
-      />
-      <path
-        d="M 0,30 C 20,28 35,31 50,27 C 65,23 75,13 86,14 C 94,15 98,18 100,21"
-        fill="none"
-        stroke={color}
-        strokeWidth="2.2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  </div>
-);
+// Dynamic SVG Sparkline Component driven by real monthly metrics
+const DynamicSparkline = ({ data = [], color = '#2563eb' }: { data?: number[]; color?: string }) => {
+  const cleanColor = color.replace('#', '');
+  const width = 160;
+  const height = 36;
+  const padding = 8; // Top & bottom safety padding so stroke curve never flat-clips!
+
+  const pointsList = data.length >= 2 ? data : [10, 18, 14, 25, 20, 30];
+  const minVal = Math.min(...pointsList);
+  const maxVal = Math.max(...pointsList);
+  const range = maxVal - minVal || 1;
+
+  const coords = pointsList.map((val, idx) => {
+    const x = (idx / (pointsList.length - 1)) * width;
+    const norm = (val - minVal) / range;
+    const y = height - padding - norm * (height - 2 * padding);
+    return { x: Number(x.toFixed(1)), y: Number(y.toFixed(1)) };
+  });
+
+  let pathD = `M ${coords[0].x},${coords[0].y}`;
+  for (let i = 0; i < coords.length - 1; i++) {
+    const p0 = coords[i];
+    const p1 = coords[i + 1];
+    const cpX = (p0.x + p1.x) / 2;
+    pathD += ` C ${cpX},${p0.y} ${cpX},${p1.y} ${p1.x},${p1.y}`;
+  }
+
+  const fillD = `${pathD} L ${width},${height} L 0,${height} Z`;
+
+  return (
+    <div className="w-full h-9 overflow-hidden rounded-b-xl">
+      <svg className="w-full h-full block" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
+        <defs>
+          <linearGradient id={`grad-dyn-${cleanColor}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity="0.32" />
+            <stop offset="100%" stopColor={color} stopOpacity="0.0" />
+          </linearGradient>
+        </defs>
+        <path d={fillD} fill={`url(#grad-dyn-${cleanColor})`} />
+        <path
+          d={pathD}
+          fill="none"
+          stroke={color}
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </div>
+  );
+};
 
 export default function AccountPayableDashboard() {
   const [loading, setLoading] = useState<boolean>(true);
@@ -228,6 +254,30 @@ export default function AccountPayableDashboard() {
                           (data?.summary?.days90Plus?.amount || 0);
   const highRiskVal = data?.summary?.days90Plus?.amount || 0;
   const overdueCountVal = data?.summary?.overdueBills?.count || 0;
+
+  const totalPayablesTrend = useMemo(() => {
+    const s = data?.trend?.series;
+    if (!s || !Array.isArray(s.current)) return [12000, 18000, 14000, 25000, 20000, 32000];
+    return s.current.map((v: number, i: number) => 
+      v + (s.days1to30[i] || 0) + (s.days31to60[i] || 0) + (s.days61to90[i] || 0) + (s.days90Plus[i] || 0)
+    );
+  }, [data]);
+
+  const currentNotDueTrend = useMemo(() => {
+    return data?.trend?.series?.current || [5000, 8000, 7000, 12000, 9000, 15000];
+  }, [data]);
+
+  const overdueTotalTrend = useMemo(() => {
+    const s = data?.trend?.series;
+    if (!s || !Array.isArray(s.days1to30)) return [8000, 12000, 9000, 18000, 15000, 22000];
+    return s.days1to30.map((v: number, i: number) => 
+      v + (s.days31to60[i] || 0) + (s.days61to90[i] || 0) + (s.days90Plus[i] || 0)
+    );
+  }, [data]);
+
+  const days90PlusTrend = useMemo(() => {
+    return data?.trend?.series?.days90Plus || [3000, 5000, 4000, 8000, 7000, 10000];
+  }, [data]);
 
   // ECharts Options: Ageing Donut Chart
   const doughnutOption = useMemo(() => {
@@ -469,7 +519,7 @@ export default function AccountPayableDashboard() {
       </div>
 
       {/* ========================================================================= */}
-      {/* 4 PRIMARY METRIC CARDS */}
+      {/* 4 PRIMARY METRIC CARDS WITH DYNAMIC SPARK LINES */}
       {/* ========================================================================= */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         
@@ -497,7 +547,7 @@ export default function AccountPayableDashboard() {
             <span className="text-[11px] text-emerald-600 font-semibold mt-1 block">Click to view all payables →</span>
           </div>
           <div className="mt-2 -mx-4 -mb-4">
-            <StripeSparkline color="#10b981" />
+            <DynamicSparkline data={totalPayablesTrend} color="#10b981" />
           </div>
         </div>
 
@@ -526,7 +576,7 @@ export default function AccountPayableDashboard() {
             </span>
           </div>
           <div className="mt-2 -mx-4 -mb-4">
-            <StripeSparkline color="#2563eb" />
+            <DynamicSparkline data={currentNotDueTrend} color="#2563eb" />
           </div>
         </div>
 
@@ -554,7 +604,7 @@ export default function AccountPayableDashboard() {
             </span>
           </div>
           <div className="mt-2 -mx-4 -mb-4">
-            <StripeSparkline color="#f59e0b" />
+            <DynamicSparkline data={overdueTotalTrend} color="#f59e0b" />
           </div>
         </div>
 
@@ -583,7 +633,7 @@ export default function AccountPayableDashboard() {
             </span>
           </div>
           <div className="mt-2 -mx-4 -mb-4">
-            <StripeSparkline color="#ef4444" />
+            <DynamicSparkline data={days90PlusTrend} color="#ef4444" />
           </div>
         </div>
       </div>
