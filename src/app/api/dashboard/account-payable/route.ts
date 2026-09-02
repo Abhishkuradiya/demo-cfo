@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
     }
     const currency = orgReport?.raw_data?.BaseCurrency || orgReport?.BaseCurrency || orgReport?.CurrencyCode || 'GBP';
 
-    // 2. Fetch Bills from Xero API or Database
+    // 2. Fetch Bills & Credit Notes from Xero API or Database
     let rawInvoicesList: any[] = [];
     if (isConnected) {
       try {
@@ -41,13 +41,13 @@ export async function GET(req: NextRequest) {
           tokenInfo.accessToken,
           tokenInfo.xeroTenantId,
           'Invoices',
-          'where=(Type=="ACCPAY")'
+          'where=(Type=="ACCPAY" OR Type=="ACCPAYCRED")'
         );
         if (Array.isArray(xeroBills) && xeroBills.length > 0) {
           rawInvoicesList = xeroBills;
         }
       } catch (err: any) {
-        console.error('Failed to fetch Xero ACCPAY bills:', err.message);
+        console.error('Failed to fetch Xero ACCPAY bills & credit notes:', err.message);
       }
     }
 
@@ -56,14 +56,14 @@ export async function GET(req: NextRequest) {
       if (Array.isArray(pgInvoices) && pgInvoices.length > 0) {
         rawInvoicesList = pgInvoices.filter((inv: any) => {
           const t = (inv.Type || inv.type || '').toUpperCase();
-          return t === 'ACCPAY';
+          return t === 'ACCPAY' || t === 'ACCPAYCRED';
         });
       } else {
         const reportInvoices = await db.getReport(tenantId, 'Invoices');
         if (Array.isArray(reportInvoices) && reportInvoices.length > 0) {
           rawInvoicesList = reportInvoices.filter((inv: any) => {
             const t = (inv.Type || inv.type || '').toUpperCase();
-            return t === 'ACCPAY';
+            return t === 'ACCPAY' || t === 'ACCPAYCRED';
           });
         }
       }
@@ -72,10 +72,13 @@ export async function GET(req: NextRequest) {
     const asOnDate = new Date(asOnDateStr);
     asOnDate.setHours(23, 59, 59, 999);
 
-    // Filter strictly to Vendor Bills / Payables (ACCPAY) issued ON or BEFORE asOnDate
+    // Filter strictly to Vendor Bills / Credit Notes issued ON or BEFORE asOnDate (Excluding DELETED, VOIDED, DRAFT)
     const accpayBills = rawInvoicesList.filter((inv: any) => {
       const t = (inv.Type || inv.type || '').toUpperCase();
-      if (t !== 'ACCPAY') return false;
+      if (t !== 'ACCPAY' && t !== 'ACCPAYCRED') return false;
+
+      const st = (inv.Status || inv.status || '').toUpperCase();
+      if (st === 'DELETED' || st === 'VOIDED' || st === 'DRAFT') return false;
 
       const invDate = parseXeroDate(inv.Date || inv.invoice_date);
       if (invDate && invDate.getTime() > asOnDate.getTime()) {
@@ -84,24 +87,29 @@ export async function GET(req: NextRequest) {
       return true;
     });
 
-    // Map & process bill ageing
+    // Map & process bill ageing (including negative balances for credit notes)
     const processedBills = accpayBills.map((inv: any) => {
       const st = (inv.Status || inv.status || 'DRAFT').toUpperCase();
+      const t = (inv.Type || inv.type || 'ACCPAY').toUpperCase();
       const invDate = parseXeroDate(inv.Date || inv.invoice_date);
-      const invDueDate = parseXeroDate(inv.DueDate || inv.due_date);
+      const invDueDate = parseXeroDate(inv.DueDate || inv.due_date || inv.Date || inv.invoice_date);
       const total = parseFloat(inv.Total || inv.total || 0);
-      const amountDue = parseFloat(inv.AmountDue || inv.amount_due || (st === 'PAID' ? 0 : total));
+      const rawAmountDue = parseFloat(inv.AmountDue || inv.amount_due || (st === 'PAID' ? 0 : total));
       const amountPaid = parseFloat(inv.AmountPaid || inv.amount_paid || (st === 'PAID' ? total : 0));
 
+      const isCreditNote = t === 'ACCPAYCRED' || t === 'CREDITNOTE';
+      const amountDue = isCreditNote ? -Math.abs(rawAmountDue) : rawAmountDue;
+
       let displayStatus = st;
-      if (st === 'AUTHORISED') displayStatus = 'AWAITING PAYMENT';
+      if (isCreditNote) displayStatus = 'CREDIT NOTE';
+      else if (st === 'AUTHORISED') displayStatus = 'AWAITING PAYMENT';
       else if (st === 'SUBMITTED') displayStatus = 'AWAITING APPROVAL';
 
       // Ageing calculation relative to asOnDate
       let daysOverdue = 0;
       let ageingBucket: 'current' | '1-30' | '31-60' | '61-90' | '90+' = 'current';
 
-      if (invDueDate && amountDue > 0 && st !== 'PAID' && st !== 'DRAFT') {
+      if (invDueDate && Math.abs(amountDue) > 0.001 && st !== 'PAID' && st !== 'DRAFT' && st !== 'DELETED' && st !== 'VOIDED') {
         const diffMs = asOnDate.getTime() - invDueDate.getTime();
         const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
         if (diffDays > 0) {
@@ -115,15 +123,15 @@ export async function GET(req: NextRequest) {
 
       return {
         id: inv.InvoiceID || inv.external_id || inv.id || inv.InvoiceNumber || inv.invoice_number,
-        billNumber: inv.InvoiceNumber || inv.invoice_number || '—',
+        billNumber: inv.InvoiceNumber || inv.invoice_number || (isCreditNote ? 'CN-CREDIT' : '—'),
         vendorName: inv.Contact?.Name || inv.ContactName || inv.contact_name || 'Unknown Vendor',
         vendorId: inv.Contact?.ContactID || inv.contact_id || '',
         status: displayStatus,
         rawStatus: st,
-        type: 'ACCPAY',
+        type: t,
         date: invDate ? invDate.toISOString() : null,
         dueDate: invDueDate ? invDueDate.toISOString() : null,
-        total,
+        total: isCreditNote ? -Math.abs(total) : total,
         amountDue,
         amountPaid,
         daysOverdue,
@@ -142,8 +150,8 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    // Unpaid & Active Payables (for Ageing calculations)
-    const activePayables = processedBills.filter(inv => inv.amountDue > 0 && inv.rawStatus !== 'PAID' && inv.rawStatus !== 'VOIDED');
+    // Unpaid & Active Payables (Including negative credit notes, excluding PAID, VOIDED, DELETED, DRAFT)
+    const activePayables = processedBills.filter(inv => Math.abs(inv.amountDue) > 0.001 && inv.rawStatus !== 'PAID' && inv.rawStatus !== 'VOIDED' && inv.rawStatus !== 'DELETED' && inv.rawStatus !== 'DRAFT');
 
     // KPI Summary Calculations
     let totalPayables = 0;

@@ -28,9 +28,12 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { FormattedDatePicker } from '@/components/ui/formatted-date-picker';
 
-// Standardized Currency Formatter
+// Standardized Currency Formatter with Credit Note / Negative Balance Support
 const formatAmount = (val: number, currencyStr: string = 'GBP') => {
   const sym = currencyStr === 'USD' ? '$' : currencyStr === 'EUR' ? '€' : '£';
+  if (val < 0) {
+    return `(${sym}${Math.abs(val).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`;
+  }
   return `${sym}${val.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
@@ -979,22 +982,22 @@ export default function AccountPayableDashboard() {
                             {formatAmount(vendor.totalPayables).split(' ')[0]}
                           </td>
                           <td className="py-2.5 px-3 text-right text-slate-500">
-                            {vendor.currentNotDue > 0 ? formatAmount(vendor.currentNotDue).split(' ')[0] : '—'}
+                            {Math.abs(vendor.currentNotDue) > 0.001 ? formatAmount(vendor.currentNotDue).split(' ')[0] : '—'}
                           </td>
-                          <td className="py-2.5 px-3 text-right text-amber-600 font-semibold">
-                            {vendor.days1to30 > 0 ? formatAmount(vendor.days1to30).split(' ')[0] : '—'}
+                          <td className={cn("py-2.5 px-3 text-right font-semibold", vendor.days1to30 < 0 ? "text-emerald-600 font-bold" : "text-amber-600")}>
+                            {Math.abs(vendor.days1to30) > 0.001 ? formatAmount(vendor.days1to30).split(' ')[0] : '—'}
                           </td>
-                          <td className="py-2.5 px-3 text-right text-orange-600 font-semibold">
-                            {vendor.days31to60 > 0 ? formatAmount(vendor.days31to60).split(' ')[0] : '—'}
+                          <td className={cn("py-2.5 px-3 text-right font-semibold", vendor.days31to60 < 0 ? "text-emerald-600 font-bold" : "text-orange-600")}>
+                            {Math.abs(vendor.days31to60) > 0.001 ? formatAmount(vendor.days31to60).split(' ')[0] : '—'}
                           </td>
-                          <td className="py-2.5 px-3 text-right text-red-500 font-semibold">
-                            {vendor.days61to90 > 0 ? formatAmount(vendor.days61to90).split(' ')[0] : '—'}
+                          <td className={cn("py-2.5 px-3 text-right font-semibold", vendor.days61to90 < 0 ? "text-emerald-600 font-bold" : "text-red-500")}>
+                            {Math.abs(vendor.days61to90) > 0.001 ? formatAmount(vendor.days61to90).split(' ')[0] : '—'}
                           </td>
-                          <td className="py-2.5 px-3 text-right text-red-700 font-bold">
-                            {vendor.days90Plus > 0 ? formatAmount(vendor.days90Plus).split(' ')[0] : '—'}
+                          <td className={cn("py-2.5 px-3 text-right font-bold", vendor.days90Plus < 0 ? "text-emerald-600" : "text-red-700")}>
+                            {Math.abs(vendor.days90Plus) > 0.001 ? formatAmount(vendor.days90Plus).split(' ')[0] : '—'}
                           </td>
-                          <td className="py-2.5 px-3 text-right font-black text-red-600">
-                            {totalOverdueVal > 0 ? formatAmount(totalOverdueVal).split(' ')[0] : '—'}
+                          <td className={cn("py-2.5 px-3 text-right font-black", totalOverdueVal < 0 ? "text-emerald-600" : "text-red-600")}>
+                            {Math.abs(totalOverdueVal) > 0.001 ? formatAmount(totalOverdueVal).split(' ')[0] : '—'}
                           </td>
                           <td className="py-2.5 px-3 text-right">
                             <span className={cn(

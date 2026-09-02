@@ -1040,11 +1040,11 @@ export default function ConsistentAccountReceivablePage() {
                         </td>
                         <td className="py-2.5 px-3 text-center font-semibold text-slate-700">{cust.totalInvoices}</td>
                         <td className="py-2.5 px-3 text-right font-extrabold text-slate-900">{formatAmount(cust.totalReceivables).split(' ')[0]}</td>
-                        <td className="py-2.5 px-3 text-right font-medium text-slate-600">{cust.currentNotDue > 0 ? formatAmount(cust.currentNotDue).split(' ')[0] : '—'}</td>
-                        <td className="py-2.5 px-3 text-right font-medium text-amber-600">{cust.days1to30 > 0 ? formatAmount(cust.days1to30).split(' ')[0] : '—'}</td>
-                        <td className="py-2.5 px-3 text-right font-medium text-orange-600">{cust.days31to60 > 0 ? formatAmount(cust.days31to60).split(' ')[0] : '—'}</td>
-                        <td className="py-2.5 px-3 text-right font-medium text-rose-600">{cust.days61to90 > 0 ? formatAmount(cust.days61to90).split(' ')[0] : '—'}</td>
-                        <td className="py-2.5 px-3 text-right font-extrabold text-red-700">{cust.days90Plus > 0 ? formatAmount(cust.days90Plus).split(' ')[0] : '—'}</td>
+                        <td className="py-2.5 px-3 text-right font-medium text-slate-600">{Math.abs(cust.currentNotDue) > 0.001 ? formatAmount(cust.currentNotDue).split(' ')[0] : '—'}</td>
+                        <td className={cn("py-2.5 px-3 text-right font-medium", cust.days1to30 < 0 ? "text-emerald-600 font-bold" : "text-amber-600")}>{Math.abs(cust.days1to30) > 0.001 ? formatAmount(cust.days1to30).split(' ')[0] : '—'}</td>
+                        <td className={cn("py-2.5 px-3 text-right font-medium", cust.days31to60 < 0 ? "text-emerald-600 font-bold" : "text-orange-600")}>{Math.abs(cust.days31to60) > 0.001 ? formatAmount(cust.days31to60).split(' ')[0] : '—'}</td>
+                        <td className={cn("py-2.5 px-3 text-right font-medium", cust.days61to90 < 0 ? "text-emerald-600 font-bold" : "text-rose-600")}>{Math.abs(cust.days61to90) > 0.001 ? formatAmount(cust.days61to90).split(' ')[0] : '—'}</td>
+                        <td className={cn("py-2.5 px-3 text-right font-extrabold", cust.days90Plus < 0 ? "text-emerald-600 font-bold" : "text-red-700")}>{Math.abs(cust.days90Plus) > 0.001 ? formatAmount(cust.days90Plus).split(' ')[0] : '—'}</td>
                         <td className="py-2.5 px-3 text-center">
                           <span className={cn(
                             "px-2 py-0.5 rounded text-[10px] font-bold",
