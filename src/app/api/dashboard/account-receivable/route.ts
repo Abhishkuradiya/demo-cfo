@@ -64,14 +64,20 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Filter strictly to Sales Invoices / Receivables (ACCREC)
-    const accrecInvoices = rawInvoicesList.filter((inv: any) => {
-      const t = (inv.Type || inv.type || 'ACCREC').toUpperCase();
-      return t === 'ACCREC';
-    });
-
     const asOnDate = new Date(asOnDateStr);
     asOnDate.setHours(23, 59, 59, 999);
+
+    // Filter strictly to Sales Invoices / Receivables (ACCREC) issued ON or BEFORE asOnDate
+    const accrecInvoices = rawInvoicesList.filter((inv: any) => {
+      const t = (inv.Type || inv.type || 'ACCREC').toUpperCase();
+      if (t !== 'ACCREC') return false;
+
+      const invDate = parseXeroDate(inv.Date || inv.invoice_date);
+      if (invDate && invDate.getTime() > asOnDate.getTime()) {
+        return false; // Exclude invoices issued after selected asOnDate
+      }
+      return true;
+    });
 
     // Map & process invoice ageing
     const processedInvoices = accrecInvoices.map((inv: any) => {

@@ -90,7 +90,10 @@ function StripeAvatar({ name }: { name: string }) {
 }
 
 export default function ConsistentAccountReceivablePage() {
-  const [asOnDate, setAsOnDate] = useState<string>('2026-08-31');
+  const [asOnDate, setAsOnDate] = useState<string>(() => {
+    const today = new Date();
+    return today.toISOString().split('T')[0];
+  });
   const [loading, setLoading] = useState<boolean>(true);
   const [data, setData] = useState<any>(null);
 
