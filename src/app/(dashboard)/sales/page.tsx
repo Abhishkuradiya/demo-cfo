@@ -15,6 +15,7 @@ import GrossMarginAnalysisPanel from '@/components/sales/GrossMarginAnalysisPane
 import InvoicesBreakdownPanel from '@/components/sales/InvoicesBreakdownPanel';
 import AccountReceivableBreakdownPanel from '@/components/sales/AccountReceivableBreakdownPanel';
 import CustomerConcentrationPanel from '@/components/sales/CustomerConcentrationPanel';
+import ProductBreakdownPanel from '@/components/sales/ProductBreakdownPanel';
 import {
   Plus,
   ChevronDown,
@@ -205,6 +206,7 @@ export default function SalesDashboardPage() {
   const [isInvoicesPanelOpen, setIsInvoicesPanelOpen] = useState<boolean>(false);
   const [isARPanelOpen, setIsARPanelOpen] = useState<boolean>(false);
   const [isCustomerConcentrationOpen, setIsCustomerConcentrationOpen] = useState<boolean>(false);
+  const [isProductBreakdownOpen, setIsProductBreakdownOpen] = useState<boolean>(false);
   const [revenueBreakdownConfig, setRevenueBreakdownConfig] = useState<{
     isOpen: boolean;
     title: string;
@@ -1544,7 +1546,11 @@ export default function SalesDashboardPage() {
                       const shareVal = prod.sharePct !== undefined ? prod.sharePct : (totalRev > 0 ? ((prod.revenue / totalRev) * 100).toFixed(1) : '0.0');
 
                       return (
-                        <tr key={itemIdx} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/50 transition duration-150">
+                        <tr
+                          key={itemIdx}
+                          onClick={() => setIsProductBreakdownOpen(true)}
+                          className="hover:bg-slate-50/80 dark:hover:bg-slate-800/50 transition duration-150 cursor-pointer"
+                        >
                           {/* Product Rank & Name */}
                           <td className="py-2 font-bold text-slate-800 dark:text-slate-200 pl-1" title={prod.name}>
                             <div className="flex items-center gap-1.5 min-w-0">
@@ -1605,11 +1611,7 @@ export default function SalesDashboardPage() {
 
           <button
             type="button"
-            onClick={() => setRevenueBreakdownConfig({
-              isOpen: true,
-              title: "Products & Services Breakdown",
-              totalRevenue: snapshot?.totalRevenue?.value || 0
-            })}
+            onClick={() => setIsProductBreakdownOpen(true)}
             className="text-[11px] font-extrabold text-blue-600 hover:text-blue-700 hover:underline mt-4 inline-flex items-center gap-1 self-start cursor-pointer bg-transparent border-0 p-0"
           >
             <span>View All Products & Services</span>
@@ -3154,6 +3156,14 @@ export default function SalesDashboardPage() {
       <CustomerConcentrationPanel
         isOpen={isCustomerConcentrationOpen}
         onClose={() => setIsCustomerConcentrationOpen(false)}
+        salesData={salesData}
+        formatAmount={formatAmount}
+      />
+
+      <ProductBreakdownPanel
+        isOpen={isProductBreakdownOpen}
+        onClose={() => setIsProductBreakdownOpen(false)}
+        products={salesData?.topProducts || []}
         salesData={salesData}
         formatAmount={formatAmount}
       />
