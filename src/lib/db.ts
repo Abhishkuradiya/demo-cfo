@@ -306,12 +306,35 @@ const initPgTables = async () => {
       );
     `);
 
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS account_transactions (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        account_code VARCHAR(50) NOT NULL,
+        account_name VARCHAR(255),
+        date TIMESTAMP NOT NULL,
+        source VARCHAR(100) NOT NULL,
+        source_id VARCHAR(255),
+        description TEXT,
+        reference VARCHAR(255),
+        currency VARCHAR(10) DEFAULT 'GBP',
+        debit DECIMAL DEFAULT 0,
+        credit DECIMAL DEFAULT 0,
+        debit_gbp DECIMAL DEFAULT 0,
+        credit_gbp DECIMAL DEFAULT 0,
+        running_balance DECIMAL DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
     // Alter table to add currency, invoice_date, contact_name, due_date, and last_synced_at if they don't exist
     await client.query(`
       ALTER TABLE invoices ADD COLUMN IF NOT EXISTS currency VARCHAR(50);
       ALTER TABLE invoices ADD COLUMN IF NOT EXISTS invoice_date TIMESTAMP;
       ALTER TABLE invoices ADD COLUMN IF NOT EXISTS contact_name VARCHAR(255);
       ALTER TABLE invoices ADD COLUMN IF NOT EXISTS due_date TIMESTAMP;
+      ALTER TABLE invoices ADD COLUMN IF NOT EXISTS reference VARCHAR(255);
+      ALTER TABLE invoices ADD COLUMN IF NOT EXISTS line_items JSONB;
       ALTER TABLE tenant_credentials ADD COLUMN IF NOT EXISTS last_synced_at TIMESTAMP;
       ALTER TABLE tenant_credentials ALTER COLUMN access_token DROP NOT NULL;
       ALTER TABLE tenant_credentials ALTER COLUMN refresh_token DROP NOT NULL;
@@ -329,11 +352,8 @@ const initPgTables = async () => {
  
 // Run PG check initially
 initPgTables();
- 
-// Fallback JSON DB File Configuration
-const JSON_DB_DIR = path.join(process.cwd(), 'src', 'data');
-const JSON_DB_PATH = path.join(JSON_DB_DIR, 'db.json');
- 
+
+// In-Memory fallback schema (No db.json file created on disk)
 interface JsonSchema {
   tenants: any[];
   tenant_credentials: any[];
@@ -358,89 +378,49 @@ interface JsonSchema {
   gl_cache?: any[];
   tax_transactions?: any[];
 }
- 
-const readJsonDb = (): JsonSchema => {
-  if (!fs.existsSync(JSON_DB_DIR)) {
-    fs.mkdirSync(JSON_DB_DIR, { recursive: true });
-  }
-  if (!fs.existsSync(JSON_DB_PATH)) {
-    const initialSchema: JsonSchema = {
-      tenants: [],
-      tenant_credentials: [],
-      contacts: [],
-      invoices: [],
-      payments: [],
-      accounts: [],
-      reports: [],
-      users: [],
-      sessions: [],
-      bank_transactions: [],
-      prepayments: [],
-      overpayments: [],
-      inventory_items: [],
-      inventory_thresholds: [],
-      inventory_sales_history: [],
-      inventory_cache: [],
-      fixed_assets: [],
-      fixed_assets_cache: [],
-      budgets_cache: [],
-      tax_cache: [],
-      gl_cache: [],
-      tax_transactions: []
-    };
-    fs.writeFileSync(JSON_DB_PATH, JSON.stringify(initialSchema, null, 2));
-    return initialSchema;
-  }
-  try {
-    const data = fs.readFileSync(JSON_DB_PATH, 'utf8');
-    const parsed = JSON.parse(data);
-    if (!parsed.reports) parsed.reports = [];
-    if (!parsed.users) parsed.users = [];
-    if (!parsed.sessions) parsed.sessions = [];
-    if (!parsed.bank_transactions) parsed.bank_transactions = [];
-    if (!parsed.prepayments) parsed.prepayments = [];
-    if (!parsed.overpayments) parsed.overpayments = [];
-    if (!parsed.inventory_items) parsed.inventory_items = [];
-    if (!parsed.inventory_thresholds) parsed.inventory_thresholds = [];
-    if (!parsed.inventory_sales_history) parsed.inventory_sales_history = [];
-    if (!parsed.inventory_cache) parsed.inventory_cache = [];
-    if (!parsed.fixed_assets) parsed.fixed_assets = [];
-    if (!parsed.fixed_assets_cache) parsed.fixed_assets_cache = [];
-    if (!parsed.budgets_cache) parsed.budgets_cache = [];
-    if (!parsed.tax_cache) parsed.tax_cache = [];
-    if (!parsed.gl_cache) parsed.gl_cache = [];
-    if (!parsed.tax_transactions) parsed.tax_transactions = [];
-    return parsed;
-  } catch (err) {
-    return { tenants: [], tenant_credentials: [], contacts: [], invoices: [], payments: [], accounts: [], reports: [], users: [], sessions: [], bank_transactions: [], prepayments: [], overpayments: [], inventory_items: [], inventory_thresholds: [], inventory_sales_history: [], inventory_cache: [], fixed_assets: [], fixed_assets_cache: [], budgets_cache: [], tax_cache: [], gl_cache: [], tax_transactions: [] };
-  }
+
+const memoryDb: JsonSchema = {
+  tenants: [],
+  tenant_credentials: [],
+  contacts: [],
+  invoices: [],
+  payments: [],
+  accounts: [],
+  reports: [],
+  users: [],
+  sessions: [],
+  bank_transactions: [],
+  prepayments: [],
+  overpayments: [],
+  inventory_items: [],
+  inventory_thresholds: [],
+  inventory_sales_history: [],
+  inventory_cache: [],
+  fixed_assets: [],
+  fixed_assets_cache: [],
+  budgets_cache: [],
+  tax_cache: [],
+  gl_cache: [],
+  tax_transactions: []
 };
- 
-const writeJsonDb = (data: JsonSchema) => {
-  if (!fs.existsSync(JSON_DB_DIR)) {
-    fs.mkdirSync(JSON_DB_DIR, { recursive: true });
-  }
-  fs.writeFileSync(JSON_DB_PATH, JSON.stringify(data, null, 2));
-};
- 
+
+const readJsonDb = (): JsonSchema => memoryDb;
+const writeJsonDb = (data: JsonSchema) => {};
+
 // DATABASE EXPORTS
 export const db = {
   // Check Connection Type
   isPostgres: () => isPgConnected,
- 
+
   // 1. TENANT OPERATIONS
   getTenants: async (): Promise<any[]> => {
-    if (isPgConnected) {
-      try {
-        const { rows } = await pgPool.query('SELECT * FROM tenants ORDER BY id ASC');
-        return rows;
-      } catch (e) {
-        console.error("Database query failed, falling back to JSON DB:", e);
-        isPgConnected = false;
-      }
+    try {
+      const { rows } = await pgPool.query('SELECT * FROM tenants ORDER BY id ASC');
+      return rows;
+    } catch (e) {
+      console.error("PostgreSQL getTenants query failed:", e);
+      return [];
     }
-    const json = readJsonDb();
-    return json.tenants;
   },
  
   createTenant: async (name: string): Promise<any> => {
@@ -647,11 +627,12 @@ export const db = {
             );
           } else if (type === 'invoices') {
             await pgPool.query(
-              'INSERT INTO invoices (tenant_id, external_id, invoice_number, type, status, total, amount_due, amount_paid, currency, invoice_date, contact_name, due_date) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)',
+              'INSERT INTO invoices (tenant_id, external_id, invoice_number, reference, type, status, total, amount_due, amount_paid, currency, invoice_date, contact_name, due_date, line_items) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)',
               [
                 tenantId,
                 item.InvoiceID || null,
                 item.InvoiceNumber || null,
+                item.Reference || null,
                 item.Type || null,
                 item.Status || null,
                 item.Total || 0,
@@ -660,7 +641,8 @@ export const db = {
                 item.CurrencyCode || null,
                 parseXeroDate(item.Date),
                 item.Contact?.Name || null,
-                parseXeroDate(item.DueDate)
+                parseXeroDate(item.DueDate),
+                JSON.stringify(item.LineItems || item.line_items || [])
               ]
             );
           } else if (type === 'payments') {
@@ -768,6 +750,7 @@ export const db = {
             ...r,
             InvoiceID: r.external_id,
             InvoiceNumber: r.invoice_number,
+            Reference: r.reference || r.invoice_number,
             Type: r.type,
             Status: r.status,
             Total: parseFloat(r.total || 0),
@@ -776,7 +759,8 @@ export const db = {
             CurrencyCode: r.currency,
             Date: r.invoice_date,
             ContactName: r.contact_name,
-            DueDate: r.due_date
+            DueDate: r.due_date,
+            LineItems: typeof r.line_items === 'string' ? JSON.parse(r.line_items) : (r.line_items || [])
           }));
         }
       } catch (e) {

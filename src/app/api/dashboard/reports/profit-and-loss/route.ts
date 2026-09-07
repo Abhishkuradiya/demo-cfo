@@ -248,7 +248,11 @@ export async function GET(req: NextRequest) {
       connected: true,
       summary: {
         revenue: totalIncome,
-        expenses: totalExpenses,
+        turnover: operatingIncomeSum,
+        otherIncome: otherIncomeSum,
+        cogs: cogsSum,
+        expenses: operatingExpensesSum + otherExpensesSum,
+        totalExpenses: cogsSum + operatingExpensesSum + otherExpensesSum,
         grossProfit,
         netProfit,
         profitMargin: Math.round(profitMargin * 10) / 10,

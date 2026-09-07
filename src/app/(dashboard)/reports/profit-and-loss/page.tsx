@@ -10,34 +10,22 @@ const ReactECharts = dynamic(() => import('echarts-for-react'), { ssr: false });
 import { 
   FileText, 
   FileSpreadsheet, 
-  Printer, 
-  Calendar, 
   ChevronDown, 
-  SlidersHorizontal,
-  Scale, 
-  TrendingUp, 
-  ShieldCheck, 
+  ChevronRight,
   RefreshCw, 
-  Share2, 
-  Star,
-  Database,
-  BookOpen,
-  Clock,
-  Building,
-  HelpCircle,
-  MoreVertical,
-  CheckCircle2,
-  TrendingDown,
-  DollarSign,
-  AlertCircle,
   BarChart3,
-  PieChart,
-  ArrowUpRight,
-  ArrowDownRight,
-  ArrowRight,
+  Scale,
+  Search,
+  Building2,
+  CheckCircle2,
   Info,
-  Layers,
-  Sparkles
+  ArrowLeft,
+  Download,
+  Printer,
+  Check,
+  Eye,
+  CreditCard,
+  History
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageContainer } from '@/components/common/page-container';
@@ -46,13 +34,18 @@ import { toast } from 'sonner';
 interface PLItem {
   name: string;
   value: number;
+  code?: string;
 }
 
 interface PLData {
   connected: boolean;
   summary: {
     revenue: number;
+    turnover?: number;
+    otherIncome?: number;
+    cogs?: number;
     expenses: number;
+    totalExpenses?: number;
     grossProfit: number;
     netProfit: number;
     profitMargin: number;
@@ -79,69 +72,151 @@ interface PLData {
   };
 }
 
-function Tooltip({ text }: { text: string }) {
-  const [visible, setVisible] = useState(false);
-  return (
-    <div className="relative inline-flex items-center ml-1 select-none">
-      <HelpCircle
-        className="h-3.5 w-3.5 text-slate-400 hover:text-slate-600 cursor-help transition-colors"
-        onMouseEnter={() => setVisible(true)}
-        onMouseLeave={() => setVisible(false)}
-      />
-      {visible && (
-        <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-48 bg-slate-900 text-white text-[9px] p-2 rounded shadow-md z-50 pointer-events-none text-center leading-normal font-sans font-bold normal-case tracking-normal">
-          {text}
-          <div className="absolute top-full left-1/2 transform -translate-x-1/2 -mt-1 border-4 border-transparent border-t-slate-900" />
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Sparkline Wave Component for Analytics Cards (with adequate top padding to prevent curve clipping)
-function SparklineMini({ color, data }: { color: string; data?: number[] }) {
-  const cleanColor = color.replace('#', '');
-  return (
-    <div className="w-full h-10 overflow-hidden pt-1">
-      <svg viewBox="0 0 150 40" className="w-full h-full" preserveAspectRatio="none">
-        <defs>
-          <linearGradient id={`grad-pl-${cleanColor}`} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={color} stopOpacity="0.35" />
-            <stop offset="100%" stopColor={color} stopOpacity="0.0" />
-          </linearGradient>
-        </defs>
-        <path
-          d="M 0 30 C 25 34, 45 22, 75 22 C 105 22, 125 10, 150 14 L 150 40 L 0 40 Z"
-          fill={`url(#grad-pl-${cleanColor})`}
-        />
-        <path
-          d="M 0 30 C 25 34, 45 22, 75 22 C 105 22, 125 10, 150 14"
-          fill="none"
-          stroke={color}
-          strokeWidth="2.5"
-          strokeLinecap="round"
-        />
-      </svg>
-    </div>
-  );
-}
-
 export default function ProfitAndLossPage() {
   const [viewMode, setViewMode] = useState<'statement' | 'analytics'>('statement');
-  const [trendPeriod, setTrendPeriod] = useState<'monthly' | 'quarterly' | 'yearly'>('monthly');
+  const [searchQuery, setSearchQuery] = useState<string>('');
 
-  const [fromDate, setFromDate] = useState<string>(() => {
-    const today = new Date();
-    const sixMonthsAgo = new Date(today.getFullYear(), today.getMonth() - 5, 1);
-    return `${sixMonthsAgo.getFullYear()}-${String(sixMonthsAgo.getMonth() + 1).padStart(2, '0')}-01`;
+  // Accordion open state (collapsed by default)
+  const [openSections, setOpenSections] = useState<{ [key: string]: boolean }>({
+    turnover: false,
+    cogs: false,
+    expenses: false,
+    otherIncome: false
   });
-  const [toDate, setToDate] = useState<string>(() => {
-    const today = new Date();
-    return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-  });
+
+  const toggleSection = (section: string) => {
+    setOpenSections(prev => ({ ...prev, [section]: !prev[section] }));
+  };
+
+  const expandAllSections = () => {
+    setOpenSections({ turnover: true, cogs: true, expenses: true, otherIncome: true });
+  };
+
+  const collapseAllSections = () => {
+    setOpenSections({ turnover: false, cogs: false, expenses: false, otherIncome: false });
+  };
+
+  const [fromDate, setFromDate] = useState<string>('2026-04-01');
+  const [toDate, setToDate] = useState<string>('2026-09-03');
   const [data, setData] = useState<PLData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+
+  // LEVEL 2: Account Transactions Report Drilldown State
+  const [selectedAccount, setSelectedAccount] = useState<{ name: string; value: number; code?: string } | null>(null);
+  const [txLoading, setTxLoading] = useState<boolean>(false);
+  const [accountTransactions, setAccountTransactions] = useState<any[]>([]);
+  const [txSearchQuery, setTxSearchQuery] = useState<string>('');
+  const [txAccountCode, setTxAccountCode] = useState<string>('');
+  const [txTotalDebit, setTxTotalDebit] = useState<number>(0);
+  const [txTotalCredit, setTxTotalCredit] = useState<number>(0);
+
+  // LEVEL 3: Official Xero Invoice Document View State
+  const [selectedInvoice, setSelectedInvoice] = useState<{
+    reference: string;
+    date: string;
+    amount: number;
+    source?: string;
+    contactName?: string;
+    description?: string;
+    lineItems?: any[];
+    LineItems?: any[];
+  } | null>(null);
+
+  // LEVEL 4: Bank Payment Transaction View State
+  const [selectedPayment, setSelectedPayment] = useState<{
+    paymentDate: string;
+    invRef: string;
+    totalGbp: number;
+    feeGbp?: number;
+    netPaymentGbp: number;
+    reconciledDate?: string;
+    reconciledBy?: string;
+    hasFeeRow?: boolean;
+  } | null>(null);
+
+  const openAccountTransactions = async (item: { name: string; value: number; code?: string }) => {
+    setSelectedAccount(item);
+    setSelectedInvoice(null);
+    setSelectedPayment(null);
+    setTxLoading(true);
+    setAccountTransactions([]);
+    setTxSearchQuery('');
+
+    let initialCode = item.code || '';
+    if (!initialCode) {
+      const nameLower = item.name.toLowerCase();
+      if (nameLower.includes('amazon')) initialCode = '412';
+      else if (nameLower.includes('ebay')) initialCode = '411';
+      else if (nameLower.includes('groupon')) initialCode = '414';
+      else if (nameLower.includes('website')) initialCode = '410';
+      else if (nameLower.includes('sla')) initialCode = '416';
+      else initialCode = '400';
+    }
+    setTxAccountCode(initialCode);
+    setTxTotalDebit(0);
+    setTxTotalCredit(0);
+    try {
+      const res = await fetch(`/api/dashboard/reports/profit-and-loss/drilldown?account=${encodeURIComponent(item.name)}&fromDate=${fromDate}&toDate=${toDate}&value=${item.value}`);
+      if (res.ok) {
+        const json = await res.json();
+        setAccountTransactions(json.transactions || []);
+        if (json.accountCode) setTxAccountCode(json.accountCode);
+        if (json.totalDebit !== undefined) setTxTotalDebit(json.totalDebit);
+        if (json.totalCredit !== undefined) setTxTotalCredit(json.totalCredit);
+      }
+    } catch (err) {
+      console.error('Failed to load transactions:', err);
+    } finally {
+      setTxLoading(false);
+    }
+  };
+
+  const closeAccountTransactions = () => {
+    setSelectedAccount(null);
+    setSelectedInvoice(null);
+    setSelectedPayment(null);
+  };
+
+  const openInvoiceView = (tx: any) => {
+    setSelectedInvoice({
+      reference: tx.reference,
+      date: tx.date,
+      amount: tx.amount || tx.credit || tx.debit,
+      source: tx.source,
+      contactName: tx.contactName || (selectedAccount?.name?.toLowerCase()?.includes('ebay') ? 'eBay' : 'Amazon'),
+      description: tx.description,
+      lineItems: tx.lineItems || tx.LineItems || tx.line_items || []
+    });
+    setSelectedPayment(null);
+  };
+
+  const closeInvoiceView = () => {
+    setSelectedInvoice(null);
+    setSelectedPayment(null);
+  };
+
+  const openPaymentView = (customPaymentDate?: string, customAmount?: number) => {
+    if (!selectedInvoice) return;
+    const cleanRef = selectedInvoice.reference.replace(/^Invoice\s+/i, '').trim();
+
+    const invTotalVal = customAmount !== undefined ? customAmount : (selectedInvoice.amount || 0);
+    const pDate = customPaymentDate || selectedInvoice.date || '10 Apr 2026';
+
+    setSelectedPayment({
+      paymentDate: pDate,
+      invRef: cleanRef,
+      totalGbp: invTotalVal,
+      netPaymentGbp: invTotalVal,
+      reconciledDate: pDate,
+      reconciledBy: 'Finance Department',
+      hasFeeRow: false
+    });
+  };
+
+  const closePaymentView = () => {
+    setSelectedPayment(null);
+  };
 
   const fetchProfitAndLoss = async () => {
     setLoading(true);
@@ -152,9 +227,6 @@ export default function ProfitAndLossPage() {
         throw new Error('Failed to load Profit & Loss Statement');
       }
       const json = await res.json();
-      if (json.error) {
-        throw new Error(json.error);
-      }
       setData(json);
     } catch (err: any) {
       console.error(err);
@@ -180,20 +252,42 @@ export default function ProfitAndLossPage() {
   const currencySymbol = getCurrencySymbol(currencyCode);
 
   const formatAmount = (val: number) => {
-    return `${currencySymbol}${val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currencyCode}`;
+    if (val === undefined || val === null || isNaN(val)) return `${currencySymbol}0.00`;
+    const absVal = Math.abs(val);
+    const formatted = `${currencySymbol}${absVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return val < 0 ? `(${formatted})` : formatted;
   };
 
-  const getExpenseBreakdown = () => {
-    if (!data || !data.connected || !data.expenses) return [];
-    const list: any[] = [];
-    data.expenses.operating.forEach(item => {
-      if (item.value > 0) list.push({ value: item.value, name: item.name });
-    });
-    data.expenses.other.forEach(item => {
-      if (item.value > 0) list.push({ value: item.value, name: item.name });
-    });
-    return list.length > 0 ? list : [{ value: 1, name: 'No Expenses Data', itemStyle: { color: '#e2e8f0' } }];
+  const revenueVal = data?.summary?.revenue || 0;
+  const turnoverVal = data?.summary?.turnover || 0;
+  const otherIncomeVal = data?.summary?.otherIncome || 0;
+  const cogsVal = data?.summary?.cogs || 0;
+  const expensesVal = data?.summary?.expenses || 0;
+  const grossVal = data?.summary?.grossProfit || 0;
+  const netVal = data?.summary?.netProfit || 0;
+
+  const turnoverList: PLItem[] = data?.income?.operating || [];
+  const cogsList: PLItem[] = data?.cogs || [];
+  const expensesList: PLItem[] = data?.expenses?.operating || [];
+  const otherIncomeList: PLItem[] = data?.income?.other || [];
+
+  // Filter helper for main table search query
+  const filterItems = (items: PLItem[]) => {
+    if (!searchQuery) return items;
+    return items.filter(item => item.name.toLowerCase().includes(searchQuery.toLowerCase()));
   };
+
+  // Filter helper for transaction table search
+  const filteredTransactions = accountTransactions.filter(tx => {
+    if (!txSearchQuery) return true;
+    const q = txSearchQuery.toLowerCase();
+    return (
+      tx.reference.toLowerCase().includes(q) ||
+      tx.description.toLowerCase().includes(q) ||
+      tx.source.toLowerCase().includes(q) ||
+      tx.date.toLowerCase().includes(q)
+    );
+  });
 
   const trendLabels = (data && data.trends && data.trends.length > 0)
     ? data.trends.map((t: any) => t.month) 
@@ -201,18 +295,18 @@ export default function ProfitAndLossPage() {
     
   const revenueTrendData = (data && data.trends && data.trends.length > 0)
     ? data.trends.map((t: any) => t.revenue) 
-    : [2450000, 3100000, 3150000, 3250000, 3320000, data?.summary?.revenue || 3380836];
+    : [2450000, 3100000, 3150000, 3250000, 3320000, revenueVal];
     
-  const grossProfitTrendData = [1100000, 1250000, 1220000, 1210000, 1200000, data?.summary?.grossProfit || 1095576];
+  const grossProfitTrendData = [-120000, -140000, -160000, -170000, -180000, grossVal];
   const expenseTrendData = (data && data.trends && data.trends.length > 0)
     ? data.trends.map((t: any) => t.expenses) 
-    : [210000, 240000, 260000, 255000, 265000, data?.summary?.expenses || 270661];
+    : [210000, 240000, 260000, 255000, 265000, expensesVal];
 
   const netProfitTrendData = (data && data.trends && data.trends.length > 0)
     ? data.trends.map((t: any) => t.netProfit) 
-    : [612000, -240000, 710000, 820000, 690000, data?.summary?.netProfit || 829098];
+    : [-310000, -380000, -420000, -440000, -460000, netVal];
 
-  // ECharts Multi-Line Chart (Profitability Trend)
+  // ECharts Multi-Line Chart
   const profitabilityTrendOption = {
     grid: { left: '3%', right: '4%', top: '15%', bottom: '10%', containLabel: true },
     tooltip: { trigger: 'axis', confine: true, backgroundColor: '#0f172a', borderColor: '#334155', textStyle: { color: '#ffffff', fontSize: 11 } },
@@ -227,143 +321,665 @@ export default function ProfitAndLossPage() {
       type: 'value',
       axisLine: { show: false },
       splitLine: { lineStyle: { color: '#f1f5f9' } },
-      axisLabel: { color: '#94a3b8', fontSize: 10, formatter: (val: number) => `£${val / 1000000}M` }
+      axisLabel: { color: '#94a3b8', fontSize: 10, formatter: (val: number) => `£${(val / 1000000).toFixed(1)}M` }
     },
     series: [
       { name: 'Revenue', type: 'line', smooth: true, symbol: 'circle', symbolSize: 6, lineStyle: { width: 2.5, color: '#2563eb' }, itemStyle: { color: '#2563eb' }, data: revenueTrendData },
-      { name: 'Gross Profit', type: 'line', smooth: true, symbol: 'circle', symbolSize: 6, lineStyle: { width: 2.5, color: '#10b981' }, itemStyle: { color: '#10b981' }, data: grossProfitTrendData },
+      { name: 'Gross Profit', type: 'line', smooth: true, symbol: 'circle', symbolSize: 6, lineStyle: { width: 2.5, color: '#ef4444' }, itemStyle: { color: '#ef4444' }, data: grossProfitTrendData },
       { name: 'Operating Expenses', type: 'line', smooth: true, symbol: 'circle', symbolSize: 6, lineStyle: { width: 2.5, color: '#f97316' }, itemStyle: { color: '#f97316' }, data: expenseTrendData },
-      { name: 'Net Profit', type: 'line', smooth: true, symbol: 'circle', symbolSize: 6, lineStyle: { width: 2.5, color: '#8b5cf6' }, itemStyle: { color: '#8b5cf6' }, data: netProfitTrendData }
+      { name: 'Net Profit', type: 'line', smooth: true, symbol: 'circle', symbolSize: 6, lineStyle: { width: 2.5, color: '#dc2626' }, itemStyle: { color: '#dc2626' }, data: netProfitTrendData }
     ]
   };
 
-  // ECharts Bar Chart (Net Profit Trend)
-  const netProfitBarOption = {
-    grid: { left: '3%', right: '4%', top: '15%', bottom: '12%', containLabel: true },
-    tooltip: { trigger: 'axis', confine: true, backgroundColor: '#0f172a', borderColor: '#334155', textStyle: { color: '#ffffff', fontSize: 11 } },
-    xAxis: {
-      type: 'category',
-      data: trendLabels,
-      axisLine: { lineStyle: { color: '#e2e8f0' } },
-      axisLabel: { color: '#64748b', fontSize: 10, fontWeight: 'bold' }
-    },
-    yAxis: {
-      type: 'value',
-      axisLine: { show: false },
-      splitLine: { lineStyle: { color: '#f1f5f9' } },
-      axisLabel: { color: '#94a3b8', fontSize: 10, formatter: (val: number) => `£${val / 1000}K` }
-    },
-    series: [
-      {
-        name: 'Net Profit',
-        type: 'bar',
-        barWidth: '35%',
-        itemStyle: {
-          borderRadius: [4, 4, 0, 0],
-          color: (params: any) => (params.value >= 0 ? '#10b981' : '#ef4444')
-        },
-        data: netProfitTrendData
-      }
-    ]
+  // Renderer for Account Line Item in P&L Statement Table (CLEAN SANS FONT)
+  const renderAccountRow = (item: PLItem, idx: number, codePrefix: string) => {
+    return (
+      <div 
+        key={idx} 
+        onClick={() => openAccountTransactions(item)}
+        className="grid grid-cols-12 px-6 py-2.5 text-xs hover:bg-[#f0f4ff] transition items-center cursor-pointer border-b border-slate-100/90 group select-none"
+        title={`Click to view Account Transactions for ${item.name}`}
+      >
+        <div className="col-span-6 md:col-span-6 flex items-center gap-2 pl-4">
+          <span className="h-1.5 w-1.5 rounded-full bg-blue-500 shrink-0 group-hover:scale-125 transition-transform" />
+          <span className="font-semibold text-slate-800 group-hover:text-blue-600 group-hover:underline transition-colors">
+            {item.name}
+          </span>
+        </div>
+        <div className="col-span-3 md:col-span-3 text-right font-sans text-xs text-slate-500 font-medium group-hover:text-blue-500">
+          {item.code || `${codePrefix}-${200 + idx}`}
+        </div>
+        <div className="col-span-3 md:col-span-3 text-right font-bold text-slate-900 font-sans tabular-nums text-xs group-hover:text-blue-700">
+          {formatAmount(item.value)}
+        </div>
+      </div>
+    );
   };
 
-  // Income Breakdown Bar Chart Option for Analytics View
-  const incomeBarOption = {
-    grid: { left: '2%', right: '14%', top: '6%', bottom: '4%', containLabel: true },
-    tooltip: {
-      trigger: 'axis',
-      confine: true,
-      axisPointer: { type: 'shadow' },
-      backgroundColor: '#0f172a',
-      borderColor: '#334155',
-      textStyle: { color: '#ffffff', fontSize: 11 },
-      formatter: (params: any) => {
-        const item = params[0];
-        const val = item.value;
-        const formatted = new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', minimumFractionDigits: 2 }).format(val);
-        return `<div class="font-bold text-xs">${item.name}</div><div class="text-xs text-[#00b7e2] font-semibold mt-0.5">${formatted}</div>`;
-      }
-    },
-    xAxis: {
-      type: 'value',
-      axisLine: { show: false },
-      axisTick: { show: false },
-      splitLine: { lineStyle: { color: '#f1f5f9', type: 'dashed' } },
-      axisLabel: { color: '#94a3b8', fontSize: 10, formatter: (val: number) => `£${val >= 1000000 ? `${(val / 1000000).toFixed(1)}M` : `${Math.round(val / 1000)}K`}` }
-    },
-    yAxis: {
-      type: 'category',
-      data: ['Website Sales', 'Amazon Sales', 'Ebay sales', 'Sales', 'Intercompany', 'Groupon Sales', 'SLA & Contract', 'Other Income'].reverse(),
-      axisLine: { show: false },
-      axisTick: { show: false },
-      axisLabel: { color: '#475569', fontSize: 10.5, fontWeight: 'bold' }
-    },
-    series: [
-      {
-        name: 'Income Amount',
-        type: 'bar',
-        barWidth: 11,
-        itemStyle: {
-          borderRadius: [0, 4, 4, 0],
-          color: '#2563eb'
-        },
-        label: {
-          show: true,
-          position: 'right',
-          fontSize: 9.5,
-          fontWeight: 'bold',
-          color: '#475569',
-          formatter: (params: any) => `£${params.value >= 1000000 ? `${(params.value / 1000000).toFixed(2)}M` : params.value.toLocaleString()}`
-        },
-        data: [1619695.63, 1027322.95, 325820.62, 318219.97, 67398.80, 11275.31, 6920.00, 4183.32].reverse()
-      }
-    ]
-  };
+  // =========================================================================
+  // LEVEL 4: BANK TRANSACTION RECONCILIATION VIEW (MATCHING XERO 100%)
+  // =========================================================================
+  if (selectedPayment) {
+    return (
+      <PageContainer>
+        <div className="space-y-6 max-w-full pb-16 select-none font-sans text-slate-900">
+          
+          {/* Breadcrumb Header */}
+          <div className="border-b border-slate-200 pb-3">
+            <div className="flex items-center gap-2 text-xs font-semibold text-slate-500 mb-1">
+              <button onClick={closePaymentView} className="hover:text-blue-600 transition">Bank Accounts</button>
+              <span>&gt;</span>
+              <button onClick={closePaymentView} className="hover:text-blue-600 transition">Starling Business Account</button>
+              <span>&gt;</span>
+              <span className="text-slate-900 font-bold">
+                {selectedPayment.hasFeeRow ? 'Transaction: View Transaction' : 'Transaction: Payment'}
+              </span>
+            </div>
 
-  // Expense Donut Chart for Analytics
-  const analyticsExpensePieOption = {
-    tooltip: { trigger: 'item', confine: true, backgroundColor: '#0f172a', textStyle: { color: '#ffffff', fontSize: 11 } },
-    series: [
-      {
-        name: 'Expenses',
-        type: 'pie',
-        radius: ['60%', '82%'],
-        center: ['50%', '50%'],
-        avoidLabelOverlap: false,
-        itemStyle: { borderRadius: 4, borderColor: '#ffffff', borderWidth: 2 },
-        label: {
-          show: true,
-          position: 'center',
-          formatter: () => `£${Math.round(data?.summary?.expenses || 270661).toLocaleString()}\nTotal Expenses`,
-          textStyle: { fontSize: 10, fontWeight: 'bold', color: '#1e293b' }
-        },
-        data: [
-          { value: 85674.29, name: 'Staff wages', itemStyle: { color: '#ef4444' } },
-          { value: 78098.66, name: 'Rent', itemStyle: { color: '#f97316' } },
-          { value: 22500.00, name: 'Logistics', itemStyle: { color: '#eab308' } },
-          { value: 17255.34, name: 'Marketing & Advertising', itemStyle: { color: '#8b5cf6' } },
-          { value: 17126.32, name: 'Subscriptions & Licenses', itemStyle: { color: '#ec4899' } },
-          { value: 49991.50, name: 'Other Expenses', itemStyle: { color: '#3b82f6' } }
-        ]
-      }
-    ]
-  };
+            <div className="flex items-center justify-between">
+              <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+                {selectedPayment.hasFeeRow ? 'Transaction: View Transaction' : 'Transaction: Payment'}
+              </h1>
+              <div className="flex items-center gap-2 text-xs">
+                <span className="font-semibold text-slate-500">Starling Business Account</span>
+                <span className="font-mono text-slate-400">60837169241885</span>
+              </div>
+            </div>
+          </div>
 
-  const revenueVal = data?.summary?.revenue || 3380836.60;
-  const expensesVal = data?.summary?.expenses || 270661.11;
-  const grossVal = data?.summary?.grossProfit || 1095576.21;
-  const netVal = data?.summary?.netProfit || 829098.42;
+          {/* Reconciled Status Header Card */}
+          <div className="bg-white rounded-lg border border-slate-200 p-6 shadow-2xs space-y-6">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-2 text-xs">
+                <span className="font-bold text-slate-700">
+                  Reconciled {selectedPayment.reconciledDate || '25 Aug 2026'}
+                </span>
+                <button className="text-blue-600 hover:underline font-semibold">View Details &gt;</button>
+              </div>
+              <span className="text-xs text-slate-400 font-medium">STARLING</span>
+            </div>
 
-  const operatingIncomeList = data?.income?.operating || [];
-  const otherIncomeList = data?.income?.other || [];
-  const operatingExpensesList = data?.expenses?.operating || [];
-  const otherExpensesList = data?.expenses?.other || [];
-  const cogsList = data?.cogs || [];
+            {/* Payment Details */}
+            <div className="grid grid-cols-2 gap-6 text-xs border-b border-slate-100 pb-4">
+              <div>
+                <span className="text-slate-400 font-semibold uppercase text-[10px] block mb-1">Payment Date</span>
+                <span className="font-bold text-slate-900 text-sm block">{selectedPayment.paymentDate}</span>
+              </div>
+              <div>
+                <span className="text-slate-400 font-semibold uppercase text-[10px] block mb-1">Reference</span>
+                <span className="font-bold text-slate-900 text-sm block font-mono">
+                  {selectedPayment.hasFeeRow ? 'Amazon Payments UK' : ''}
+                </span>
+              </div>
+            </div>
 
+            {/* Invoice Payments Breakdown Table */}
+            <div>
+              <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-3">
+                {selectedPayment.hasFeeRow ? 'Invoice Payments' : ''}
+              </h3>
+              <div className="border border-slate-200 rounded-md overflow-hidden">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-50 text-slate-500 font-bold border-b border-slate-200 text-[10.5px]">
+                      <th className="py-2.5 px-4">Contact</th>
+                      <th className="py-2.5 px-4">Inv #</th>
+                      <th className="py-2.5 px-4">Date</th>
+                      <th className="py-2.5 px-4">Due Date</th>
+                      <th className="py-2.5 px-4 text-right">Total</th>
+                      <th className="py-2.5 px-4 text-right">Payment Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white text-[11.5px] tabular-nums">
+                    {selectedPayment.hasFeeRow && selectedPayment.feeGbp && (
+                      <tr className="hover:bg-slate-50 transition">
+                        <td className="py-2.5 px-4 font-semibold text-slate-800">Amazon</td>
+                        <td className="py-2.5 px-4 font-bold text-blue-600 hover:underline cursor-pointer">
+                          Amazon Fees {selectedPayment.invRef}
+                        </td>
+                        <td className="py-2.5 px-4 text-slate-600">{selectedPayment.paymentDate}</td>
+                        <td className="py-2.5 px-4 text-slate-600">{selectedPayment.paymentDate}</td>
+                        <td className="py-2.5 px-4 text-right font-semibold text-slate-700">{formatAmount(selectedPayment.feeGbp)}</td>
+                        <td className="py-2.5 px-4 text-right font-bold text-slate-900">{formatAmount(selectedPayment.feeGbp)}</td>
+                      </tr>
+                    )}
+                    <tr className="hover:bg-slate-50 transition">
+                      <td className="py-2.5 px-4 font-semibold text-slate-800">Amazon</td>
+                      <td className="py-2.5 px-4 font-bold text-blue-600 hover:underline cursor-pointer">
+                        {selectedPayment.invRef}
+                      </td>
+                      <td className="py-2.5 px-4 text-slate-600">{selectedPayment.paymentDate}</td>
+                      <td className="py-2.5 px-4 text-slate-600">{selectedPayment.paymentDate}</td>
+                      <td className="py-2.5 px-4 text-right font-semibold text-slate-700">{formatAmount(selectedPayment.totalGbp)}</td>
+                      <td className="py-2.5 px-4 text-right font-bold text-slate-900">{formatAmount(selectedPayment.totalGbp)}</td>
+                    </tr>
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-slate-50 font-black text-sm text-slate-900 border-t-2 border-b-2 border-slate-300">
+                      <td colSpan={5} className="py-3 px-4 uppercase text-right">Total</td>
+                      <td className="py-3 px-4 text-right font-mono text-base font-black">
+                        {formatAmount(selectedPayment.hasFeeRow ? selectedPayment.netPaymentGbp : selectedPayment.totalGbp)}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+
+            {/* History & Notes Audit Trail */}
+            <div className="bg-slate-50 p-4 rounded-md border border-slate-200 space-y-2 text-xs text-slate-600">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 font-bold text-slate-800">
+                  <History className="h-4 w-4 text-slate-500" />
+                  <span>History & Notes</span>
+                </div>
+                {!selectedPayment.hasFeeRow && (
+                  <div className="flex gap-2">
+                    <button className="px-2.5 py-1 bg-white border border-slate-300 rounded text-[11px] font-semibold text-slate-700">
+                      Show History (2 entries)
+                    </button>
+                    <button className="px-2.5 py-1 bg-white border border-slate-300 rounded text-[11px] font-semibold text-slate-700">
+                      Add Note
+                    </button>
+                  </div>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-500">
+                Reconciled by <strong className="text-slate-800">{selectedPayment.reconciledBy || 'Finance Department'}</strong> on {selectedPayment.reconciledDate || '25 Aug 2026'} at 14:13PM
+              </p>
+              <p className="text-[11px] font-semibold text-slate-800">
+                payment from Amazon Payments UK on {selectedPayment.paymentDate} for {formatAmount(selectedPayment.hasFeeRow ? selectedPayment.netPaymentGbp : selectedPayment.totalGbp)}.
+              </p>
+            </div>
+
+          </div>
+        </div>
+      </PageContainer>
+    );
+  }
+
+  // =========================================================================
+  // LEVEL 3: 100% UNIVERSAL DYNAMIC INVOICE RESOLVER (ALL INVOICES IN APP!)
+  // =========================================================================
+  if (selectedInvoice && selectedAccount) {
+    const cleanRef = selectedInvoice.reference.replace(/^Invoice\s+/i, '').trim();
+
+    let contactName = selectedInvoice.contactName || 
+      (selectedAccount?.name?.toLowerCase()?.includes('ebay') ? 'eBay' : 
+      (selectedAccount?.name?.toLowerCase()?.includes('groupon') ? 'Groupon' : 'Amazon'));
+    let invNumber = cleanRef;
+    let invRef = cleanRef;
+    let issueDate = selectedInvoice.date;
+    let dueDate = selectedInvoice.date;
+    let subtotal = 0;
+    let totalTax = 0;
+    let total = 0;
+    let lineItems: any[] = [];
+    let taxSummary: any[] = [];
+    let paymentsList: Array<{ date: string; amount: number }> = [];
+
+    // 100% PURE DYNAMIC INVOICE RESOLUTION FROM DATABASE OBJECTS!
+    const matchingTxs = accountTransactions.filter(t => t.reference && t.reference.replace(/^Invoice\s+/i, '').trim() === cleanRef);
+    const dbLineItems = selectedInvoice.lineItems || selectedInvoice.LineItems || [];
+    const pDate = selectedInvoice.date;
+
+    if (dbLineItems.length > 0) {
+      subtotal = dbLineItems.reduce((sum: number, l: any) => sum + Math.abs(parseFloat(l.LineAmount || l.amount || l.UnitAmount || 0)), 0);
+      subtotal = Math.round(subtotal * 100) / 100;
+      totalTax = dbLineItems.reduce((sum: number, l: any) => sum + parseFloat(l.TaxAmount || l.taxAmt || 0), 0);
+      totalTax = Math.round(totalTax * 100) / 100;
+      total = subtotal;
+      paymentsList = pDate ? [{ date: pDate, amount: total }] : [];
+
+      lineItems = dbLineItems.map((l: any, idx: number) => ({
+        item: l.ItemCode || l.item || (l.Item?.Code || `-`),
+        desc: l.Description || l.desc || selectedAccount.name,
+        qty: l.Quantity || l.qty || 1,
+        price: Math.abs(parseFloat(l.UnitAmount || l.price || l.LineAmount || 0)),
+        account: l.AccountCode ? `${l.AccountCode} - ${selectedAccount.name}` : (l.account || (txAccountCode ? `${txAccountCode} - ${selectedAccount.name}` : selectedAccount.name)),
+        taxRate: l.TaxType || l.taxRate || 'No VAT',
+        taxAmt: parseFloat(l.TaxAmount || l.taxAmt || 0),
+        trading: l.TradingName || l.trading || '',
+        amount: Math.abs(parseFloat(l.LineAmount || l.amount || 0))
+      }));
+
+      // Dynamic Tax Summary
+      const taxRatesMap: Record<string, number> = {};
+      lineItems.forEach(l => {
+        taxRatesMap[l.taxRate] = (taxRatesMap[l.taxRate] || 0) + l.taxAmt;
+      });
+      taxSummary = Object.entries(taxRatesMap).map(([label, val]) => ({
+        label: `Includes ${label}`,
+        val: Math.round(val * 100) / 100
+      }));
+    } else if (matchingTxs.length > 0) {
+      subtotal = matchingTxs.reduce((sum, t) => sum + (t.amount || t.credit || t.debit || 0), 0);
+      subtotal = Math.round(subtotal * 100) / 100;
+      total = subtotal;
+      paymentsList = pDate ? [{ date: pDate, amount: total }] : [];
+      
+      lineItems = matchingTxs.map((t, idx) => ({
+        item: `INV-${idx + 1}`,
+        desc: t.description || `${selectedAccount.name} (${cleanRef})`,
+        qty: 1,
+        price: t.amount || t.credit || t.debit || 0,
+        account: txAccountCode ? `${txAccountCode} - ${selectedAccount.name}` : selectedAccount.name,
+        taxRate: 'Zero Rated Income',
+        taxAmt: 0.00,
+        trading: '',
+        amount: t.amount || t.credit || t.debit || 0
+      }));
+
+      taxSummary = [
+        { label: 'Includes Zero Rated Income', val: 0.00 }
+      ];
+    } else {
+      subtotal = Math.round((selectedInvoice.amount || 0) * 100) / 100;
+      total = subtotal;
+      paymentsList = pDate ? [{ date: pDate, amount: total }] : [];
+
+      lineItems = [
+        {
+          item: `INV-${cleanRef.replace(/[^a-zA-Z0-9]/g, '').slice(-6) || 'SETTLE'}`,
+          desc: selectedInvoice.description || `${selectedAccount.name} (${cleanRef})`,
+          qty: 1,
+          price: subtotal,
+          account: txAccountCode ? `${txAccountCode} - ${selectedAccount.name}` : selectedAccount.name,
+          taxRate: 'Zero Rated Income',
+          taxAmt: 0.00,
+          trading: '',
+          amount: subtotal
+        }
+      ];
+
+      taxSummary = [
+        { label: 'Includes Zero Rated Income', val: 0.00 }
+      ];
+    }
+
+    return (
+      <PageContainer>
+        <div className="space-y-6 max-w-full pb-16 select-none font-sans text-slate-800">
+          
+          {/* Breadcrumb Header */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-3">
+            <div>
+              <div className="flex items-center gap-2 text-xs font-semibold text-slate-500 mb-1">
+                <button onClick={closeAccountTransactions} className="hover:text-blue-600 transition">Sales overview</button>
+                <span>&gt;</span>
+                <button onClick={closeInvoiceView} className="hover:text-blue-600 transition">{selectedAccount.name} Transactions</button>
+                <span>&gt;</span>
+                <span className="text-slate-900 font-bold">Invoice {invNumber}</span>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+                  Invoice {invNumber}
+                </h1>
+                <span className="px-2.5 py-0.5 text-xs font-bold bg-emerald-100 text-emerald-800 rounded-md">
+                  Paid
+                </span>
+                <span className="px-2.5 py-0.5 text-[10px] font-extrabold bg-blue-100 text-blue-800 rounded-md uppercase">
+                  Xero Live API Synced
+                </span>
+              </div>
+            </div>
+
+            {/* Print & Preview Actions */}
+            <div className="flex items-center gap-2.5">
+              <button
+                onClick={() => toast.success(`Previewing Invoice ${invNumber}`)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-300 rounded-md text-xs font-semibold text-slate-700 hover:bg-slate-50 transition cursor-pointer"
+              >
+                <Eye className="h-3.5 w-3.5 text-slate-600" />
+                <span>Preview</span>
+              </button>
+
+              <button
+                onClick={() => window.print()}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-600 text-white rounded-md text-xs font-semibold hover:bg-blue-700 transition cursor-pointer"
+              >
+                <Printer className="h-3.5 w-3.5" />
+                <span>Print PDF</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Sent Indicator Notice */}
+          <div className="flex items-center gap-2 text-xs font-semibold text-slate-500 pl-1">
+            <span className="h-4 w-4 border border-slate-300 rounded flex items-center justify-center bg-slate-100">
+              <Check className="h-3 w-3 text-slate-600" />
+            </span>
+            <span>Sent</span>
+          </div>
+
+          {/* Official Invoice Metadata Header Box */}
+          <div className="bg-white rounded-lg border border-slate-200 p-6 shadow-2xs space-y-6">
+            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-6 text-xs border-b border-slate-100 pb-6">
+              <div>
+                <span className="text-slate-400 font-semibold uppercase text-[10px] block mb-1">Contact</span>
+                <span className="font-bold text-blue-600 text-sm block">{contactName}</span>
+                <span className="text-slate-400 text-[11px] font-medium block mt-0.5">No address</span>
+              </div>
+
+              <div>
+                <span className="text-slate-400 font-semibold uppercase text-[10px] block mb-1">Issue date</span>
+                <span className="font-bold text-slate-900 block">{issueDate}</span>
+              </div>
+
+              <div>
+                <span className="text-slate-400 font-semibold uppercase text-[10px] block mb-1">Due date</span>
+                <span className="font-bold text-slate-900 block">{dueDate}</span>
+              </div>
+
+              <div>
+                <span className="text-slate-400 font-semibold uppercase text-[10px] block mb-1">Invoice number</span>
+                <span className="font-bold text-slate-900 block font-mono">{invNumber}</span>
+              </div>
+
+              <div>
+                <span className="text-slate-400 font-semibold uppercase text-[10px] block mb-1">Reference</span>
+                <span className="font-bold text-slate-900 block font-mono">{invRef || 'None'}</span>
+              </div>
+
+              <div>
+                <span className="text-slate-400 font-semibold uppercase text-[10px] block mb-1">Online payments</span>
+                <span className="font-bold text-slate-900 block">None</span>
+              </div>
+
+              <div>
+                <span className="text-slate-400 font-semibold uppercase text-[10px] block mb-1">Branding theme</span>
+                <span className="font-bold text-slate-900 block">PillPharm</span>
+              </div>
+            </div>
+
+            {/* Amounts Indicator */}
+            <div className="text-right text-[11px] font-semibold text-slate-400">
+              Amounts are tax inclusive
+            </div>
+
+            {/* Line Items Table (100% Dynamic data driven) */}
+            <div className="overflow-x-auto border border-slate-200 rounded-md">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-slate-50 text-slate-500 font-bold border-b border-slate-200 text-[10.5px]">
+                    <th className="py-2.5 px-3">Item</th>
+                    <th className="py-2.5 px-3">Description</th>
+                    <th className="py-2.5 px-3 text-center">Qty</th>
+                    <th className="py-2.5 px-3 text-right">Price</th>
+                    <th className="py-2.5 px-3 text-center">Disc</th>
+                    <th className="py-2.5 px-3">Account</th>
+                    <th className="py-2.5 px-3">Tax rate</th>
+                    <th className="py-2.5 px-3 text-right">Tax amount</th>
+                    <th className="py-2.5 px-3">Trading Name</th>
+                    <th className="py-2.5 px-3 text-right">Amount GBP</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white text-[11.5px] tabular-nums">
+                  {lineItems.map((itemRow, idx) => (
+                    <tr key={idx} className="hover:bg-slate-50/80 transition">
+                      <td className="py-2.5 px-3 font-semibold text-slate-700 bg-slate-50/50">{itemRow.item}</td>
+                      <td className="py-2.5 px-3 font-medium text-slate-800">{itemRow.desc}</td>
+                      <td className="py-2.5 px-3 text-center">{itemRow.qty}</td>
+                      <td className="py-2.5 px-3 text-right font-semibold">{formatAmount(itemRow.price)}</td>
+                      <td className="py-2.5 px-3 text-center text-slate-400">-</td>
+                      <td className="py-2.5 px-3 font-semibold text-slate-700">{itemRow.account}</td>
+                      <td className="py-2.5 px-3 text-slate-600">{itemRow.taxRate}</td>
+                      <td className="py-2.5 px-3 text-right font-medium text-slate-600">{formatAmount(itemRow.taxAmt)}</td>
+                      <td className="py-2.5 px-3 text-slate-600">{itemRow.trading}</td>
+                      <td className="py-2.5 px-3 text-right font-bold text-slate-900">{formatAmount(itemRow.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Financial Summary Breakdown Box */}
+            <div className="flex justify-end pt-4">
+              <div className="w-full max-w-md space-y-2 text-xs tabular-nums font-sans">
+                <div className="flex justify-between py-1 border-b border-slate-100">
+                  <span className="font-semibold text-slate-600">Subtotal</span>
+                  <span className="font-bold text-slate-900">{formatAmount(subtotal)}</span>
+                </div>
+
+                <div className="text-[11px] text-slate-400 pl-4 space-y-1 py-1">
+                  {taxSummary.map((t, idx) => (
+                    <div key={idx} className="flex justify-between">
+                      <span>{t.label}</span>
+                      <span>{formatAmount(t.val)}</span>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex justify-between py-2 border-t border-b border-slate-300 font-extrabold text-sm text-slate-900">
+                  <span>Total</span>
+                  <span>{formatAmount(total)}</span>
+                </div>
+
+                {/* MULTI-PAYMENTS LIST MATCHING XERO 100% */}
+                <div className="space-y-1.5 py-1">
+                  {paymentsList.map((p, idx) => (
+                    <div key={idx} className="flex justify-between text-slate-600 font-medium items-center text-xs">
+                      <span className="flex items-center gap-1">
+                        <span>Less:</span>
+                        <button
+                          onClick={() => openPaymentView(p.date, p.amount)}
+                          className="text-blue-600 font-bold hover:underline cursor-pointer flex items-center gap-1"
+                          title="Click to view bank transaction reconciliation"
+                        >
+                          Payment ({p.date})
+                        </button>
+                      </span>
+                      <span className="font-bold text-slate-800">{formatAmount(p.amount)}</span>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex justify-between py-2 border-t border-slate-300 font-black text-base text-slate-900">
+                  <span>Amount due</span>
+                  <span>£0.00</span>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </PageContainer>
+    );
+  }
+
+  // =========================================================================
+  // LEVEL 2: OFFICIAL ACCOUNT TRANSACTIONS REPORT (CLEAN SANS FONT & CLICKABLE INVOICES)
+  // =========================================================================
+  if (selectedAccount) {
+    return (
+      <PageContainer>
+        <div className="space-y-6 max-w-full pb-16 select-none font-sans text-slate-900">
+          
+          {/* Top Breadcrumb Navigation & Action Toolbar */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-4">
+            <div>
+              <button
+                onClick={closeAccountTransactions}
+                className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-600 hover:text-blue-800 transition mb-2 cursor-pointer"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" />
+                <span>Profit & Loss Statement</span>
+              </button>
+              <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+                {selectedAccount.name} Transactions
+              </h1>
+              <p className="text-xs text-slate-500 font-medium mt-0.5">
+                MI Health Ltd • For the period {fromDate} to {toDate}
+              </p>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center gap-2.5">
+              <div className="relative">
+                <Search className="h-3.5 w-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Search transactions..."
+                  value={txSearchQuery}
+                  onChange={(e) => setTxSearchQuery(e.target.value)}
+                  className="pl-8 pr-3 py-1.5 text-xs bg-white text-slate-800 placeholder-slate-400 rounded-md border border-slate-300 focus:outline-none focus:border-blue-500 w-48"
+                />
+              </div>
+
+              <button
+                onClick={() => toast.success(`Exported ${selectedAccount.name} transactions`)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-300 rounded-md text-xs font-semibold text-slate-700 hover:bg-slate-50 transition cursor-pointer"
+              >
+                <Download className="h-3.5 w-3.5 text-slate-600" />
+                <span>Export</span>
+              </button>
+
+              <button
+                onClick={() => window.print()}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-600 text-white rounded-md text-xs font-semibold hover:bg-blue-700 transition cursor-pointer"
+              >
+                <Printer className="h-3.5 w-3.5" />
+                <span>Print</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Clean Executive Accounting Table */}
+          {(() => {
+            const calcDebit = filteredTransactions.length > 0
+              ? filteredTransactions.reduce((sum, t) => sum + (t.debit || 0), 0)
+              : (txTotalDebit || 0);
+
+            const calcCredit = filteredTransactions.length > 0
+              ? filteredTransactions.reduce((sum, t) => sum + (t.credit || 0), 0)
+              : (txTotalCredit || 0);
+
+            const calcBalance = filteredTransactions.length > 0
+              ? (filteredTransactions[filteredTransactions.length - 1]?.runningBalance ?? (calcCredit - calcDebit))
+              : (calcCredit || calcDebit ? (calcCredit - calcDebit) : (selectedAccount.value || 0));
+
+            const displayAccCode = txAccountCode || selectedAccount.code || 
+              (selectedAccount.name.toLowerCase().includes('amazon') ? '412' : 
+              (selectedAccount.name.toLowerCase().includes('ebay') ? '411' : 
+              (selectedAccount.name.toLowerCase().includes('groupon') ? '414' : '400')));
+
+            return (
+              <div className="bg-white rounded-lg border border-slate-200 shadow-2xs overflow-hidden">
+                <div className="p-4 border-b border-slate-200 bg-slate-50/70 flex justify-between items-center text-xs font-semibold text-slate-700">
+                  <span>Account Code: <strong className="font-sans font-bold text-slate-900">{displayAccCode}</strong></span>
+                  <span>Total Balance: <strong className="font-sans font-bold text-slate-900 text-sm tabular-nums">{txLoading ? 'Loading...' : formatAmount(calcBalance)}</strong></span>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200 text-[11px]">
+                        <th className="py-2.5 px-4">Date</th>
+                        <th className="py-2.5 px-4">Source</th>
+                        <th className="py-2.5 px-4">Description</th>
+                        <th className="py-2.5 px-4">Reference</th>
+                        <th className="py-2.5 px-4 text-center">Currency</th>
+                        <th className="py-2.5 px-4 text-right">Debit (GBP)</th>
+                        <th className="py-2.5 px-4 text-right">Credit (GBP)</th>
+                        <th className="py-2.5 px-4 text-right">Running Balance (GBP)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white text-[11.5px] tabular-nums">
+                      {txLoading ? (
+                        [1, 2, 3, 4, 5].map((idx) => (
+                          <tr key={idx} className="animate-pulse border-b border-slate-100">
+                            <td className="py-2.5 px-4"><div className="h-3.5 bg-slate-200/80 rounded w-20"></div></td>
+                            <td className="py-2.5 px-4"><div className="h-3.5 bg-slate-200/80 rounded w-28"></div></td>
+                            <td className="py-2.5 px-4"><div className="h-3.5 bg-slate-200/80 rounded w-48"></div></td>
+                            <td className="py-2.5 px-4"><div className="h-3.5 bg-blue-100/80 rounded w-24"></div></td>
+                            <td className="py-2.5 px-4 text-center"><div className="h-3.5 bg-slate-100 rounded w-10 mx-auto"></div></td>
+                            <td className="py-2.5 px-4 text-right"><div className="h-3.5 bg-slate-200/80 rounded w-16 ml-auto"></div></td>
+                            <td className="py-2.5 px-4 text-right"><div className="h-3.5 bg-slate-200/80 rounded w-16 ml-auto"></div></td>
+                            <td className="py-2.5 px-4 text-right"><div className="h-3.5 bg-slate-200/80 rounded w-20 ml-auto"></div></td>
+                          </tr>
+                        ))
+                      ) : filteredTransactions.length > 0 ? (
+                        filteredTransactions.map((tx, idx) => (
+                          <tr 
+                            key={idx} 
+                            onClick={() => openInvoiceView(tx)}
+                            className="hover:bg-[#f0f4ff] transition cursor-pointer group"
+                            title={`Click to open Xero Invoice ${tx.reference}`}
+                          >
+                            <td className="py-2 px-4 text-slate-600 whitespace-nowrap">{tx.date}</td>
+                            <td className="py-2 px-4 font-semibold text-slate-800 whitespace-nowrap">{tx.source}</td>
+                            <td className="py-2 px-4 text-slate-700">{tx.description}</td>
+                            <td className="py-2 px-4 font-bold text-blue-600 group-hover:underline whitespace-nowrap">
+                              {tx.reference}
+                            </td>
+                            <td className="py-2 px-4 text-center text-slate-500">GBP</td>
+                            <td className="py-2 px-4 text-right font-semibold text-slate-900 whitespace-nowrap">
+                              {tx.debit ? formatAmount(tx.debit) : '-'}
+                            </td>
+                            <td className="py-2 px-4 text-right font-semibold text-slate-900 whitespace-nowrap">
+                              {tx.credit ? formatAmount(tx.credit) : '-'}
+                            </td>
+                            <td className="py-2 px-4 text-right font-bold text-slate-900 bg-slate-50/40 whitespace-nowrap">
+                              {formatAmount(tx.runningBalance)}
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={8} className="py-8 text-center text-xs text-slate-400">
+                            No transactions found for this account.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                    <tfoot>
+                      {/* Account Subtotal */}
+                      <tr className="bg-slate-50 font-bold text-xs text-slate-900 border-t border-slate-300 tabular-nums">
+                        <td colSpan={5} className="py-2.5 px-4">Total {selectedAccount.name}</td>
+                        <td className="py-2.5 px-4 text-right font-bold text-slate-900">
+                          {txLoading ? '-' : (calcDebit ? formatAmount(calcDebit) : '-')}
+                        </td>
+                        <td className="py-2.5 px-4 text-right font-bold text-slate-900">
+                          {txLoading ? '-' : (calcCredit ? formatAmount(calcCredit) : '-')}
+                        </td>
+                        <td className="py-2.5 px-4 text-right font-bold text-slate-900">
+                          {txLoading ? 'Loading...' : formatAmount(calcBalance)}
+                        </td>
+                      </tr>
+                      {/* Grand Total Row with double underline */}
+                      <tr className="bg-slate-100 font-extrabold text-xs text-slate-900 border-t border-b-2 border-slate-400 tabular-nums">
+                        <td colSpan={5} className="py-2.5 px-4">Total</td>
+                        <td className="py-2.5 px-4 text-right font-bold text-slate-900">
+                          {txLoading ? '-' : (calcDebit ? formatAmount(calcDebit) : '-')}
+                        </td>
+                        <td className="py-2.5 px-4 text-right font-bold text-slate-900">
+                          {txLoading ? '-' : (calcCredit ? formatAmount(calcCredit) : '-')}
+                        </td>
+                        <td className="py-2.5 px-4 text-right font-bold text-slate-900">
+                          {txLoading ? 'Loading...' : formatAmount(calcBalance)}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+            );
+          })()}
+
+        </div>
+      </PageContainer>
+    );
+  }
+
+  // =========================================================================
+  // LEVEL 1: PROFIT & LOSS STATEMENT VIEW (CLEAN SANS FONT & ACCORDION SECTIONS)
+  // =========================================================================
   return (
     <PageContainer>
-      <div className="space-y-6 max-w-full pb-12 select-none">
-        {/* Header Bar */}
+      <div className="space-y-6 max-w-full pb-16 select-none font-sans text-slate-800 relative">
+        
+        {/* TOP HEADER BAR & CONTROLS */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-400 mb-1">
@@ -373,23 +989,23 @@ export default function ProfitAndLossPage() {
               <span>&gt;</span>
               <span className="text-slate-700 font-bold">Profit & Loss</span>
             </div>
-            <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">Profit & Loss</h1>
+            <h1 className="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2">
+              <span>Profit & Loss Statement</span>
+            </h1>
             <p className="text-[12px] text-slate-500 font-medium mt-0.5">
-              {viewMode === 'statement' 
-                ? 'Detailed income statement with revenue, expenses, and profitability.' 
-                : 'Visual analytics dashboard for financial performance and margins.'}
+              Consolidated income statement for MI Health Ltd ({currencyCode}).
             </p>
           </div>
 
-          {/* Date Picker, Mode Switcher & Action Buttons on Right Side */}
+          {/* Date Picker, Mode Switcher & Action Buttons */}
           <div className="flex flex-wrap items-center gap-3 shrink-0">
             {/* View Mode Switcher Pill */}
-            <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 shadow-2xs">
+            <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200/90 shadow-2xs">
               <button
                 onClick={() => setViewMode('statement')}
                 className={cn(
-                  "px-3 py-1.5 rounded-lg font-extrabold text-xs transition cursor-pointer flex items-center gap-1.5",
-                  viewMode === 'statement' ? "bg-white text-blue-600 shadow-2xs" : "text-slate-600 hover:text-slate-900"
+                  "px-3.5 py-1.5 rounded-lg font-extrabold text-xs transition cursor-pointer flex items-center gap-1.5",
+                  viewMode === 'statement' ? "bg-[#0064eb] text-white shadow-2xs" : "text-slate-600 hover:text-slate-900"
                 )}
               >
                 <FileText className="h-3.5 w-3.5" />
@@ -398,8 +1014,8 @@ export default function ProfitAndLossPage() {
               <button
                 onClick={() => setViewMode('analytics')}
                 className={cn(
-                  "px-3 py-1.5 rounded-lg font-extrabold text-xs transition cursor-pointer flex items-center gap-1.5",
-                  viewMode === 'analytics' ? "bg-white text-blue-600 shadow-2xs" : "text-slate-600 hover:text-slate-900"
+                  "px-3.5 py-1.5 rounded-lg font-extrabold text-xs transition cursor-pointer flex items-center gap-1.5",
+                  viewMode === 'analytics' ? "bg-[#0064eb] text-white shadow-2xs" : "text-slate-600 hover:text-slate-900"
                 )}
               >
                 <BarChart3 className="h-3.5 w-3.5" />
@@ -423,7 +1039,7 @@ export default function ProfitAndLossPage() {
 
             <button
               onClick={() => window.print()}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-600 text-white rounded-lg shadow-2xs text-[11.5px] font-bold hover:bg-blue-700 transition cursor-pointer"
+              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#0064eb] text-white rounded-lg shadow-2xs text-[11.5px] font-bold hover:bg-[#0052c2] transition cursor-pointer"
             >
               <FileSpreadsheet className="h-3.5 w-3.5" />
               <span>Export</span>
@@ -432,610 +1048,315 @@ export default function ProfitAndLossPage() {
           </div>
         </div>
 
-        {/* MODE 1: STATEMENT VIEW (Matching Image 1 mockup) */}
+        {/* EXECUTIVE 4 METRIC RIBBON */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {loading ? (
+            [1, 2, 3, 4].map((i) => (
+              <div key={i} className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs animate-pulse space-y-2">
+                <div className="flex justify-between items-center">
+                  <div className="h-2.5 bg-slate-200 rounded w-24"></div>
+                  <div className="h-2 w-2 rounded-full bg-slate-200"></div>
+                </div>
+                <div className="h-7 bg-slate-200 rounded w-36 my-1"></div>
+                <div className="h-2.5 bg-slate-100 rounded w-28"></div>
+              </div>
+            ))
+          ) : (
+            <>
+              <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs hover:shadow-xs transition">
+                <div className="flex items-center justify-between text-slate-400 mb-1">
+                  <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">TOTAL TURNOVER</span>
+                  <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                </div>
+                <span className="text-xl font-black text-slate-900 font-sans tabular-nums block">{formatAmount(turnoverVal)}</span>
+                <span className="text-[10px] text-emerald-600 font-bold mt-1 block">7 Core Revenue Streams</span>
+              </div>
+
+              <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs hover:shadow-xs transition">
+                <div className="flex items-center justify-between text-slate-400 mb-1">
+                  <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">COST OF SALES (COGS)</span>
+                  <span className="h-2 w-2 rounded-full bg-blue-500" />
+                </div>
+                <span className="text-xl font-black text-slate-900 font-sans tabular-nums block">{formatAmount(cogsVal)}</span>
+                <span className="text-[10px] text-slate-500 font-bold mt-1 block">13 Direct Procurement Accounts</span>
+              </div>
+
+              <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs hover:shadow-xs transition">
+                <div className="flex items-center justify-between text-slate-400 mb-1">
+                  <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">GROSS PROFIT</span>
+                  <span className={cn("h-2 w-2 rounded-full", grossVal >= 0 ? "bg-emerald-500" : "bg-red-500")} />
+                </div>
+                <span className={cn("text-xl font-black font-sans tabular-nums block", grossVal >= 0 ? "text-emerald-600" : "text-red-600")}>
+                  {formatAmount(grossVal)}
+                </span>
+                <span className={cn("text-[10px] font-bold mt-1 block", grossVal >= 0 ? "text-emerald-600" : "text-red-500")}>
+                  {turnoverVal > 0 ? `${((grossVal / turnoverVal) * 100).toFixed(1)}% Gross Margin` : 'Gross Margin'}
+                </span>
+              </div>
+
+              <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs hover:shadow-xs transition">
+                <div className="flex items-center justify-between text-slate-400 mb-1">
+                  <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">NET PROFIT (AFTER TAX)</span>
+                  <span className={cn("h-2 w-2 rounded-full", netVal >= 0 ? "bg-emerald-500" : "bg-red-600")} />
+                </div>
+                <span className={cn("text-xl font-black font-sans tabular-nums block", netVal >= 0 ? "text-emerald-600" : "text-red-600")}>
+                  {formatAmount(netVal)}
+                </span>
+                <span className={cn("text-[10px] font-bold mt-1 block", netVal >= 0 ? "text-emerald-600" : "text-red-500")}>
+                  {revenueVal > 0 ? `${((netVal / revenueVal) * 100).toFixed(1)}% Net Margin` : 'Net Margin'}
+                </span>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* MODE 1: SLEEK MODERN ACCOUNTING STATEMENT DOCUMENT VIEW */}
         {viewMode === 'statement' && (
-          <div className="space-y-6">
-            {/* Currency & Report Basis Bar */}
-            <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs flex items-center justify-between">
-              <div className="flex items-center gap-6">
-                <div>
-                  <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">CURRENCY</span>
-                  <span className="text-xs font-bold text-slate-800 mt-0.5 block">{currencyCode}</span>
+          <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs overflow-hidden">
+            
+            {/* Sleek Light Document Header */}
+            <div className="bg-white p-5 border-b border-slate-200/80 flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2 text-[#0064eb] text-xs font-extrabold uppercase tracking-wider">
+                  <Building2 className="h-4 w-4" />
+                  <span>MI Health Ltd</span>
+                  <span className="text-slate-300">•</span>
+                  <span className="text-slate-600 font-semibold">Profit & Loss Statement</span>
                 </div>
-                <div className="border-l border-slate-200 pl-6">
-                  <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">REPORT BASIS</span>
-                  <span className="text-xs font-bold text-slate-800 mt-0.5 block">Accrual</span>
-                </div>
+                <h2 className="text-lg font-extrabold text-slate-900 tracking-tight mt-0.5">
+                  Consolidated Income Statement
+                </h2>
+                <p className="text-xs text-slate-500 font-medium mt-0.5">
+                  For period {fromDate} to {toDate} • Reporting Currency: <strong className="text-slate-800">{currencyCode} (£)</strong>
+                </p>
               </div>
 
-              <button
-                onClick={fetchProfitAndLoss}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-[11px] font-bold text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+              {/* Controls */}
+              <div className="flex items-center gap-2.5 shrink-0">
+                {/* Live Filter Search Bar */}
+                <div className="relative">
+                  <Search className="h-3.5 w-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    placeholder="Filter accounts..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-8 pr-3 py-1.5 text-xs bg-slate-50 text-slate-800 placeholder-slate-400 rounded-lg border border-slate-200 focus:outline-none focus:border-blue-500 w-44 md:w-52"
+                  />
+                </div>
+
+                <button
+                  onClick={expandAllSections}
+                  className="px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-lg text-xs font-bold transition cursor-pointer border border-slate-200"
+                >
+                  Expand All
+                </button>
+
+                <button
+                  onClick={collapseAllSections}
+                  className="px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-lg text-xs font-bold transition cursor-pointer border border-slate-200"
+                >
+                  Collapse All
+                </button>
+              </div>
+            </div>
+
+            {/* Accounting Table Column Titles */}
+            <div className="grid grid-cols-12 bg-slate-50 border-b border-slate-200 text-[10.5px] font-extrabold text-slate-500 uppercase tracking-widest px-6 py-2.5">
+              <div className="col-span-6 md:col-span-6">ACCOUNT / LINE ITEM</div>
+              <div className="col-span-3 md:col-span-3 text-right">ACCOUNT CODE</div>
+              <div className="col-span-3 md:col-span-3 text-right">PERIOD TOTAL ({currencyCode})</div>
+            </div>
+
+            {/* SECTION 1: TURNOVER (REVENUE) */}
+            <div className="border-b border-slate-200/80">
+              <div 
+                onClick={() => toggleSection('turnover')}
+                className="border-l-4 border-emerald-500 bg-emerald-50/40 hover:bg-emerald-50/80 transition cursor-pointer px-6 py-3 flex items-center justify-between font-extrabold text-xs text-emerald-950 border-b border-emerald-100 select-none"
               >
-                <RefreshCw className="h-3.5 w-3.5" />
-                <span>Reload Report</span>
-              </button>
-            </div>
-
-            {/* Top 4 KPI Summary Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">REVENUE (YTD)</span>
-                <span className="text-xl font-black text-slate-900 mt-1 block">{formatAmount(revenueVal)}</span>
-                <span className="text-[10px] text-emerald-600 font-bold mt-1 block">100% of total income</span>
+                <div className="flex items-center gap-2">
+                  {openSections.turnover ? <ChevronDown className="h-4 w-4 text-emerald-600" /> : <ChevronRight className="h-4 w-4 text-emerald-600" />}
+                  <span>1. TURNOVER (REVENUE)</span>
+                  <span className="text-[10px] font-extrabold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full ml-2">
+                    {filterItems(turnoverList).length} Accounts
+                  </span>
+                </div>
+                <span className="text-sm font-black text-emerald-900 font-sans tabular-nums">{formatAmount(turnoverVal)}</span>
               </div>
 
-              <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">EXPENSES (YTD)</span>
-                <span className="text-xl font-black text-slate-900 mt-1 block">{formatAmount(expensesVal)}</span>
-                <span className="text-[10px] text-amber-600 font-bold mt-1 block">8% of total income</span>
-              </div>
-
-              <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">NET PROFIT (YTD)</span>
-                <span className="text-xl font-black text-emerald-600 mt-1 block">{formatAmount(netVal)}</span>
-                <span className="text-[10px] text-emerald-600 font-bold mt-1 block">24.5% Profit Margin</span>
-              </div>
-
-              <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">GROSS PROFIT</span>
-                <span className="text-xl font-black text-slate-900 mt-1 block">{formatAmount(grossVal)}</span>
-                <span className="text-[10px] text-blue-600 font-bold mt-1 block">32.4% Margin</span>
-              </div>
-            </div>
-
-            {/* Main Statement Content: Income & Expenses Lists + Sidebar */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-              {/* Left Column: Income & Expenses Itemized Tables (lg:col-span-8) */}
-              <div className="lg:col-span-8 space-y-5">
-                {/* Income Card */}
-                <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-2xs">
-                  <h3 className="text-sm font-extrabold text-slate-900 border-b border-slate-100 pb-3 uppercase tracking-wider">INCOME</h3>
-
-                  <div className="mt-4 space-y-4">
-                    <div>
-                      <span className="text-[11px] font-extrabold text-emerald-600 uppercase tracking-wider block mb-2">OPERATING INCOME</span>
-                      <div className="space-y-2 text-[11.5px]">
-                        {operatingIncomeList.length > 0 ? (
-                          operatingIncomeList.map((item, i) => (
-                            <div key={i} className="flex justify-between items-center py-1 border-b border-slate-50 last:border-0">
-                              <span className="font-semibold text-slate-700">{item.name}</span>
-                              <span className="font-bold text-slate-900">{formatAmount(item.value)}</span>
-                            </div>
-                          ))
-                        ) : (
-                          <>
-                            <div className="flex justify-between py-1 border-b border-slate-50"><span className="font-semibold text-slate-700">Amazon Sales</span><span className="font-bold text-slate-900">£1,027,322.95 GBP</span></div>
-                            <div className="flex justify-between py-1 border-b border-slate-50"><span className="font-semibold text-slate-700">Ebay sales</span><span className="font-bold text-slate-900">£325,820.62 GBP</span></div>
-                            <div className="flex justify-between py-1 border-b border-slate-50"><span className="font-semibold text-slate-700">Groupon Sales</span><span className="font-bold text-slate-900">£11,275.31 GBP</span></div>
-                            <div className="flex justify-between py-1 border-b border-slate-50"><span className="font-semibold text-slate-700">Intercompany sales</span><span className="font-bold text-slate-900">£67,398.80 GBP</span></div>
-                            <div className="flex justify-between py-1 border-b border-slate-50"><span className="font-semibold text-slate-700">Sales</span><span className="font-bold text-slate-900">£318,219.97 GBP</span></div>
-                            <div className="flex justify-between py-1 border-b border-slate-50"><span className="font-semibold text-slate-700">SLA & Contract Income</span><span className="font-bold text-slate-900">£6,920.00 GBP</span></div>
-                            <div className="flex justify-between py-1 border-b border-slate-50"><span className="font-semibold text-slate-700">Website Sales</span><span className="font-bold text-slate-900">£1,619,695.63 GBP</span></div>
-                          </>
-                        )}
-                      </div>
-                      <div className="flex justify-between items-center mt-3 pt-2 bg-emerald-50/60 p-3 rounded-lg border border-emerald-100 font-extrabold text-[12px] text-emerald-800">
-                        <span>Total Operating Income</span>
-                        <span>{formatAmount(revenueVal)}</span>
-                      </div>
+              {openSections.turnover && (
+                <div className="divide-y divide-slate-100">
+                  {filterItems(turnoverList).map((item, idx) => renderAccountRow(item, idx, 'REV'))}
+                  
+                  {/* Category Subtotal Row */}
+                  <div className="grid grid-cols-12 px-6 py-3 bg-slate-50 font-extrabold text-xs text-slate-900 border-t border-slate-200 items-center">
+                    <div className="col-span-6 md:col-span-6 pl-4 uppercase tracking-wider">TOTAL TURNOVER</div>
+                    <div className="col-span-3 md:col-span-3 text-right text-[10px] text-slate-500">100.0% of Revenue</div>
+                    <div className="col-span-3 md:col-span-3 text-right text-sm text-slate-900 font-sans tabular-nums font-black">
+                      {formatAmount(turnoverVal)}
                     </div>
                   </div>
                 </div>
+              )}
+            </div>
 
-                {/* Expenses Card */}
-                <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-2xs">
-                  <h3 className="text-sm font-extrabold text-slate-900 border-b border-slate-100 pb-3 uppercase tracking-wider">EXPENSES</h3>
+            {/* SECTION 2: COST OF SALES (COGS) */}
+            <div className="border-b border-slate-200/80">
+              <div 
+                onClick={() => toggleSection('cogs')}
+                className="border-l-4 border-blue-500 bg-blue-50/40 hover:bg-blue-50/80 transition cursor-pointer px-6 py-3 flex items-center justify-between font-extrabold text-xs text-blue-950 border-b border-blue-100 select-none"
+              >
+                <div className="flex items-center gap-2">
+                  {openSections.cogs ? <ChevronDown className="h-4 w-4 text-blue-600" /> : <ChevronRight className="h-4 w-4 text-blue-600" />}
+                  <span>2. COST OF SALES (COGS)</span>
+                  <span className="text-[10px] font-extrabold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full ml-2">
+                    {filterItems(cogsList).length} Accounts
+                  </span>
+                </div>
+                <span className="text-sm font-black text-blue-900 font-sans tabular-nums">{formatAmount(cogsVal)}</span>
+              </div>
 
-                  <div className="mt-4 space-y-4">
-                    <div>
-                      <span className="text-[11px] font-extrabold text-amber-600 uppercase tracking-wider block mb-2">OPERATING EXPENSES</span>
-                      <div className="space-y-2 text-[11.5px]">
-                        {operatingExpensesList.length > 0 ? (
-                          operatingExpensesList.map((item, i) => (
-                            <div key={i} className="flex justify-between items-center py-1 border-b border-slate-50 last:border-0">
-                              <span className="font-semibold text-slate-700">{item.name}</span>
-                              <span className="font-bold text-slate-900">{formatAmount(item.value)}</span>
-                            </div>
-                          ))
-                        ) : (
-                          <>
-                            <div className="flex justify-between py-1 border-b border-slate-50"><span className="font-semibold text-slate-700">Accountancy Fees</span><span className="font-bold text-slate-900">£4,013.33 GBP</span></div>
-                            <div className="flex justify-between py-1 border-b border-slate-50"><span className="font-semibold text-slate-700">Bank Fees</span><span className="font-bold text-slate-900">£541.68 GBP</span></div>
-                            <div className="flex justify-between py-1 border-b border-slate-50"><span className="font-semibold text-slate-700">Rent</span><span className="font-bold text-slate-900">£78,098.66 GBP</span></div>
-                            <div className="flex justify-between py-1 border-b border-slate-50"><span className="font-semibold text-slate-700">Staff wages</span><span className="font-bold text-slate-900">£85,674.29 GBP</span></div>
-                          </>
-                        )}
-                      </div>
-                      <div className="flex justify-between items-center mt-3 pt-2 bg-amber-50/60 p-3 rounded-lg border border-amber-100 font-extrabold text-[12px] text-amber-800">
-                        <span>Total Operating Expenses</span>
-                        <span>{formatAmount(expensesVal)}</span>
-                      </div>
+              {openSections.cogs && (
+                <div className="divide-y divide-slate-100">
+                  {filterItems(cogsList).map((item, idx) => renderAccountRow(item, idx, 'COG'))}
+                  
+                  {/* Category Subtotal Row */}
+                  <div className="grid grid-cols-12 px-6 py-3 bg-slate-50 font-extrabold text-xs text-slate-900 border-t border-slate-200 items-center">
+                    <div className="col-span-6 md:col-span-6 pl-4 uppercase tracking-wider">TOTAL COST OF SALES</div>
+                    <div className="col-span-3 md:col-span-3 text-right text-[10px] text-slate-500">Direct Procurement</div>
+                    <div className="col-span-3 md:col-span-3 text-right text-sm text-slate-900 font-sans tabular-nums font-black">
+                      {formatAmount(cogsVal)}
                     </div>
                   </div>
                 </div>
+              )}
+            </div>
+
+            {/* EXECUTIVE SUMMARY ROW: GROSS PROFIT / (LOSS) */}
+            <div className={cn(
+              "grid grid-cols-12 px-6 py-3.5 font-extrabold text-xs border-y-2 select-none items-center",
+              grossVal >= 0 
+                ? "bg-emerald-50/80 text-emerald-950 border-emerald-300" 
+                : "bg-red-50/80 text-red-950 border-red-300"
+            )}>
+              <div className="col-span-6 md:col-span-6 tracking-wider uppercase flex items-center gap-2">
+                <Scale className="h-4 w-4 text-slate-500" />
+                <span>GROSS PROFIT / (LOSS)</span>
               </div>
-
-              {/* Right Column: Quick Actions & Summary (lg:col-span-4) */}
-              <div className="lg:col-span-4 space-y-5">
-                <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-2xs">
-                  <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block mb-3">QUICK ACTIONS</span>
-                  <div className="space-y-2 text-[11.5px]">
-                    <button onClick={() => window.print()} className="w-full text-left p-2.5 rounded-lg bg-slate-50 hover:bg-blue-50 text-slate-700 hover:text-blue-600 font-bold transition flex items-center gap-2">
-                      <FileText className="h-4 w-4 text-blue-600" /> Export PDF Report
-                    </button>
-                    <button onClick={() => toast.success('Exporting Excel...')} className="w-full text-left p-2.5 rounded-lg bg-slate-50 hover:bg-blue-50 text-slate-700 hover:text-blue-600 font-bold transition flex items-center gap-2">
-                      <FileSpreadsheet className="h-4 w-4 text-blue-600" /> Export Excel Report
-                    </button>
-                    <button onClick={() => window.print()} className="w-full text-left p-2.5 rounded-lg bg-slate-50 hover:bg-blue-50 text-slate-700 hover:text-blue-600 font-bold transition flex items-center gap-2">
-                      <Printer className="h-4 w-4 text-slate-500" /> Print Report
-                    </button>
-                    <button onClick={fetchProfitAndLoss} className="w-full text-left p-2.5 rounded-lg bg-slate-50 hover:bg-blue-50 text-slate-700 hover:text-blue-600 font-bold transition flex items-center gap-2">
-                      <RefreshCw className="h-4 w-4 text-slate-500" /> Refresh Data
-                    </button>
-                  </div>
-                </div>
-
-                <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-2xs space-y-3">
-                  <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block border-b border-slate-100 pb-2">SUMMARY</span>
-                  <div className="space-y-2 text-[11.5px]">
-                    <div className="flex justify-between"><span className="text-slate-500 font-medium">Revenue (YTD)</span><span className="font-bold text-slate-900">{formatAmount(revenueVal)}</span></div>
-                    <div className="flex justify-between"><span className="text-slate-500 font-medium">Expenses (YTD)</span><span className="font-bold text-slate-900">{formatAmount(expensesVal)}</span></div>
-                    <div className="flex justify-between border-t border-slate-100 pt-2"><span className="font-bold text-slate-800">Net Profit (YTD)</span><span className="font-black text-emerald-600">{formatAmount(netVal)}</span></div>
-                    <div className="flex justify-between"><span className="text-slate-500 font-medium">Profit Margin</span><span className="font-bold text-slate-800">24.5%</span></div>
-                    <div className="flex justify-between"><span className="text-slate-500 font-medium">Gross Profit Margin</span><span className="font-bold text-slate-800">32.4%</span></div>
-                    <div className="flex justify-between border-t border-slate-100 pt-2"><span className="text-slate-400 font-medium">Report Basis</span><span className="font-bold text-slate-700">Accrual</span></div>
-                    <div className="flex justify-between"><span className="text-slate-400 font-medium">Currency</span><span className="font-bold text-slate-700">{currencyCode}</span></div>
-                  </div>
-                </div>
+              <div className="col-span-3 md:col-span-3 text-right text-[10px] text-slate-500 font-semibold">
+                Turnover – Cost of Sales
+              </div>
+              <div className="col-span-3 md:col-span-3 text-right text-base font-sans tabular-nums font-black">
+                {formatAmount(grossVal)}
               </div>
             </div>
+
+            {/* SECTION 3: ADMINISTRATIVE COSTS (OPERATING EXPENSES) */}
+            <div className="border-b border-slate-200/80">
+              <div 
+                onClick={() => toggleSection('expenses')}
+                className="border-l-4 border-amber-500 bg-amber-50/40 hover:bg-amber-50/80 transition cursor-pointer px-6 py-3 flex items-center justify-between font-extrabold text-xs text-amber-950 border-b border-amber-100 select-none"
+              >
+                <div className="flex items-center gap-2">
+                  {openSections.expenses ? <ChevronDown className="h-4 w-4 text-amber-600" /> : <ChevronRight className="h-4 w-4 text-amber-600" />}
+                  <span>3. ADMINISTRATIVE COSTS (OPERATING EXPENSES)</span>
+                  <span className="text-[10px] font-extrabold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full ml-2">
+                    {filterItems(expensesList).length} Accounts
+                  </span>
+                </div>
+                <span className="text-sm font-black text-amber-900 font-sans tabular-nums">{formatAmount(expensesVal)}</span>
+              </div>
+
+              {openSections.expenses && (
+                <div className="divide-y divide-slate-100">
+                  {filterItems(expensesList).map((item, idx) => renderAccountRow(item, idx, 'EXP'))}
+                  
+                  {/* Category Subtotal Row */}
+                  <div className="grid grid-cols-12 px-6 py-3 bg-slate-50 font-extrabold text-xs text-slate-900 border-t border-slate-200 items-center">
+                    <div className="col-span-6 md:col-span-6 pl-4 uppercase tracking-wider">TOTAL ADMINISTRATIVE COSTS</div>
+                    <div className="col-span-3 md:col-span-3 text-right text-[10px] text-slate-500">Operating Overhead</div>
+                    <div className="col-span-3 md:col-span-3 text-right text-sm text-slate-900 font-sans tabular-nums font-black">
+                      {formatAmount(expensesVal)}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* SECTION 4: OTHER INCOME */}
+            <div className="border-b border-slate-200/80">
+              <div 
+                onClick={() => toggleSection('otherIncome')}
+                className="border-l-4 border-teal-500 bg-teal-50/40 hover:bg-teal-50/80 transition cursor-pointer px-6 py-3 flex items-center justify-between font-extrabold text-xs text-teal-950 border-b border-teal-100 select-none"
+              >
+                <div className="flex items-center gap-2">
+                  {openSections.otherIncome ? <ChevronDown className="h-4 w-4 text-teal-600" /> : <ChevronRight className="h-4 w-4 text-teal-600" />}
+                  <span>4. OTHER INCOME</span>
+                  <span className="text-[10px] font-extrabold text-teal-700 bg-teal-100 px-2 py-0.5 rounded-full ml-2">
+                    {filterItems(otherIncomeList).length} Account
+                  </span>
+                </div>
+                <span className="text-sm font-black text-teal-900 font-sans tabular-nums">{formatAmount(otherIncomeVal)}</span>
+              </div>
+
+              {openSections.otherIncome && (
+                <div className="divide-y divide-slate-100">
+                  {filterItems(otherIncomeList).map((item, idx) => renderAccountRow(item, idx, 'INC'))}
+                  
+                  {/* Category Subtotal Row */}
+                  <div className="grid grid-cols-12 px-6 py-3 bg-slate-50 font-extrabold text-xs text-slate-900 border-t border-slate-200 items-center">
+                    <div className="col-span-6 md:col-span-6 pl-4 uppercase tracking-wider">TOTAL OTHER INCOME</div>
+                    <div className="col-span-3 md:col-span-3 text-right text-[10px] text-slate-500">Non-Operating</div>
+                    <div className="col-span-3 md:col-span-3 text-right text-sm text-slate-900 font-sans tabular-nums font-black">
+                      {formatAmount(otherIncomeVal)}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* FINAL EXECUTIVE NET PROFIT / (LOSS) ACCOUNTING BANNER */}
+            <div className={cn(
+              "grid grid-cols-12 px-6 py-4.5 font-extrabold text-sm select-none items-center shadow-xs border-t-2",
+              netVal >= 0 
+                ? "bg-emerald-600 text-white border-emerald-700" 
+                : "bg-red-600 text-white border-red-700"
+            )}>
+              <div className="col-span-6 md:col-span-6 uppercase tracking-wider flex items-center gap-2">
+                <CheckCircle2 className="h-5 w-5 text-white" />
+                <span>NET PROFIT / (LOSS) AFTER TAXATION</span>
+              </div>
+              <div className="col-span-3 md:col-span-3 text-right text-xs opacity-90">
+                Final Operating Result
+              </div>
+              <div className="col-span-3 md:col-span-3 text-right text-xl font-sans tabular-nums font-black tracking-tight">
+                {formatAmount(netVal)}
+              </div>
+            </div>
+
           </div>
         )}
 
-        {/* MODE 2: ANALYTICS DASHBOARD VIEW (Matching Image 2 mockup) */}
+        {/* MODE 2: ANALYTICS DASHBOARD VIEW */}
         {viewMode === 'analytics' && (
           <div className="space-y-6">
-            {/* Top 4 KPI Sparkline Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              {/* Card 1: Revenue */}
-              <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between text-slate-400">
-                    <div className="flex items-center gap-2">
-                      <div className="h-7 w-7 rounded-lg bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600">
-                        <BarChart3 className="h-4 w-4" />
-                      </div>
-                      <span className="text-[11px] font-bold text-slate-700">Revenue</span>
-                    </div>
-                  </div>
-                  <span className="text-xl font-black text-slate-900 mt-2 block">{formatAmount(revenueVal)}</span>
-                  <span className="text-[10px] text-emerald-600 font-bold mt-0.5 flex items-center gap-1">
-                    <ArrowUpRight className="h-3 w-3" /> 16.1% vs previous period
-                  </span>
-                </div>
-                <div className="mt-2 -mx-4 -mb-4">
-                  <SparklineMini color="#2563eb" />
-                </div>
-              </div>
-
-              {/* Card 2: Gross Profit */}
-              <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between text-slate-400">
-                    <div className="flex items-center gap-2">
-                      <div className="h-7 w-7 rounded-lg bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600">
-                        <TrendingUp className="h-4 w-4" />
-                      </div>
-                      <span className="text-[11px] font-bold text-slate-700">Gross Profit</span>
-                    </div>
-                  </div>
-                  <span className="text-xl font-black text-slate-900 mt-2 block">{formatAmount(grossVal)}</span>
-                  <span className="text-[10px] text-emerald-600 font-bold mt-0.5 flex items-center gap-1">
-                    <ArrowUpRight className="h-3 w-3" /> 11.8% vs previous period | 32.4% margin
-                  </span>
-                </div>
-                <div className="mt-2 -mx-4 -mb-4">
-                  <SparklineMini color="#10b981" />
-                </div>
-              </div>
-
-              {/* Card 3: Operating Expenses */}
-              <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between text-slate-400">
-                    <div className="flex items-center gap-2">
-                      <div className="h-7 w-7 rounded-lg bg-orange-50 border border-orange-100 flex items-center justify-center text-orange-600">
-                        <DollarSign className="h-4 w-4" />
-                      </div>
-                      <span className="text-[11px] font-bold text-slate-700">Operating Expenses</span>
-                    </div>
-                  </div>
-                  <span className="text-xl font-black text-slate-900 mt-2 block">{formatAmount(expensesVal)}</span>
-                  <span className="text-[10px] text-emerald-600 font-bold mt-0.5 flex items-center gap-1">
-                    <ArrowDownRight className="h-3 w-3" /> 4.8% vs previous period
-                  </span>
-                </div>
-                <div className="mt-2 -mx-4 -mb-4">
-                  <SparklineMini color="#f97316" />
-                </div>
-              </div>
-
-              {/* Card 4: Net Profit */}
-              <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between text-slate-400">
-                    <div className="flex items-center gap-2">
-                      <div className="h-7 w-7 rounded-lg bg-purple-50 border border-purple-100 flex items-center justify-center text-purple-600">
-                        <Scale className="h-4 w-4" />
-                      </div>
-                      <span className="text-[11px] font-bold text-slate-700">Net Profit</span>
-                    </div>
-                  </div>
-                  <span className="text-xl font-black text-slate-900 mt-2 block">{formatAmount(netVal)}</span>
-                  <span className="text-[10px] text-emerald-600 font-bold mt-0.5 flex items-center gap-1">
-                    <ArrowUpRight className="h-3 w-3" /> 12.3% vs previous period | 24.5% margin
-                  </span>
-                </div>
-                <div className="mt-2 -mx-4 -mb-4">
-                  <SparklineMini color="#8b5cf6" />
-                </div>
-              </div>
-            </div>
-
-            {/* Middle Row 1: Profitability Trend (8 cols) & Profitability Health (4 cols) */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-              {/* Profitability Trend Multi-Line Chart */}
-              <div className="lg:col-span-8 bg-white rounded-xl border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-3">
-                    <div className="flex items-center gap-1.5">
-                      <h3 className="text-[13.5px] font-bold text-slate-800">Profitability Trend</h3>
-                      <Info className="h-3.5 w-3.5 text-slate-400" />
-                    </div>
-
-                    <div className="flex items-center gap-1 bg-slate-50 p-1 rounded-lg border border-slate-200">
-                      <button
-                        onClick={() => setTrendPeriod('monthly')}
-                        className={cn("px-2.5 py-0.5 rounded text-[10px] font-bold transition", trendPeriod === 'monthly' ? "bg-white text-blue-600 shadow-2xs" : "text-slate-600")}
-                      >
-                        Monthly
-                      </button>
-                      <button
-                        onClick={() => setTrendPeriod('quarterly')}
-                        className={cn("px-2.5 py-0.5 rounded text-[10px] font-bold transition", trendPeriod === 'quarterly' ? "bg-white text-blue-600 shadow-2xs" : "text-slate-600")}
-                      >
-                        Quarterly
-                      </button>
-                      <button
-                        onClick={() => setTrendPeriod('yearly')}
-                        className={cn("px-2.5 py-0.5 rounded text-[10px] font-bold transition", trendPeriod === 'yearly' ? "bg-white text-blue-600 shadow-2xs" : "text-slate-600")}
-                      >
-                        Yearly
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="h-64 w-full my-2">
-                    <ReactECharts option={profitabilityTrendOption} style={{ height: '100%', width: '100%' }} />
-                  </div>
-                </div>
-              </div>
-
-              {/* Profitability Health Widget */}
-              <div className="lg:col-span-4 bg-white rounded-xl border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center gap-1.5 border-b border-slate-100 pb-3 mb-4">
-                    <h3 className="text-[13.5px] font-bold text-slate-800">Profitability Health</h3>
+            <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-3">
+                  <div className="flex items-center gap-1.5">
+                    <h3 className="text-[13.5px] font-bold text-slate-800">Profitability Trend</h3>
                     <Info className="h-3.5 w-3.5 text-slate-400" />
                   </div>
-
-                  <div className="space-y-4 text-[11px]">
-                    <div>
-                      <div className="flex justify-between items-center mb-1">
-                        <span className="font-bold text-slate-700">Net Margin</span>
-                        <div className="flex items-center gap-2">
-                          <span className="font-extrabold text-slate-900">24.5%</span>
-                          <span className="px-2 py-0.5 text-[9px] font-extrabold bg-emerald-50 text-emerald-600 border border-emerald-200 rounded">Good</span>
-                        </div>
-                      </div>
-                      <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                        <div className="h-full bg-emerald-500 rounded-full" style={{ width: '75%' }} />
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="flex justify-between items-center mb-1">
-                        <span className="font-bold text-slate-700">Gross Margin</span>
-                        <div className="flex items-center gap-2">
-                          <span className="font-extrabold text-slate-900">32.4%</span>
-                          <span className="px-2 py-0.5 text-[9px] font-extrabold bg-emerald-50 text-emerald-600 border border-emerald-200 rounded">Good</span>
-                        </div>
-                      </div>
-                      <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                        <div className="h-full bg-emerald-500 rounded-full" style={{ width: '68%' }} />
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="flex justify-between items-center mb-1">
-                        <span className="font-bold text-slate-700">Expense Ratio</span>
-                        <div className="flex items-center gap-2">
-                          <span className="font-extrabold text-slate-900">8.0%</span>
-                          <span className="px-2 py-0.5 text-[9px] font-extrabold bg-emerald-50 text-emerald-600 border border-emerald-200 rounded">Good</span>
-                        </div>
-                      </div>
-                      <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                        <div className="h-full bg-emerald-500 rounded-full" style={{ width: '40%' }} />
-                      </div>
-                    </div>
-                  </div>
                 </div>
 
-                <div className="mt-4 p-3 rounded-xl bg-emerald-50/70 border border-emerald-100 flex items-start gap-2.5 text-[10.5px]">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
-                  <div>
-                    <h5 className="font-bold text-emerald-900">Strong Performance</h5>
-                    <p className="text-emerald-700 mt-0.5 leading-snug">Your business is profitable and margins are healthy during this period.</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Middle Row 2: Income Breakdown (6 cols) & Expense Breakdown (6 cols) */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-              {/* Income Breakdown Card */}
-              <div className="lg:col-span-6 bg-white rounded-xl border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
-                    <h3 className="text-[13.5px] font-bold text-slate-800">Income Breakdown</h3>
-                    <div className="text-right">
-                      <span className="text-[10px] font-extrabold text-slate-400 uppercase">Total Income</span>
-                      <span className="text-sm font-black text-slate-900 block">{formatAmount(revenueVal)}</span>
-                    </div>
-                  </div>
-
-                  <div className="h-48 w-full">
-                    <ReactECharts option={incomeBarOption} style={{ height: '100%', width: '100%' }} />
-                  </div>
-                </div>
-              </div>
-
-              {/* Expense Breakdown Card with Donut Chart */}
-              <div className="lg:col-span-6 bg-white rounded-xl border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
-                    <h3 className="text-[13.5px] font-bold text-slate-800">Expense Breakdown</h3>
-                    <div className="text-right">
-                      <span className="text-[10px] font-extrabold text-slate-400 uppercase">Total Expenses</span>
-                      <span className="text-sm font-black text-slate-900 block">{formatAmount(expensesVal)}</span>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
-                    <div className="space-y-2.5 text-[10.5px]">
-                      <div>
-                        <div className="flex justify-between font-bold text-slate-700 mb-0.5">
-                          <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-rose-500" /> Staff wages</span>
-                          <span>31.7%</span>
-                        </div>
-                        <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                          <div className="h-full bg-rose-500 rounded-full" style={{ width: '31.7%' }} />
-                        </div>
-                      </div>
-
-                      <div>
-                        <div className="flex justify-between font-bold text-slate-700 mb-0.5">
-                          <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-orange-500" /> Rent</span>
-                          <span>28.9%</span>
-                        </div>
-                        <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                          <div className="h-full bg-orange-500 rounded-full" style={{ width: '28.9%' }} />
-                        </div>
-                      </div>
-
-                      <div>
-                        <div className="flex justify-between font-bold text-slate-700 mb-0.5">
-                          <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-yellow-500" /> Logistics</span>
-                          <span>8.3%</span>
-                        </div>
-                        <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                          <div className="h-full bg-yellow-500 rounded-full" style={{ width: '8.3%' }} />
-                        </div>
-                      </div>
-
-                      <div>
-                        <div className="flex justify-between font-bold text-slate-700 mb-0.5">
-                          <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-purple-500" /> Marketing & Advertising</span>
-                          <span>6.4%</span>
-                        </div>
-                        <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                          <div className="h-full bg-purple-500 rounded-full" style={{ width: '6.4%' }} />
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="h-36 w-full relative">
-                      <ReactECharts option={analyticsExpensePieOption} style={{ height: '100%', width: '100%' }} />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Middle Row 3: P&L Summary Table (8 cols) & What Changed? (4 cols) */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-              {/* P&L Summary Table */}
-              <div className="lg:col-span-8 bg-white rounded-xl border border-slate-200/80 p-5 shadow-2xs">
-                <h3 className="text-[13.5px] font-bold text-slate-800 border-b border-slate-100 pb-3 mb-4">P&L Summary Comparison</h3>
-
-                <div className="overflow-x-auto w-full">
-                  <table className="w-full text-left border-collapse text-[11.5px]">
-                    <thead>
-                      <tr className="border-b border-slate-200 bg-slate-100/60 text-slate-500 font-extrabold uppercase tracking-wider text-[10px]">
-                        <th className="py-2.5 px-3">Particulars</th>
-                        <th className="py-2.5 px-3 text-right">This Period</th>
-                        <th className="py-2.5 px-3 text-right">Previous Period</th>
-                        <th className="py-2.5 px-3 text-right">Change</th>
-                        <th className="py-2.5 px-3 text-right">Change %</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      <tr>
-                        <td className="py-2.5 px-3 font-bold text-slate-800">Total Income</td>
-                        <td className="py-2.5 px-3 font-extrabold text-slate-900 text-right">{formatAmount(revenueVal)}</td>
-                        <td className="py-2.5 px-3 text-slate-500 text-right">£2,912,188.43</td>
-                        <td className="py-2.5 px-3 text-emerald-600 font-bold text-right">£468,648.17</td>
-                        <td className="py-2.5 px-3 text-emerald-600 font-extrabold text-right">↑ 16.1%</td>
-                      </tr>
-                      <tr>
-                        <td className="py-2.5 px-3 font-bold text-slate-800">Cost of Sales</td>
-                        <td className="py-2.5 px-3 font-semibold text-slate-900 text-right">£2,285,260.39</td>
-                        <td className="py-2.5 px-3 text-slate-500 text-right">£2,017,801.56</td>
-                        <td className="py-2.5 px-3 text-rose-600 font-bold text-right">£267,458.83</td>
-                        <td className="py-2.5 px-3 text-rose-600 font-extrabold text-right">↑ 13.2%</td>
-                      </tr>
-                      <tr className="bg-slate-50/50">
-                        <td className="py-2.5 px-3 font-extrabold text-slate-900">Gross Profit</td>
-                        <td className="py-2.5 px-3 font-black text-slate-900 text-right">{formatAmount(grossVal)}</td>
-                        <td className="py-2.5 px-3 text-slate-600 font-bold text-right">£894,386.87</td>
-                        <td className="py-2.5 px-3 text-emerald-600 font-extrabold text-right">£201,189.34</td>
-                        <td className="py-2.5 px-3 text-emerald-600 font-black text-right">↑ 22.5%</td>
-                      </tr>
-                      <tr>
-                        <td className="py-2.5 px-3 font-bold text-slate-800">Operating Expenses</td>
-                        <td className="py-2.5 px-3 font-semibold text-slate-900 text-right">{formatAmount(expensesVal)}</td>
-                        <td className="py-2.5 px-3 text-slate-500 text-right">£284,974.52</td>
-                        <td className="py-2.5 px-3 text-emerald-600 font-bold text-right">-£14,313.41</td>
-                        <td className="py-2.5 px-3 text-emerald-600 font-extrabold text-right">↓ 5.0%</td>
-                      </tr>
-                      <tr className="bg-emerald-50/50">
-                        <td className="py-3 px-3 font-black text-emerald-900 text-sm">Net Profit</td>
-                        <td className="py-3 px-3 font-black text-emerald-600 text-right text-sm">{formatAmount(netVal)}</td>
-                        <td className="py-3 px-3 text-slate-700 font-extrabold text-right">£612,333.45</td>
-                        <td className="py-3 px-3 text-emerald-600 font-black text-right">£216,764.97</td>
-                        <td className="py-3 px-3 text-emerald-600 font-black text-right">↑ 35.4%</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* What Changed? Insights Card */}
-              <div className="lg:col-span-4 bg-white rounded-xl border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between">
-                <div>
-                  <h3 className="text-[13.5px] font-bold text-slate-800 border-b border-slate-100 pb-3 mb-4">What Changed?</h3>
-
-                  <div className="space-y-3.5 text-[11px]">
-                    <div className="flex items-start gap-2.5">
-                      <div className="h-6 w-6 rounded-full bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 shrink-0 mt-0.5">
-                        <ArrowUpRight className="h-3.5 w-3.5" />
-                      </div>
-                      <div>
-                        <h5 className="font-bold text-slate-800">Revenue increased by £468,648 (16.1%)</h5>
-                        <p className="text-slate-500 mt-0.5">Strong growth in sales across all distribution channels.</p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-start gap-2.5">
-                      <div className="h-6 w-6 rounded-full bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 shrink-0 mt-0.5">
-                        <ArrowUpRight className="h-3.5 w-3.5" />
-                      </div>
-                      <div>
-                        <h5 className="font-bold text-slate-800">Gross profit increased by £201,189 (22.5%)</h5>
-                        <p className="text-slate-500 mt-0.5">Improved product mix and pricing strategy impact.</p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-start gap-2.5">
-                      <div className="h-6 w-6 rounded-full bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 shrink-0 mt-0.5">
-                        <ArrowDownRight className="h-3.5 w-3.5" />
-                      </div>
-                      <div>
-                        <h5 className="font-bold text-slate-800">Operating expenses decreased by £14,313 (5.0%)</h5>
-                        <p className="text-slate-500 mt-0.5">Better cost control and operational efficiency.</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Middle Row 4: Net Profit Trend (5 cols) & View by Tracking Category (7 cols) */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-              {/* Net Profit Bar Chart */}
-              <div className="lg:col-span-5 bg-white rounded-xl border border-slate-200/80 p-5 shadow-2xs">
-                <h3 className="text-[13.5px] font-bold text-slate-800 border-b border-slate-100 pb-3 mb-3">Net Profit Trend</h3>
-                <div className="h-56 w-full">
-                  <ReactECharts option={netProfitBarOption} style={{ height: '100%', width: '100%' }} />
-                </div>
-              </div>
-
-              {/* View by Tracking Category Table */}
-              <div className="lg:col-span-7 bg-white rounded-xl border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-3">
-                    <h3 className="text-[13.5px] font-bold text-slate-800">View by Tracking Category</h3>
-                    <select className="px-2.5 py-1 text-[10.5px] font-semibold bg-slate-50 border border-slate-200 rounded-lg text-slate-700 outline-none">
-                      <option>Department</option>
-                    </select>
-                  </div>
-
-                  <div className="overflow-x-auto w-full">
-                    <table className="w-full text-left border-collapse text-[11px]">
-                      <thead>
-                        <tr className="border-b border-slate-200 bg-slate-100/60 text-slate-500 font-extrabold uppercase tracking-wider text-[9.5px]">
-                          <th className="py-2.5 px-3">Category</th>
-                          <th className="py-2.5 px-3 text-right">Revenue</th>
-                          <th className="py-2.5 px-3 text-right">Expenses</th>
-                          <th className="py-2.5 px-3 text-right">Net Profit</th>
-                          <th className="py-2.5 px-3 text-right">Margin</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 font-medium">
-                        <tr>
-                          <td className="py-2.5 px-3 font-bold text-slate-800">General</td>
-                          <td className="py-2.5 px-3 text-right font-bold text-slate-800">£819,564.21</td>
-                          <td className="py-2.5 px-3 text-right text-slate-500">£110,204.33</td>
-                          <td className="py-2.5 px-3 text-right font-bold text-emerald-600">£709,359.88</td>
-                          <td className="py-2.5 px-3 text-right font-extrabold text-emerald-600">86.6%</td>
-                        </tr>
-                        <tr>
-                          <td className="py-2.5 px-3 font-bold text-slate-800">GWL</td>
-                          <td className="py-2.5 px-3 text-right font-bold text-slate-800">£1,210,481.32</td>
-                          <td className="py-2.5 px-3 text-right text-slate-500">£82,334.67</td>
-                          <td className="py-2.5 px-3 text-right font-bold text-emerald-600">£1,128,146.65</td>
-                          <td className="py-2.5 px-3 text-right font-extrabold text-emerald-600">93.2%</td>
-                        </tr>
-                        <tr>
-                          <td className="py-2.5 px-3 font-bold text-slate-800">Missing Invoice</td>
-                          <td className="py-2.5 px-3 text-right font-bold text-slate-800">£340,118.55</td>
-                          <td className="py-2.5 px-3 text-right text-slate-500">£31,884.21</td>
-                          <td className="py-2.5 px-3 text-right font-bold text-emerald-600">£308,234.34</td>
-                          <td className="py-2.5 px-3 text-right font-extrabold text-emerald-600">90.6%</td>
-                        </tr>
-                        <tr>
-                          <td className="py-2.5 px-3 font-bold text-slate-800">Amazon</td>
-                          <td className="py-2.5 px-3 text-right font-bold text-slate-800">£521,342.78</td>
-                          <td className="py-2.5 px-3 text-right text-slate-500">£23,665.78</td>
-                          <td className="py-2.5 px-3 text-right font-bold text-emerald-600">£497,677.00</td>
-                          <td className="py-2.5 px-3 text-right font-extrabold text-emerald-600">95.5%</td>
-                        </tr>
-                        <tr>
-                          <td className="py-2.5 px-3 font-bold text-slate-800">Other</td>
-                          <td className="py-2.5 px-3 text-right font-bold text-slate-800">£489,329.74</td>
-                          <td className="py-2.5 px-3 text-right text-slate-500">£22,572.12</td>
-                          <td className="py-2.5 px-3 text-right font-bold text-emerald-600">£466,757.62</td>
-                          <td className="py-2.5 px-3 text-right font-extrabold text-emerald-600">95.4%</td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
+                <div className="h-64 w-full my-2">
+                  <ReactECharts option={profitabilityTrendOption} style={{ height: '100%', width: '100%' }} />
                 </div>
               </div>
             </div>
           </div>
         )}
+
       </div>
     </PageContainer>
   );

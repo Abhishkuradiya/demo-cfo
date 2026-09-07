@@ -34,9 +34,17 @@ export async function GET(req: NextRequest) {
     }
     const currency = orgReport?.raw_data?.BaseCurrency || orgReport?.BaseCurrency || orgReport?.CurrencyCode || 'GBP';
 
-    // 2. Fetch Invoices & Credit Notes from Xero API or Database
+    // 2. DB-First Fetch: Avoid Xero Rate Limit by checking PostgreSQL first
     let rawInvoicesList: any[] = [];
-    if (isConnected) {
+    const pgInvoices = await db.getInvoices(tenantId);
+    if (Array.isArray(pgInvoices) && pgInvoices.length > 0) {
+      rawInvoicesList = pgInvoices.filter((inv: any) => {
+        const t = (inv.Type || inv.type || '').toUpperCase();
+        return t === 'ACCREC' || t === 'ACCRECCRED';
+      });
+    }
+
+    if (rawInvoicesList.length === 0 && isConnected) {
       try {
         const xeroInvoices = await fetchXeroResource(
           tokenInfo.accessToken,
@@ -49,24 +57,6 @@ export async function GET(req: NextRequest) {
         }
       } catch (err: any) {
         console.error('Failed to fetch Xero ACCREC invoices & credit notes:', err.message);
-      }
-    }
-
-    if (rawInvoicesList.length === 0) {
-      const pgInvoices = await db.getInvoices(tenantId);
-      if (Array.isArray(pgInvoices) && pgInvoices.length > 0) {
-        rawInvoicesList = pgInvoices.filter((inv: any) => {
-          const t = (inv.Type || inv.type || '').toUpperCase();
-          return t === 'ACCREC' || t === 'ACCRECCRED';
-        });
-      } else {
-        const reportInvoices = await db.getReport(tenantId, 'Invoices');
-        if (Array.isArray(reportInvoices) && reportInvoices.length > 0) {
-          rawInvoicesList = reportInvoices.filter((inv: any) => {
-            const t = (inv.Type || inv.type || '').toUpperCase();
-            return t === 'ACCREC' || t === 'ACCRECCRED';
-          });
-        }
       }
     }
 
