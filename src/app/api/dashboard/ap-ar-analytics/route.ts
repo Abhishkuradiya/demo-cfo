@@ -120,6 +120,9 @@ export async function GET(req: NextRequest) {
       return true;
     });
 
+    // Fetch Contact Credit Limits Map
+    const creditLimitsMap = await db.getContactCreditLimits(tenantId);
+
     // Map & process all invoices/bills with exact status & 4-Week categorization
     const processedInvoices = validInvoices.map((inv: any) => {
       const st = (inv.Status || inv.status || 'AUTHORISED').toUpperCase();
@@ -178,9 +181,23 @@ export async function GET(req: NextRequest) {
         }
       }
 
+      const invNumRaw = (inv.InvoiceNumber || inv.invoice_number || '').toString().trim();
+      const refRaw = (inv.Reference || inv.reference || '').toString().trim();
+      const shortId = (inv.InvoiceID || inv.external_id || inv.id || '').toString().slice(-6).toUpperCase();
+
+      let resolvedInvNum = invNumRaw;
+      if (!resolvedInvNum || resolvedInvNum === '—') {
+        resolvedInvNum = refRaw && refRaw !== '—' ? refRaw : (isAR ? `INV-${shortId || '7842'}` : `BILL-${shortId || '9120'}`);
+      }
+
+      let resolvedRef = refRaw;
+      if (!resolvedRef || resolvedRef === '—') {
+        resolvedRef = invNumRaw && invNumRaw !== '—' ? invNumRaw : resolvedInvNum;
+      }
+
       return {
-        id: inv.InvoiceID || inv.external_id || inv.id || inv.InvoiceNumber || inv.invoice_number,
-        invoiceNumber: inv.InvoiceNumber || inv.invoice_number || (isCreditNote ? 'CN-CREDIT' : '—'),
+        id: inv.InvoiceID || inv.external_id || inv.id || resolvedInvNum,
+        invoiceNumber: resolvedInvNum,
         contactName: inv.Contact?.Name || inv.ContactName || inv.contact_name || 'Unknown Contact',
         contactId: inv.Contact?.ContactID || inv.contact_id || '',
         status: displayStatus,
@@ -195,7 +212,7 @@ export async function GET(req: NextRequest) {
         daysOverdue,
         daysUntilDue,
         weekBucket,
-        reference: inv.Reference || inv.reference || '—',
+        reference: resolvedRef,
         currency: inv.CurrencyCode || inv.currency || currency,
         lineItems: Array.isArray(inv.LineItems || inv.line_items)
           ? (inv.LineItems || inv.line_items).map((item: any) => ({
@@ -210,7 +227,7 @@ export async function GET(req: NextRequest) {
     });
 
     // STRICT FILTER: Exclude PAID, VOIDED, DELETED, DRAFT, and items where amountDue is 0 or amountPaid >= total
-    const activeDueInvoices = processedInvoices.filter(inv => 
+    const rawActiveDueInvoices = processedInvoices.filter(inv => 
       Math.abs(inv.amountDue) > 0.001 && 
       inv.rawStatus !== 'PAID' && 
       inv.rawStatus !== 'VOIDED' && 
@@ -218,6 +235,36 @@ export async function GET(req: NextRequest) {
       inv.rawStatus !== 'DRAFT' &&
       (Math.abs(inv.total) > 0 ? inv.amountPaid < Math.abs(inv.total) : true)
     );
+
+    // Calculate Total Outstanding per Contact for Credit Limit Monitoring
+    const contactBalanceMap: Record<string, number> = {};
+    rawActiveDueInvoices.forEach(inv => {
+      const cName = inv.contactName;
+      const cId = inv.contactId;
+      contactBalanceMap[cName] = (contactBalanceMap[cName] || 0) + Math.abs(inv.amountDue);
+      if (cId) contactBalanceMap[cId] = (contactBalanceMap[cId] || 0) + Math.abs(inv.amountDue);
+    });
+
+    // Enrich invoices with contact credit limit and breach status
+    const activeDueInvoices = rawActiveDueInvoices.map(inv => {
+      const cInfo = creditLimitsMap[inv.contactId] || creditLimitsMap[inv.contactName] || { creditLimit: 0, creditTermsDays: 90, contactName: inv.contactName };
+      const contactTotalOut = contactBalanceMap[inv.contactId] || contactBalanceMap[inv.contactName] || Math.abs(inv.amountDue);
+      const creditLimit = cInfo.creditLimit || 0;
+      const creditTermsDays = cInfo.creditTermsDays || 90;
+      const isOverLimit = creditLimit > 0 && contactTotalOut > creditLimit;
+      const excessAmount = isOverLimit ? contactTotalOut - creditLimit : 0;
+      const limitStatus = isOverLimit ? 'EXCEEDED' : (creditLimit > 0 ? 'OK' : 'NOT_SET');
+
+      return {
+        ...inv,
+        creditLimit,
+        creditTermsDays,
+        contactTotalOutstanding: contactTotalOut,
+        isOverLimit,
+        excessAmount,
+        limitStatus
+      };
+    });
 
     const activeAR = activeDueInvoices.filter(inv => inv.category === 'AR');
     const activeAP = activeDueInvoices.filter(inv => inv.category === 'AP');
@@ -507,5 +554,33 @@ export async function GET(req: NextRequest) {
   } catch (err: any) {
     console.error('AP & AR Analytics API Error:', err);
     return NextResponse.json({ error: err.message || 'Internal Server Error' }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  const tenantId = await getTenantIdFromSession();
+  if (tenantId === null) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  try {
+    const body = await req.json();
+    const { contactId, contactName, creditLimit, creditTermsDays } = body;
+    if (!contactId && !contactName) {
+      return NextResponse.json({ error: 'Missing contact ID or name' }, { status: 400 });
+    }
+
+    await db.saveContactCreditLimit(
+      tenantId,
+      contactId || contactName,
+      contactName || 'Unknown Contact',
+      parseFloat(creditLimit || 0),
+      parseInt(creditTermsDays || 90, 10)
+    );
+
+    return NextResponse.json({ success: true, message: 'Credit limit updated successfully' });
+  } catch (err: any) {
+    console.error('Error saving credit limit:', err);
+    return NextResponse.json({ error: err.message || 'Failed to save credit limit' }, { status: 500 });
   }
 }

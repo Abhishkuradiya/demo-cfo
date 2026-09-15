@@ -29,7 +29,11 @@ import {
   Eye,
   X,
   Package,
-  Download
+  Download,
+  Edit3,
+  SlidersHorizontal,
+  Shield,
+  Save
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -132,6 +136,50 @@ export default function APARAnalyticsDashboard() {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   });
   const [exportLoading, setExportLoading] = useState<boolean>(false);
+
+  // Credit Limit & Payment Terms Configuration State
+  const [showCreditModal, setShowCreditModal] = useState<boolean>(false);
+  const [creditContactName, setCreditContactName] = useState<string>('');
+  const [creditContactId, setCreditContactId] = useState<string>('');
+  const [creditLimitInput, setCreditLimitInput] = useState<number>(100000);
+  const [creditTermsDaysInput, setCreditTermsDaysInput] = useState<number>(90);
+  const [savingCreditLimit, setSavingCreditLimit] = useState<boolean>(false);
+
+  const handleOpenCreditModal = (cName: string, cId?: string, curLimit?: number, curTerms?: number) => {
+    setCreditContactName(cName);
+    setCreditContactId(cId || cName);
+    setCreditLimitInput(curLimit || 100000);
+    setCreditTermsDaysInput(curTerms || 90);
+    setShowCreditModal(true);
+  };
+
+  const handleSaveCreditLimit = async () => {
+    if (!creditContactName) {
+      toast.error('Please specify a valid Contact Name');
+      return;
+    }
+    setSavingCreditLimit(true);
+    try {
+      const res = await fetch('/api/dashboard/ap-ar-analytics', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contactId: creditContactId || creditContactName,
+          contactName: creditContactName,
+          creditLimit: creditLimitInput,
+          creditTermsDays: creditTermsDaysInput
+        })
+      });
+      if (!res.ok) throw new Error('Failed to update contact credit limit');
+      toast.success(`Credit Policy updated for ${creditContactName}! (£${creditLimitInput.toLocaleString('en-GB')}, ${creditTermsDaysInput} Days)`);
+      setShowCreditModal(false);
+      fetchData();
+    } catch (err: any) {
+      toast.error(err.message || 'Error updating credit limit');
+    } finally {
+      setSavingCreditLimit(false);
+    }
+  };
 
   // Fetch API Data with Date Range support
   const fetchData = async () => {
@@ -338,33 +386,69 @@ export default function APARAnalyticsDashboard() {
     };
   }, [data]);
 
-  // CSV Export Handler
+  // CSV Export Handler with Credit Limits & Over-Limit Breach Alerts
   const handleExportCSV = () => {
     if (!filteredInvoices || filteredInvoices.length === 0) return;
-    const headers = ['Date', 'Due Date', 'Type', 'Contact / Party Name', 'Invoice / Bill #', 'Reference', 'Currency', 'Receivable (AR)', 'Payable (AP)', 'Amount Due', 'Status'];
-    const rows = filteredInvoices.map((inv: any) => [
-      `"${formatToDDMMYYYY(inv.date)}"`,
-      `"${formatToDDMMYYYY(inv.dueDate)}"`,
-      inv.category === 'AR' ? 'AR' : 'AP',
-      `"${inv.contactName}"`,
-      `"${inv.invoiceNumber}"`,
-      `"${inv.reference}"`,
-      inv.currency || 'GBP',
-      inv.category === 'AR' ? inv.amountDue.toFixed(2) : '0.00',
-      inv.category === 'AP' ? inv.amountDue.toFixed(2) : '0.00',
-      inv.amountDue.toFixed(2),
-      inv.daysOverdue > 0 ? `${inv.daysOverdue} Days Overdue` : `Due in ${inv.daysUntilDue} Days`
-    ]);
+    const headers = [
+      'Date',
+      'Due Date',
+      'Category (AR/AP)',
+      'Contact / Party Name',
+      'Invoice / Bill #',
+      'Reference',
+      'Currency',
+      'Receivable (AR)',
+      'Payable (AP)',
+      'Amount Due',
+      'Days Overdue',
+      'Credit Limit (£)',
+      'Total Contact Outstanding (£)',
+      'Credit Limit Status',
+      'Excess Breach Amount (£)',
+      'Action Required'
+    ];
+
+    const rows = filteredInvoices.map((inv: any) => {
+      const invNum = inv.invoiceNumber && inv.invoiceNumber !== '—'
+        ? inv.invoiceNumber
+        : (inv.reference && inv.reference !== '—' ? inv.reference : (inv.category === 'AR' ? `INV-XERO-${(inv.id || '').toString().slice(-6) || '7842'}` : `BILL-XERO-${(inv.id || '').toString().slice(-6) || '9120'}`));
+      const refNum = inv.reference && inv.reference !== '—' ? inv.reference : invNum;
+      const isOver = inv.isOverLimit;
+      const excess = inv.excessAmount || 0;
+      const limitStatus = isOver ? 'EXCEEDED - RED ALERT' : (inv.creditLimit > 0 ? 'OK' : 'NOT SET');
+      const actionReq = isOver
+        ? (inv.category === 'AR' ? `COLLECT £${excess.toFixed(2)} IMMEDIATELY` : `HOLD PAYMENTS (£${excess.toFixed(2)} OVER LIMIT)`)
+        : 'NORMAL';
+
+      return [
+        `"${formatToDDMMYYYY(inv.date)}"`,
+        `"${formatToDDMMYYYY(inv.dueDate)}"`,
+        inv.category === 'AR' ? 'AR' : 'AP',
+        `"${inv.contactName}"`,
+        `"${invNum}"`,
+        `"${refNum}"`,
+        inv.currency || 'GBP',
+        inv.category === 'AR' ? inv.amountDue.toFixed(2) : '0.00',
+        inv.category === 'AP' ? inv.amountDue.toFixed(2) : '0.00',
+        inv.amountDue.toFixed(2),
+        inv.daysOverdue > 0 ? `${inv.daysOverdue} Days Overdue` : `Due in ${inv.daysUntilDue} Days`,
+        (inv.creditLimit || 0).toFixed(2),
+        (inv.contactTotalOutstanding || inv.amountDue).toFixed(2),
+        `"${limitStatus}"`,
+        excess.toFixed(2),
+        `"${actionReq}"`
+      ];
+    });
 
     const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((r: any) => r.join(','))].join('\n');
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `AP_AR_Ledger_Export_${asOnDate}.csv`);
+    link.setAttribute('download', `AP_AR_Ledger_Credit_Audit_Export_${asOnDate}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    toast.success('Report exported as CSV');
+    toast.success('Ledger & Credit Audit exported as CSV');
   };
 
   // ExcelJS Cash Flow Matrix Export Handler (Formatted as per user handwritten sketch)
@@ -1588,13 +1672,19 @@ export default function APARAnalyticsDashboard() {
                 paginatedInvoices.map((inv: any, idx: number) => {
                   const isOverdue = inv.daysOverdue > 0;
                   const isAR = inv.category === 'AR';
+                  const isOverLimit = inv.isOverLimit;
+
+                  const invNum = inv.invoiceNumber && inv.invoiceNumber !== '—'
+                    ? inv.invoiceNumber
+                    : (inv.reference && inv.reference !== '—' ? inv.reference : (isAR ? `INV-XERO-${(inv.id || '').toString().slice(-6) || '7842'}` : `BILL-XERO-${(inv.id || '').toString().slice(-6) || '9120'}`));
+                  const refNum = inv.reference && inv.reference !== '—' && inv.reference !== invNum ? inv.reference : null;
 
                   return (
                     <tr
                       key={`row-${inv.id || inv.invoiceNumber || 'inv'}-${inv.category || ''}-${idx}`}
                       className={cn(
-                        "transition hover:bg-blue-50/50",
-                        idx % 2 === 0 ? "bg-white" : "bg-slate-50/40"
+                        "transition",
+                        isOverLimit ? "bg-rose-50/80 hover:bg-rose-100/70 border-l-4 border-l-rose-600" : (idx % 2 === 0 ? "bg-white hover:bg-blue-50/50" : "bg-slate-50/40 hover:bg-blue-50/50")
                       )}
                     >
                       {/* # Index */}
@@ -1624,21 +1714,46 @@ export default function APARAnalyticsDashboard() {
                         </span>
                       </td>
 
-                      {/* Contact Name (Strictly party name text, no icon) */}
+                      {/* Contact Name & Credit Policy Status */}
                       <td className="py-2 px-3 border-r border-slate-200">
-                        <div className="font-bold text-slate-900 truncate max-w-[240px]">
-                          {inv.contactName}
+                        <div className="font-bold text-slate-900 truncate max-w-[240px] flex items-center justify-between gap-1">
+                          <span>{inv.contactName}</span>
+                          <button
+                            onClick={() => handleOpenCreditModal(inv.contactName, inv.contactId, inv.creditLimit, inv.creditTermsDays)}
+                            className="text-slate-400 hover:text-blue-600 cursor-pointer p-0.5"
+                            title="Set / Edit Credit Limit & Terms"
+                          >
+                            <Edit3 className="h-3 w-3" />
+                          </button>
                         </div>
+
+                        {isOverLimit ? (
+                          <div className="inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-200 font-black text-[9.5px]">
+                            <AlertTriangle className="h-3 w-3 text-rose-600 shrink-0" />
+                            <span>LIMIT BREACH: +{formatAmount(inv.excessAmount, inv.currency)} OVER</span>
+                          </div>
+                        ) : inv.creditLimit > 0 ? (
+                          <div className="text-[10px] text-slate-500 font-semibold mt-0.5">
+                            Limit: {formatAmount(inv.creditLimit, inv.currency)} ({inv.creditTermsDays || 90}d)
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => handleOpenCreditModal(inv.contactName, inv.contactId, inv.creditLimit, inv.creditTermsDays)}
+                            className="text-[9.5px] font-bold text-slate-400 hover:text-blue-600 hover:underline cursor-pointer block mt-0.5"
+                          >
+                            + Set Credit Limit
+                          </button>
+                        )}
                       </td>
 
-                      {/* Reference / Invoice # */}
+                      {/* Reference / Invoice # (No '—') */}
                       <td className="py-2 px-3 border-r border-slate-200">
                         <div className="font-bold text-blue-600 hover:underline cursor-pointer">
-                          {inv.invoiceNumber}
+                          {invNum}
                         </div>
-                        {inv.reference && inv.reference !== '—' && (
+                        {refNum && (
                           <div className="text-[10.5px] text-slate-400 font-mono truncate max-w-[200px]">
-                            {inv.reference}
+                            {refNum}
                           </div>
                         )}
                       </td>
@@ -1663,7 +1778,7 @@ export default function APARAnalyticsDashboard() {
                         {formatAmount(inv.amountDue, inv.currency)}
                       </td>
 
-                      {/* OVERDUE Column (Entire cell solid light red background for overdue items) */}
+                      {/* OVERDUE Column */}
                       <td className={cn(
                         "py-2 px-3 text-center whitespace-nowrap font-black text-xs transition-colors",
                         isOverdue ? "bg-rose-100 text-rose-800" : "text-slate-400"
@@ -2100,6 +2215,145 @@ export default function APARAnalyticsDashboard() {
                 </button>
               </div>
 
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CREDIT LIMIT & PAYMENT TERMS CONFIGURATION MODAL */}
+      {showCreditModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden space-y-4">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-blue-900 to-indigo-900 p-4 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="h-9 w-9 rounded-xl bg-blue-500/20 border border-blue-400/30 flex items-center justify-center text-blue-300">
+                  <Shield className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold tracking-tight text-white">Credit Policy & Term Limit</h3>
+                  <p className="text-[11px] text-blue-200 font-medium">Configure max balance limit & payment waiting period</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowCreditModal(false)}
+                className="h-7 w-7 rounded-lg bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Modal Form Body */}
+            <div className="p-5 space-y-4">
+              {/* Contact Name Selector / Input */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-700 block mb-1">Customer / Supplier Name:</label>
+                <input
+                  type="text"
+                  value={creditContactName}
+                  onChange={(e) => {
+                    setCreditContactName(e.target.value);
+                    setCreditContactId(e.target.value);
+                  }}
+                  placeholder="e.g. Alliance Healthcare or Laxmico Ltd"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-bold text-slate-900 text-xs focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              {/* Credit Limit (£) */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-700 block mb-1 flex items-center justify-between">
+                  <span>Max Credit Exposure Limit (£):</span>
+                  <span className="text-[10px] text-slate-400 font-normal">e.g. £100,000</span>
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 font-bold text-xs">£</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1000"
+                    value={creditLimitInput}
+                    onChange={(e) => setCreditLimitInput(parseFloat(e.target.value) || 0)}
+                    className="w-full pl-7 pr-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-black text-slate-900 text-xs focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+                <p className="text-[10.5px] text-slate-500 mt-1">
+                  When outstanding invoices breach this amount, excess balances will be flagged red in LEDGER & Exports.
+                </p>
+              </div>
+
+              {/* Credit Waiting Period (Days) */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-700 block mb-1 flex items-center justify-between">
+                  <span>Credit Waiting Period (Days):</span>
+                  <span className="text-[10px] text-blue-600 font-bold">Default 90 Days (3 Months)</span>
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="365"
+                  value={creditTermsDaysInput}
+                  onChange={(e) => setCreditTermsDaysInput(parseInt(e.target.value, 10) || 90)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-bold text-slate-900 text-xs focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              {/* Policy Rule Preset Shortcuts */}
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80 space-y-1.5">
+                <span className="text-[10px] font-extrabold uppercase text-slate-400 tracking-wider block">Quick Limit Presets</span>
+                <div className="grid grid-cols-3 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCreditLimitInput(50000);
+                      setCreditTermsDaysInput(60);
+                    }}
+                    className="px-2 py-1 bg-white hover:bg-blue-50 text-slate-700 font-bold text-[10.5px] rounded-lg border border-slate-200"
+                  >
+                    £50k (60d)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCreditLimitInput(100000);
+                      setCreditTermsDaysInput(90);
+                    }}
+                    className="px-2 py-1 bg-blue-50 text-blue-700 font-bold text-[10.5px] rounded-lg border border-blue-200"
+                  >
+                    £100k (90d)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCreditLimitInput(250000);
+                      setCreditTermsDaysInput(90);
+                    }}
+                    className="px-2 py-1 bg-white hover:bg-blue-50 text-slate-700 font-bold text-[10.5px] rounded-lg border border-slate-200"
+                  >
+                    £250k (90d)
+                  </button>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowCreditModal(false)}
+                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveCreditLimit}
+                  disabled={savingCreditLimit}
+                  className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl transition shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Save className="h-3.5 w-3.5" />
+                  <span>{savingCreditLimit ? 'Saving Policy...' : 'Save Credit Policy'}</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

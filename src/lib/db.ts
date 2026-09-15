@@ -156,6 +156,19 @@ const initPgTables = async () => {
         UNIQUE(tenant_id, report_type)
       );
     `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS contact_credit_limits (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        contact_id VARCHAR(255) NOT NULL,
+        contact_name VARCHAR(255) NOT NULL,
+        credit_limit DECIMAL DEFAULT 0,
+        credit_terms_days INTEGER DEFAULT 90,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, contact_id)
+      );
+    `);
  
     await client.query(`
       CREATE TABLE IF NOT EXISTS inventory_items (
@@ -1324,6 +1337,7 @@ interface JsonSchema {
   tax_cache?: any[];
   gl_cache?: any[];
   tax_transactions?: any[];
+  contact_credit_limits?: any[];
 }
 
 const memoryDb: JsonSchema = {
@@ -2789,6 +2803,70 @@ export const db = {
       }
     }
   },
+  getContactCreditLimits: async (tenantId: number): Promise<Record<string, { creditLimit: number; creditTermsDays: number; contactName: string }>> => {
+    if (isPgConnected) {
+      try {
+        const { rows } = await pgPool.query(
+          'SELECT contact_id, contact_name, credit_limit, credit_terms_days FROM contact_credit_limits WHERE tenant_id = $1',
+          [tenantId]
+        );
+        const map: Record<string, { creditLimit: number; creditTermsDays: number; contactName: string }> = {};
+        rows.forEach(r => {
+          const rec = {
+            creditLimit: parseFloat(r.credit_limit || 0),
+            creditTermsDays: parseInt(r.credit_terms_days || 90, 10),
+            contactName: r.contact_name
+          };
+          if (r.contact_id) map[r.contact_id] = rec;
+          if (r.contact_name) map[r.contact_name] = rec;
+        });
+        return map;
+      } catch (e) {
+        console.error("Database query failed in getContactCreditLimits:", e);
+      }
+    }
+    const json = readJsonDb();
+    const list = json.contact_credit_limits || [];
+    const map: Record<string, { creditLimit: number; creditTermsDays: number; contactName: string }> = {};
+    list.filter((x: any) => x.tenant_id === tenantId).forEach((r: any) => {
+      const rec = {
+        creditLimit: parseFloat(r.credit_limit || 0),
+        creditTermsDays: parseInt(r.credit_terms_days || 90, 10),
+        contactName: r.contact_name
+      };
+      if (r.contact_id) map[r.contact_id] = rec;
+      if (r.contact_name) map[r.contact_name] = rec;
+    });
+    return map;
+  },
+
+  saveContactCreditLimit: async (tenantId: number, contactId: string, contactName: string, creditLimit: number, creditTermsDays: number): Promise<void> => {
+    if (isPgConnected) {
+      try {
+        await pgPool.query(
+          `INSERT INTO contact_credit_limits (tenant_id, contact_id, contact_name, credit_limit, credit_terms_days, updated_at)
+           VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+           ON CONFLICT (tenant_id, contact_id)
+           DO UPDATE SET contact_name = $3, credit_limit = $4, credit_terms_days = $5, updated_at = CURRENT_TIMESTAMP`,
+          [tenantId, contactId, contactName, creditLimit, creditTermsDays]
+        );
+        return;
+      } catch (e) {
+        console.error("Database query failed in saveContactCreditLimit:", e);
+      }
+    }
+    const json = readJsonDb();
+    if (!json.contact_credit_limits) json.contact_credit_limits = [];
+    const idx = json.contact_credit_limits.findIndex((x: any) => x.tenant_id === tenantId && x.contact_id === contactId);
+    const rec = { tenant_id: tenantId, contact_id: contactId, contact_name: contactName, credit_limit: creditLimit, credit_terms_days: creditTermsDays, updated_at: new Date().toISOString() };
+    if (idx >= 0) {
+      json.contact_credit_limits[idx] = rec;
+    } else {
+      json.contact_credit_limits.push(rec);
+    }
+    writeJsonDb(json);
+  },
+
   isPgActive: (): boolean => {
     return isPgConnected;
   },
