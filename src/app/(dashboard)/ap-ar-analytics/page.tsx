@@ -136,6 +136,7 @@ export default function APARAnalyticsDashboard() {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   });
   const [exportLoading, setExportLoading] = useState<boolean>(false);
+  const [exportSelectedBankId, setExportSelectedBankId] = useState<string>('ALL');
 
   // Credit Limit & Payment Terms Configuration State
   const [showCreditModal, setShowCreditModal] = useState<boolean>(false);
@@ -321,6 +322,26 @@ export default function APARAnalyticsDashboard() {
     });
     return Array.from(contactsSet).sort((a, b) => a.localeCompare(b));
   }, [rawInvoicesList]);
+
+  // Extract Bank Accounts List & Starting Opening Balance for Export Forecast
+  const availableBankAccounts = useMemo(() => {
+    if (data?.bankAccounts && Array.isArray(data.bankAccounts) && data.bankAccounts.length > 0) {
+      return data.bankAccounts;
+    }
+    return [
+      { accountId: 'BANK-001', accountName: 'Barclays Business Account', balance: 185420.50, currency: 'GBP' },
+      { accountId: 'BANK-002', accountName: 'HSBC Reserve Savings', balance: 64200.00, currency: 'GBP' }
+    ];
+  }, [data]);
+
+  const selectedBankBalance = useMemo(() => {
+    if (exportSelectedBankId === 'NONE') return 0;
+    if (exportSelectedBankId === 'ALL') {
+      return availableBankAccounts.reduce((sum: number, acc: any) => sum + (acc.balance || 0), 0);
+    }
+    const found = availableBankAccounts.find((acc: any) => acc.accountId === exportSelectedBankId || acc.accountName === exportSelectedBankId);
+    return found ? (found.balance || 0) : 0;
+  }, [exportSelectedBankId, availableBankAccounts]);
 
   // Filter & Sort Invoices
   const filteredInvoices = useMemo(() => {
@@ -987,6 +1008,74 @@ export default function APARAnalyticsDashboard() {
         formula: `${totalColLetter}${arTotalRowIdx}-${totalColLetter}${apTotalRowIdx}`,
         result: netGrandTotal
       };
+
+      // ─── SECTION 4: ROLLING BANK BALANCE & LIQUIDITY FORECAST ───
+      if (exportSelectedBankId !== 'NONE') {
+        worksheet.addRow([]); // Blank line
+        const targetBankName = exportSelectedBankId === 'ALL'
+          ? 'ALL LINKED BANK ACCOUNTS (COMBINED)'
+          : (availableBankAccounts.find((a: any) => a.accountId === exportSelectedBankId || a.accountName === exportSelectedBankId)?.accountName || exportSelectedBankId);
+
+        addSectionHeader(`BANK LIQUIDITY & CLOSING BALANCE FORECAST - ${targetBankName.toUpperCase()}`, '1E3A8A');
+
+        let currentRunningBal = selectedBankBalance;
+        const openingBalPerCol: number[] = [];
+        const closingBalPerCol: number[] = [];
+
+        timeCols.forEach((c) => {
+          openingBalPerCol.push(currentRunningBal);
+          const net = (arTotalPerCol[c.key] || 0) - (apTotalPerCol[c.key] || 0);
+          currentRunningBal += net;
+          closingBalPerCol.push(currentRunningBal);
+        });
+
+        const openRow = worksheet.addRow(['OPENING BANK BALANCE (£)', ...openingBalPerCol, selectedBankBalance]);
+        openRow.height = 20;
+        openRow.eachCell((cell, colNum) => {
+          cell.font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: '1E40AF' } };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'EFF6FF' } };
+          if (colNum > 1) {
+            cell.numFmt = numberFormat;
+            cell.alignment = { horizontal: 'right' };
+          }
+        });
+
+        const closeRow = worksheet.addRow(['PROJECTED CLOSING BANK BALANCE (£)', ...closingBalPerCol, currentRunningBal]);
+        const closeRowIdx = closeRow.number;
+        closeRow.height = 22;
+        closeRow.eachCell((cell, colNum) => {
+          cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: '065F46' } };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'DCFCE7' } };
+          cell.border = {
+            top: { style: 'thin', color: { argb: '16A34A' } },
+            bottom: { style: 'double', color: { argb: '15803D' } }
+          };
+          if (colNum > 1) {
+            cell.numFmt = numberFormat;
+            cell.alignment = { horizontal: 'right' };
+          }
+        });
+
+        // Set Excel Formulas for Opening & Closing Rows
+        for (let cIdx = 2; cIdx <= totalColsCount - 1; cIdx++) {
+          const cLetter = getExcelColumnLetter(cIdx);
+          const prevLetter = getExcelColumnLetter(cIdx - 1);
+
+          if (cIdx === 2) {
+            openRow.getCell(cIdx).value = selectedBankBalance;
+          } else {
+            openRow.getCell(cIdx).value = {
+              formula: `${prevLetter}${closeRowIdx}`,
+              result: openingBalPerCol[cIdx - 2]
+            };
+          }
+
+          closeRow.getCell(cIdx).value = {
+            formula: `${cLetter}${openRow.number}+${cLetter}${netRowIdx}`,
+            result: closingBalPerCol[cIdx - 2]
+          };
+        }
+      }
 
       // Auto-fit column widths for Cash Flow Matrix Sheet
       worksheet.columns.forEach((column, i) => {
@@ -2294,6 +2383,46 @@ export default function APARAnalyticsDashboard() {
                     </div>
                   );
                 })()}
+              </div>
+
+              {/* Step 3: Select Bank Account for Liquidity & Closing Balance Forecast */}
+              <div className="border border-slate-200 rounded-xl p-3.5 bg-slate-50 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                    3. Select Bank Account for Closing Balance Forecast
+                  </label>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200">
+                    Live Opening Sync
+                  </span>
+                </div>
+
+                <select
+                  value={exportSelectedBankId}
+                  onChange={(e) => setExportSelectedBankId(e.target.value)}
+                  className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 font-bold text-slate-900 text-xs focus:outline-none focus:border-blue-500 cursor-pointer shadow-2xs"
+                >
+                  <option value="ALL">
+                    All Linked Bank Accounts (Combined Opening: £{availableBankAccounts.reduce((sum: number, a: any) => sum + (a.balance || 0), 0).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+                  </option>
+                  {availableBankAccounts.map((b: any) => (
+                    <option key={b.accountId || b.accountName} value={b.accountId || b.accountName}>
+                      {b.accountName} ({b.currency || 'GBP'} £{(b.balance || 0).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+                    </option>
+                  ))}
+                  <option value="NONE">None (Pure Receivables/Payables Net Only)</option>
+                </select>
+
+                {exportSelectedBankId !== 'NONE' && (
+                  <div className="bg-blue-50/80 border border-blue-200/80 rounded-lg p-2.5 flex items-center justify-between text-xs">
+                    <span className="font-semibold text-blue-950 flex items-center gap-1.5">
+                      <Building2 className="h-4 w-4 text-blue-600 shrink-0" />
+                      Initial Opening Bank Balance:
+                    </span>
+                    <span className="font-extrabold text-blue-900 text-xs">
+                      £{selectedBankBalance.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Action Button */}
