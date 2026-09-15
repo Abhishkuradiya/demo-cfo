@@ -329,8 +329,15 @@ export default function APARAnalyticsDashboard() {
       return data.bankAccounts;
     }
     return [
-      { accountId: 'BANK-001', accountName: 'Barclays Business Account', balance: 185420.50, currency: 'GBP' },
-      { accountId: 'BANK-002', accountName: 'HSBC Reserve Savings', balance: 64200.00, currency: 'GBP' }
+      { accountId: 'BANK-100', accountName: 'Starling Business Account', balance: 168369.35, currency: 'GBP' },
+      { accountId: 'BANK-101', accountName: 'BC Inter company bank', balance: 3429383.72, currency: 'GBP' },
+      { accountId: 'BANK-102', accountName: 'Ebay Control Account', balance: 65194.50, currency: 'GBP' },
+      { accountId: 'BANK-103', accountName: 'IT Platinum Business Supplementary Charge', balance: 18398.14, currency: 'GBP' },
+      { accountId: 'BANK-104', accountName: 'TT Gold Business Supplementary Charge', balance: 15054.21, currency: 'GBP' },
+      { accountId: 'BANK-105', accountName: 'MS American Express Platinum Business', balance: 3293.54, currency: 'GBP' },
+      { accountId: 'BANK-106', accountName: 'PayPal', balance: 511.69, currency: 'GBP' },
+      { accountId: 'BANK-107', accountName: 'Capital on Tap Account NEW', balance: 423.04, currency: 'GBP' },
+      { accountId: 'BANK-108', accountName: 'Groupon Control account', balance: 4722.20, currency: 'GBP' }
     ];
   }, [data]);
 

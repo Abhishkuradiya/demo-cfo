@@ -74,8 +74,15 @@ export async function GET(req: NextRequest) {
     let bankAccountsList = BankAccountMergeService.mergeAccounts(rawAccounts, bsBankAccounts);
     if (!bankAccountsList || bankAccountsList.length === 0) {
       bankAccountsList = [
-        { accountId: 'BANK-001', accountName: 'Barclays Business Account', accountCode: '1200', balance: 185420.50, currency, status: 'ACTIVE', type: 'BANK' },
-        { accountId: 'BANK-002', accountName: 'HSBC Reserve Savings', accountCode: '1210', balance: 64200.00, currency, status: 'ACTIVE', type: 'BANK' }
+        { accountId: 'BANK-100', accountName: 'Starling Business Account', accountCode: '100', balance: 168369.35, currency, status: 'ACTIVE', type: 'BANK' },
+        { accountId: 'BANK-101', accountName: 'BC Inter company bank', accountCode: '101', balance: 3429383.72, currency, status: 'ACTIVE', type: 'BANK' },
+        { accountId: 'BANK-102', accountName: 'Ebay Control Account', accountCode: '102', balance: 65194.50, currency, status: 'ACTIVE', type: 'BANK' },
+        { accountId: 'BANK-103', accountName: 'IT Platinum Business Supplementary Charge', accountCode: '103', balance: 18398.14, currency, status: 'ACTIVE', type: 'BANK' },
+        { accountId: 'BANK-104', accountName: 'TT Gold Business Supplementary Charge', accountCode: '104', balance: 15054.21, currency, status: 'ACTIVE', type: 'BANK' },
+        { accountId: 'BANK-105', accountName: 'MS American Express Platinum Business', accountCode: '105', balance: 3293.54, currency, status: 'ACTIVE', type: 'BANK' },
+        { accountId: 'BANK-106', accountName: 'PayPal', accountCode: '106', balance: 511.69, currency, status: 'ACTIVE', type: 'BANK' },
+        { accountId: 'BANK-107', accountName: 'Capital on Tap Account NEW', accountCode: '107', balance: 423.04, currency, status: 'ACTIVE', type: 'BANK' },
+        { accountId: 'BANK-108', accountName: 'Groupon Control account', accountCode: '108', balance: 4722.20, currency, status: 'ACTIVE', type: 'BANK' }
       ];
     }
 
@@ -135,10 +142,26 @@ export async function GET(req: NextRequest) {
     const toDate = toDateStr ? new Date(toDateStr) : null;
     if (toDate) toDate.setHours(23, 59, 59, 999);
 
-    // Filter out DELETED, VOIDED, DRAFT, PAID, and items outside range
+    // Filter out DELETED, VOIDED, DRAFT, PAID, System Opening Balances, and items outside range
     const validInvoices = rawInvoicesList.filter((inv: any) => {
       const st = (inv.Status || inv.status || '').toUpperCase();
       if (st === 'PAID' || st === 'DELETED' || st === 'VOIDED' || st === 'DRAFT') return false;
+
+      // Filter out System Opening Balances & Opening Balance conversion entries
+      const contactNameNorm = (inv.Contact?.Name || inv.contactName || inv.contact_name || '').toLowerCase().trim();
+      const refNorm = (inv.Reference || inv.reference || '').toLowerCase().trim();
+      const invNumNorm = (inv.InvoiceNumber || inv.invoiceNumber || '').toLowerCase().trim();
+
+      if (
+        contactNameNorm === 'opening balance' ||
+        contactNameNorm === 'system opening balance' ||
+        refNorm === 'opening balance (system opening balance)' ||
+        refNorm.includes('system opening balance') ||
+        invNumNorm.includes('system opening balance') ||
+        inv.isOpeningBalance
+      ) {
+        return false;
+      }
 
       const invDate = parseXeroDate(inv.Date || inv.invoice_date);
       const invDueDate = parseXeroDate(inv.DueDate || inv.due_date || inv.Date || inv.invoice_date);
