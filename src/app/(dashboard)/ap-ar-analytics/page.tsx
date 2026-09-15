@@ -727,6 +727,20 @@ export default function APARAnalyticsDashboard() {
 
       sourceInvoices.forEach((inv: any) => {
         if (!inv.dueDate || !inv.contactName) return;
+        const cNameNorm = (inv.contactName || '').toLowerCase().trim();
+        const refNorm = (inv.reference || '').toLowerCase().trim();
+        const numNorm = (inv.invoiceNumber || '').toLowerCase().trim();
+
+        if (
+          cNameNorm === 'opening balance' ||
+          cNameNorm.includes('opening balance') ||
+          refNorm.includes('opening balance') ||
+          numNorm.includes('opening balance') ||
+          inv.isOpeningBalance
+        ) {
+          return;
+        }
+
         const invDueDate = new Date(inv.dueDate);
         const amt = Math.abs(inv.amountDue);
         const isAR = inv.category === 'AR';
@@ -1928,7 +1942,7 @@ export default function APARAnalyticsDashboard() {
                   const isOpeningBal = inv.isOpeningBalance || inv.invoiceNumber === 'Opening Balance' || inv.reference === 'System Opening Balance';
                   const invNum = inv.invoiceNumber && inv.invoiceNumber !== '—'
                     ? inv.invoiceNumber
-                    : (inv.reference && inv.reference !== '—' ? inv.reference : 'Opening Balance');
+                    : (inv.reference && inv.reference !== '—' ? inv.reference : (isAR ? `INV-${(inv.id || '').toString().slice(-6) || '7842'}` : `BILL-${(inv.id || '').toString().slice(-6) || '9120'}`));
                   const refNum = inv.reference && inv.reference !== '—' && inv.reference !== invNum ? inv.reference : null;
 
                   return (

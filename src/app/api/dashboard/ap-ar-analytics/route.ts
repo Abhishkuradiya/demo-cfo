@@ -160,10 +160,15 @@ export async function GET(req: NextRequest) {
       if (
         contactNameNorm === 'opening balance' ||
         contactNameNorm === 'system opening balance' ||
-        refNorm === 'opening balance (system opening balance)' ||
+        contactNameNorm.includes('opening balance') ||
+        refNorm.includes('opening balance') ||
         refNorm.includes('system opening balance') ||
+        invNumNorm.includes('opening balance') ||
         invNumNorm.includes('system opening balance') ||
-        inv.isOpeningBalance
+        inv.isOpeningBalance ||
+        inv.IsConversionBalance ||
+        inv.IsSystemGenerated ||
+        inv.Type === 'CONVERSION'
       ) {
         return false;
       }
@@ -251,20 +256,19 @@ export async function GET(req: NextRequest) {
       const invNumRaw = (inv.InvoiceNumber || inv.invoice_number || '').toString().trim();
       const refRaw = (inv.Reference || inv.reference || '').toString().trim();
       const shortId = (inv.InvoiceID || inv.external_id || inv.id || '').toString().slice(-6).toUpperCase();
-      const isOpeningBalance = inv.IsConversionBalance || (!invNumRaw && !refRaw) || inv.IsSystemGenerated || inv.Type === 'CONVERSION';
 
       let resolvedInvNum = invNumRaw;
       if (!resolvedInvNum || resolvedInvNum === '—') {
         if (refRaw && refRaw !== '—') {
           resolvedInvNum = refRaw;
         } else {
-          resolvedInvNum = isOpeningBalance ? 'Opening Balance' : (isAR ? `INV-${shortId || '7842'}` : `BILL-${shortId || '9120'}`);
+          resolvedInvNum = isAR ? `INV-${shortId || '7842'}` : `BILL-${shortId || '9120'}`;
         }
       }
 
       let resolvedRef = refRaw;
       if (!resolvedRef || resolvedRef === '—') {
-        resolvedRef = invNumRaw && invNumRaw !== '—' ? invNumRaw : (isOpeningBalance ? 'System Opening Balance' : resolvedInvNum);
+        resolvedRef = invNumRaw && invNumRaw !== '—' ? invNumRaw : resolvedInvNum;
       }
 
       return {
@@ -285,7 +289,7 @@ export async function GET(req: NextRequest) {
         daysUntilDue,
         weekBucket,
         reference: resolvedRef,
-        isOpeningBalance,
+        isOpeningBalance: false,
         currency: inv.CurrencyCode || inv.currency || currency,
         lineItems: Array.isArray(inv.LineItems || inv.line_items)
           ? (inv.LineItems || inv.line_items).map((item: any) => ({
