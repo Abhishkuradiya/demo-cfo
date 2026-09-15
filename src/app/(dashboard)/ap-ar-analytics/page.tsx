@@ -113,8 +113,8 @@ export default function APARAnalyticsDashboard() {
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [selectedContact, setSelectedContact] = useState<string>('ALL');
 
-  // Sorting
-  const [sortCol, setSortCol] = useState<'amount' | 'date' | 'dueDate' | 'contact' | 'number' | 'category' | 'status' | 'ar' | 'ap'>('amount');
+  // Sorting (Default: Latest Date at top)
+  const [sortCol, setSortCol] = useState<'amount' | 'date' | 'dueDate' | 'contact' | 'number' | 'category' | 'status' | 'ar' | 'ap'>('date');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
   // Pagination (Default 100 entries per page, expands container height naturally)
