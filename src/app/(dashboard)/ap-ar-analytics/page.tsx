@@ -232,7 +232,8 @@ export default function APARAnalyticsDashboard() {
       const cId = inv.contactId || inv.contactName;
       const existing = map.get(cId) || {
         contactId: cId,
-        contactName: inv.contactName,
+        contactName: inv.contactName || 'Unnamed Contact',
+        name: inv.contactName || 'Unnamed Contact',
         contactType: inv.category === 'AR' ? 'CUSTOMER' : 'VENDOR',
         type: inv.category === 'AR' ? 'customer' : 'supplier',
         totalReceivable: 0,
@@ -2596,14 +2597,15 @@ export default function APARAnalyticsDashboard() {
                     <p className="text-xs text-slate-500 mt-1">Try adjusting your filter or search query.</p>
                   </div>
                 ) : (
-                  filteredDrawerContacts.map((contact) => {
-                    const isEditing = drawerEditingContactId === contact.name;
+                  filteredDrawerContacts.map((contact, idx) => {
+                    const cName = contact.name || contact.contactName || `Contact-${idx}`;
+                    const isEditing = drawerEditingContactId === cName;
                     const isBreached = contact.limitStatus === 'EXCEEDED';
                     const pct = Math.min(100, contact.creditLimit ? Math.round((contact.totalAmount / contact.creditLimit) * 100) : 0);
 
                     return (
                       <div 
-                        key={contact.name}
+                        key={cName}
                         className={cn(
                           "bg-white rounded-xl border p-3.5 shadow-2xs transition-all",
                           isBreached ? "border-rose-300 bg-rose-50/20" : "border-slate-200 hover:border-slate-300"
@@ -2613,11 +2615,11 @@ export default function APARAnalyticsDashboard() {
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex items-center gap-2 min-w-0">
                             <div className={cn("h-8 w-8 rounded-lg flex items-center justify-center font-bold text-xs shrink-0", contact.type === 'customer' ? "bg-emerald-100 text-emerald-800 border border-emerald-200" : "bg-blue-100 text-blue-800 border border-blue-200")}>
-                              {contact.name.charAt(0).toUpperCase()}
+                              {(contact.name || contact.contactName || 'C').charAt(0).toUpperCase()}
                             </div>
                             <div className="min-w-0">
                               <h4 className="text-xs font-bold text-slate-900 truncate flex items-center gap-1.5">
-                                {contact.name}
+                                {contact.name || contact.contactName || 'Unnamed Contact'}
                                 <span className={cn("text-[9.5px] px-1.5 py-0.2 rounded font-semibold uppercase tracking-wider", contact.type === 'customer' ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-blue-50 text-blue-700 border border-blue-200")}>
                                   {contact.type === 'customer' ? 'AR Customer' : 'AP Supplier'}
                                 </span>
@@ -2714,13 +2716,13 @@ export default function APARAnalyticsDashboard() {
                                         method: 'POST',
                                         headers: { 'Content-Type': 'application/json' },
                                         body: JSON.stringify({
-                                          contactName: contact.name,
+                                          contactName: cName,
                                           creditLimit: drawerEditLimit,
                                           creditTermsDays: drawerEditTerms
                                         })
                                       });
                                       if (res.ok) {
-                                        toast.success(`Updated policy for ${contact.name}`);
+                                        toast.success(`Updated policy for ${cName}`);
                                         setDrawerEditingContactId(null);
                                         fetchData();
                                       } else {
@@ -2743,7 +2745,7 @@ export default function APARAnalyticsDashboard() {
                               </span>
                               <button
                                 onClick={() => {
-                                  setDrawerEditingContactId(contact.name);
+                                  setDrawerEditingContactId(cName);
                                   setDrawerEditLimit(contact.creditLimit || 50000);
                                   setDrawerEditTerms(contact.creditTermsDays || 30);
                                 }}
