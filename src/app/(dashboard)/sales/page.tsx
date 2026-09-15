@@ -1049,31 +1049,7 @@ export default function SalesDashboardPage() {
         </div>
       </div>
 
-      {/* ========================================================================= */}
-      {/* ATTACHMENT 2 SECTION HEADER */}
-      {/* ========================================================================= */}
-      {/* DYNAMIC EXECUTIVE HERO GREETING SECTION */}
-      <div className={cn("border-t pt-4 flex flex-col md:flex-row md:items-center justify-between gap-3", isDark ? "border-white/20" : "border-slate-200/60")}>
-        <div>
-          <div className="flex items-center gap-2">
-            <h2 className={cn("text-2xl font-black tracking-tight flex items-center gap-2", isDark ? "text-slate-100" : "text-slate-900")}>
-              <span>{greetingInfo.text},</span>
-              <span className="text-blue-600">MI Health Ltd</span>
-              <span className="text-xl">{greetingInfo.icon}</span>
-            </h2>
-          </div>
-          <p className={cn("text-xs font-medium mt-0.5", isDark ? "text-slate-400" : "text-slate-500")}>
-            Real-time consolidated sales performance & receivable intelligence snapshot.
-          </p>
-        </div>
 
-        {loading && (
-          <div className={cn("flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold shadow-3xs border", isDark ? "bg-slate-900 border-white/20 text-blue-400" : "bg-blue-50 border-blue-200/80 text-blue-600")}>
-            <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-            <span>Updating live metrics...</span>
-          </div>
-        )}
-      </div>
 
       {/* ========================================================================= */}
       {/* EXECUTIVE 7 SNAPSHOT CARDS WITH DYNAMIC SPARK LINES */}
@@ -1112,13 +1088,16 @@ export default function SalesDashboardPage() {
                   }
                 }}
                 className={cn(
-                  "rounded-xl border p-3.5 shadow-2xs hover:shadow-md transition-all duration-200 flex flex-col justify-between overflow-visible relative group min-h-[165px]",
+                  "rounded-xl border p-3.5 shadow-2xs hover:shadow-md transition-all duration-200 flex flex-col justify-between overflow-hidden relative group min-h-[165px]",
                   isDark ? "bg-slate-900/90 border-white/25 text-slate-100" : "bg-white border-slate-200/80 text-slate-800",
                   (isTotalRevenue || isNetSales || isGrossProfit || isGrossMargin || isInvoices || isAR)
                     ? "cursor-pointer hover:border-blue-400"
                     : "cursor-default hover:border-slate-300"
                 )}
               >
+                {/* Animated Light Sweep Shimmer Overlay */}
+                <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-blue-100/40 dark:via-white/10 to-transparent animate-card-shimmer pointer-events-none" />
+
                 {/* Top Section: Title, Info Tooltip & Icon */}
                 <div>
                   <div className="flex items-center justify-between text-slate-400">
@@ -1149,8 +1128,8 @@ export default function SalesDashboardPage() {
                   {/* Middle Section: Metric Value & Advanced Trend Pill */}
                   {isCardLoading ? (
                     <div className="space-y-1.5 mt-3">
-                      <div className={cn("h-5 w-20 animate-pulse rounded", isDark ? "bg-slate-800" : "bg-slate-200")} />
-                      <div className={cn("h-3 w-24 animate-pulse rounded", isDark ? "bg-slate-800/60" : "bg-slate-100")} />
+                      <div className="h-5 w-20 rounded shimmer-effect" />
+                      <div className="h-3 w-24 rounded shimmer-effect" />
                     </div>
                   ) : (
                     <div className="mt-1.5">
@@ -1659,7 +1638,7 @@ export default function SalesDashboardPage() {
             {(() => {
               const activeRegionsList = (salesData?.regions && salesData.regions.length > 0)
                 ? salesData.regions
-                : [
+                : (showDemoRegionData ? [
                     {
                       name: "UK General / South East",
                       revenue: totalRev || 3799019,
@@ -1697,9 +1676,11 @@ export default function SalesDashboardPage() {
                         { name: "Shrewsbury / Shropshire", revenue: 8141, pct: 100.0, count: 2 }
                       ]
                     }
-                  ];
+                  ] : []);
 
-              const currentRegion = activeRegionsList[selectedRegionIndex % activeRegionsList.length] || activeRegionsList[0];
+              const currentRegion = activeRegionsList && activeRegionsList.length > 0
+                ? (activeRegionsList[selectedRegionIndex % activeRegionsList.length] || activeRegionsList[0])
+                : null;
               const regionColors = ["bg-blue-600", "bg-emerald-500", "bg-amber-500", "bg-purple-500", "bg-indigo-500", "bg-rose-500", "bg-cyan-500"];
 
               // Precise Map pin location coordinates & zoom origins per region (SVG 1008x651 canvas)
@@ -1725,7 +1706,7 @@ export default function SalesDashboardPage() {
                 return { top: '41.5%', left: '46.2%', zoomClass: 'origin-[46.2%_41.5%] scale-[1.6]' };
               };
 
-              const pin = getPinCoords(currentRegion.name, currentRegion.countryCode || currentRegion.code);
+              const pin = getPinCoords(currentRegion?.name || '', currentRegion?.countryCode || currentRegion?.code || '');
 
               return (
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
@@ -1972,7 +1953,7 @@ export default function SalesDashboardPage() {
                   <path stroke="#f1f5f9" strokeWidth="4" fill="none"
                     d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
                   <path
-                    stroke="url(#blueGrad)" strokeDasharray={`${salesData?.executiveRow4?.revenueQuality?.qualityScore || 88}, 100`}
+                    stroke="url(#blueGrad)" strokeDasharray={`${salesData?.executiveRow4?.revenueQuality?.qualityScore || 0}, 100`}
                     strokeWidth="4" strokeLinecap="round" fill="none"
                     className="transition-all duration-1000"
                     d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
@@ -1986,7 +1967,7 @@ export default function SalesDashboardPage() {
                 </svg>
                 <div className="absolute inset-0 flex flex-col items-center justify-center" style={{ lineHeight: 1 }}>
                   <div className="flex items-end">
-                    <span className="text-[21px] font-black text-slate-800 dark:text-slate-100">{salesData?.executiveRow4?.revenueQuality?.qualityScore || 88}</span>
+                    <span className="text-[21px] font-black text-slate-800 dark:text-slate-100">{salesData?.executiveRow4?.revenueQuality?.qualityScore || 0}</span>
                     <span className="text-[9px] font-bold text-slate-400 mb-0.5">/100</span>
                   </div>
                   <span className="text-[7.5px] font-extrabold text-slate-400 uppercase tracking-widest mt-0.5">Score</span>
@@ -2013,9 +1994,9 @@ export default function SalesDashboardPage() {
             {/* 3 Revenue Metrics with progress */}
             <div className="space-y-2.5">
               {[
-                { label: 'Profitable Revenue', value: salesData?.executiveRow4?.revenueQuality?.profitableRevenue || 0, pct: salesData?.executiveRow4?.revenueQuality?.profitablePct || 100, color: '#10b981' },
-                { label: 'Collectable Revenue', value: salesData?.executiveRow4?.revenueQuality?.collectableRevenue || 0, pct: salesData?.executiveRow4?.revenueQuality?.collectablePct || 86, color: '#2563eb' },
-                { label: 'Sustainable Revenue', value: salesData?.executiveRow4?.revenueQuality?.sustainableRevenue || 0, pct: salesData?.executiveRow4?.revenueQuality?.sustainablePct || 75, color: '#f59e0b' },
+                { label: 'Profitable Revenue', value: salesData?.executiveRow4?.revenueQuality?.profitableRevenue || 0, pct: salesData?.executiveRow4?.revenueQuality?.profitableRevenue > 0 ? (salesData?.executiveRow4?.revenueQuality?.profitablePct || 0) : 0, color: '#10b981' },
+                { label: 'Collectable Revenue', value: salesData?.executiveRow4?.revenueQuality?.collectableRevenue || 0, pct: salesData?.executiveRow4?.revenueQuality?.collectableRevenue > 0 ? (salesData?.executiveRow4?.revenueQuality?.collectablePct || 0) : 0, color: '#2563eb' },
+                { label: 'Sustainable Revenue', value: salesData?.executiveRow4?.revenueQuality?.sustainableRevenue || 0, pct: salesData?.executiveRow4?.revenueQuality?.sustainableRevenue > 0 ? (salesData?.executiveRow4?.revenueQuality?.sustainablePct || 0) : 0, color: '#f59e0b' },
               ].map((row) => (
                 <div key={row.label}>
                   <div className="flex justify-between items-baseline mb-1">
@@ -2134,8 +2115,8 @@ export default function SalesDashboardPage() {
                   {formatAmount(salesData?.agingSummary?.totalAR || 0)}
                 </span>
               </div>
-              <span className="text-[9.5px] font-bold text-slate-500 bg-slate-100 border border-slate-200/80 px-2 py-0.5 rounded-md">
-                As on {salesData?.agingSummary?.asOnDate || '31 Aug 2026'}
+              <span className="text-[9.5px] font-bold text-slate-500 bg-slate-100 dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 px-2 py-0.5 rounded-md">
+                As on {salesData?.agingSummary?.asOnDate || (salesData?.meta?.toDate ? new Date(salesData.meta.toDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }))}
               </span>
             </div>
 
@@ -2161,10 +2142,10 @@ export default function SalesDashboardPage() {
                     <div key={idx} className="flex items-center justify-between font-semibold">
                       <div className="flex items-center gap-1.5 truncate max-w-[90px]">
                         <span className={cn("h-2 w-2 rounded-full shrink-0", item.color)} />
-                        <span className="text-slate-600 truncate">{item.label}</span>
+                        <span className="text-slate-600 dark:text-slate-400 truncate">{item.label}</span>
                       </div>
                       <div className="flex items-center gap-1 font-sans">
-                        <span className="font-extrabold text-slate-800">{formatAmount(item.val)}</span>
+                        <span className="font-extrabold text-slate-800 dark:text-slate-200">{formatAmount(item.val)}</span>
                         <span className="text-slate-400 text-[9px]">({pct}%)</span>
                       </div>
                     </div>
@@ -2174,9 +2155,20 @@ export default function SalesDashboardPage() {
             </div>
 
             {/* Footer */}
-            <div className="border-t border-slate-100 pt-2.5">
-              <Link href="/aging" className="text-[11px] font-extrabold text-blue-600 hover:text-blue-700 hover:underline inline-flex items-center gap-1 cursor-pointer">
-                <span>View Aging Report</span>
+            <div className="border-t border-slate-100 dark:border-slate-800 pt-2.5 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => setIsARPanelOpen(true)}
+                className="text-[11px] font-extrabold text-blue-600 hover:text-blue-700 dark:text-blue-400 hover:underline inline-flex items-center gap-1 cursor-pointer bg-transparent border-0 p-0"
+              >
+                <span>Inspect Aging Drawer</span>
+              </button>
+
+              <Link
+                href={`/invoices?as_on_date=${salesData?.meta?.toDate || toDate || new Date().toISOString().split('T')[0]}`}
+                className="text-[11px] font-extrabold text-blue-600 hover:text-blue-700 dark:text-blue-400 hover:underline inline-flex items-center gap-1 cursor-pointer"
+              >
+                <span>View Full AR Report</span>
                 <ArrowRight className="h-3.5 w-3.5" />
               </Link>
             </div>
@@ -2596,7 +2588,7 @@ export default function SalesDashboardPage() {
                         catBg: "bg-emerald-50 text-emerald-700 border-emerald-200",
                         text: salesData?.topCustomers?.[0]
                           ? `Top customer "${salesData.topCustomers[0].name}" accounts for ${formatAmount(salesData.topCustomers[0].revenue)} of total sales.`
-                          : "Top product line shows strong quarterly growth.",
+                          : "No customer sales activity recorded for this period.",
                         time: "25 min ago"
                       },
                       {

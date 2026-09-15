@@ -20,7 +20,10 @@ export async function GET(req: NextRequest) {
  
     // 1. Exchange authorization code for access token
     const tokenUrl = 'https://identity.xero.com/connect/token';
-    const redirectUri = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/xero/callback`;
+    const host = req.headers.get('x-forwarded-host') || req.headers.get('host') || req.nextUrl.host;
+    const proto = req.headers.get('x-forwarded-proto') || (req.nextUrl.protocol ? req.nextUrl.protocol.replace(':', '') : 'http');
+    const baseUrl = host ? `${proto}://${host}` : (process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000');
+    const redirectUri = `${baseUrl}/api/xero/callback`;
     const basicAuth = Buffer.from(`${credentials.client_id}:${credentials.client_secret}`).toString('base64');
  
     const tokenRes = await fetch(tokenUrl, {

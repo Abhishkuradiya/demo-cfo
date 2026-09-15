@@ -68,8 +68,7 @@ export default function LoginPage() {
         });
         
         // Redirect to dashboard
-        router.push('/overview');
-        router.refresh();
+        window.location.href = '/overview';
       } else {
         toast.error(data.message || 'Login failed. Please check credentials.');
       }

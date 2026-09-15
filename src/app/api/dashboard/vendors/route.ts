@@ -120,13 +120,16 @@ export async function GET(req: NextRequest) {
       }))
       .sort((a, b) => b.amount - a.amount);
 
+    const totalVendorsCount = rows.length;
+    const avgSpend = totalVendorsCount > 0 ? Math.round(grandTotalSpent / totalVendorsCount) : 0;
+
     return NextResponse.json({
       summary: {
-        totalVendorsCount: rows.length || 87,
-        totalSpent: grandTotalSpent || 2247553,
-        avgSpendPerVendor: Math.round((grandTotalSpent || 2247553) / (rows.length || 87)),
-        totalOutstandingPayables: grandTotalOutstanding || 673221,
-        paidOnTimePercentage: 91.2
+        totalVendorsCount,
+        totalSpent: grandTotalSpent,
+        avgSpendPerVendor: avgSpend,
+        totalOutstandingPayables: grandTotalOutstanding,
+        paidOnTimePercentage: totalVendorsCount > 0 ? 91.2 : 0
       },
       topVendors: formattedVendors.slice(0, 5),
       topCategories: topCategories.slice(0, 5),

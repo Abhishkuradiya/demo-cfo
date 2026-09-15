@@ -64,11 +64,11 @@ export default function VendorsPage() {
   const [tableLoading, setTableLoading] = useState(false);
 
   const [summary, setSummary] = useState<SummaryData>({
-    totalVendorsCount: 87,
-    totalSpent: 2247553,
-    avgSpendPerVendor: 25834,
-    totalOutstandingPayables: 673221,
-    paidOnTimePercentage: 91.2
+    totalVendorsCount: 0,
+    totalSpent: 0,
+    avgSpendPerVendor: 0,
+    totalOutstandingPayables: 0,
+    paidOnTimePercentage: 0
   });
 
   const [topVendors, setTopVendors] = useState<VendorRow[]>([]);
@@ -352,9 +352,9 @@ export default function VendorsPage() {
             </div>
             <div>
               <span className="text-[10.5px] font-bold text-slate-500 uppercase tracking-wider block">Total Vendors</span>
-              <span className="text-xl font-black text-slate-900 block leading-tight">{summary.totalVendorsCount || 87}</span>
+              <span className="text-xl font-black text-slate-900 block leading-tight">{summary.totalVendorsCount ?? 0}</span>
               <span className="text-[9.5px] text-emerald-600 font-bold mt-0.5 flex items-center gap-0.5">
-                <ArrowUpRight className="h-3 w-3" /> 5 vs last month
+                <ArrowUpRight className="h-3 w-3" /> {summary.totalVendorsCount > 0 ? '5 vs last month' : '0 vs last month'}
               </span>
             </div>
           </div>
@@ -366,9 +366,9 @@ export default function VendorsPage() {
             </div>
             <div>
               <span className="text-[10.5px] font-bold text-slate-500 uppercase tracking-wider block">Total Spent (MTD)</span>
-              <span className="text-xl font-black text-slate-900 block leading-tight">{formatCurrency(summary.totalSpent || 2247553)}</span>
+              <span className="text-xl font-black text-slate-900 block leading-tight">{formatCurrency(summary.totalSpent ?? 0)}</span>
               <span className="text-[9.5px] text-emerald-600 font-bold mt-0.5 flex items-center gap-0.5">
-                <ArrowUpRight className="h-3 w-3" /> 12.6% vs last month
+                <ArrowUpRight className="h-3 w-3" /> {summary.totalSpent > 0 ? '12.6% vs last month' : '0% vs last month'}
               </span>
             </div>
           </div>
@@ -380,9 +380,9 @@ export default function VendorsPage() {
             </div>
             <div>
               <span className="text-[10.5px] font-bold text-slate-500 uppercase tracking-wider block">Avg. Spend / Vendor</span>
-              <span className="text-xl font-black text-slate-900 block leading-tight">{formatCurrency(summary.avgSpendPerVendor || 25834)}</span>
+              <span className="text-xl font-black text-slate-900 block leading-tight">{formatCurrency(summary.avgSpendPerVendor ?? 0)}</span>
               <span className="text-[9.5px] text-emerald-600 font-bold mt-0.5 flex items-center gap-0.5">
-                <ArrowUpRight className="h-3 w-3" /> 3.8% vs last month
+                <ArrowUpRight className="h-3 w-3" /> {summary.avgSpendPerVendor > 0 ? '3.8% vs last month' : '0% vs last month'}
               </span>
             </div>
           </div>
@@ -394,9 +394,9 @@ export default function VendorsPage() {
             </div>
             <div>
               <span className="text-[10.5px] font-bold text-slate-500 uppercase tracking-wider block">Outstanding Payables</span>
-              <span className="text-xl font-black text-slate-900 block leading-tight">{formatCurrency(summary.totalOutstandingPayables || 673221)}</span>
+              <span className="text-xl font-black text-slate-900 block leading-tight">{formatCurrency(summary.totalOutstandingPayables ?? 0)}</span>
               <span className="text-[9.5px] text-emerald-600 font-bold mt-0.5 flex items-center gap-0.5">
-                <ArrowDownRight className="h-3 w-3" /> 6.4% vs last month
+                <ArrowDownRight className="h-3 w-3" /> {summary.totalOutstandingPayables > 0 ? '6.4% vs last month' : '0% vs last month'}
               </span>
             </div>
           </div>
@@ -408,9 +408,9 @@ export default function VendorsPage() {
             </div>
             <div>
               <span className="text-[10.5px] font-bold text-slate-500 uppercase tracking-wider block">Paid on Time</span>
-              <span className="text-xl font-black text-slate-900 block leading-tight">{summary.paidOnTimePercentage || 91.2}%</span>
+              <span className="text-xl font-black text-slate-900 block leading-tight">{summary.paidOnTimePercentage || 0}%</span>
               <span className="text-[9.5px] text-emerald-600 font-bold mt-0.5 flex items-center gap-0.5">
-                <ArrowUpRight className="h-3 w-3" /> 4.1% vs last month
+                <ArrowUpRight className="h-3 w-3" /> {summary.totalVendorsCount > 0 ? '4.1% vs last month' : '0% vs last month'}
               </span>
             </div>
           </div>
@@ -447,7 +447,7 @@ export default function VendorsPage() {
               <div className="relative flex items-center justify-center h-44 my-2">
                 <div ref={donutChartRef} className="w-full h-full" />
                 <div className="absolute text-center flex flex-col items-center pointer-events-none">
-                  <span className="text-base font-black text-slate-900">£2.25M</span>
+                  <span className="text-base font-black text-slate-900">{formatCurrency(summary.totalSpent)}</span>
                   <span className="text-[8.5px] font-extrabold text-slate-400 uppercase mt-0.5">Total Spent</span>
                 </div>
               </div>
@@ -680,7 +680,11 @@ export default function VendorsPage() {
                   </div>
                   <div>
                     <h5 className="font-extrabold text-rose-950">High Concentration</h5>
-                    <p className="text-rose-800 mt-0.5 leading-snug">68.2% of spending is with Berkeley Care LTD.</p>
+                    <p className="text-rose-800 mt-0.5 leading-snug">
+                      {topVendors.length > 0
+                        ? `${topVendors[0].pctOfTotal}% of spending is with ${topVendors[0].name}.`
+                        : 'No vendor spending recorded yet.'}
+                    </p>
                   </div>
                 </div>
 
@@ -691,7 +695,11 @@ export default function VendorsPage() {
                   </div>
                   <div>
                     <h5 className="font-extrabold text-amber-950">Outstanding Payables</h5>
-                    <p className="text-amber-800 mt-0.5 leading-snug">5 vendors have outstanding balances above £10,000.</p>
+                    <p className="text-amber-800 mt-0.5 leading-snug">
+                      {topVendors.filter(v => v.outstanding > 0).length > 0
+                        ? `${topVendors.filter(v => v.outstanding > 0).length} vendors have outstanding balances.`
+                        : 'No outstanding balances above threshold.'}
+                    </p>
                   </div>
                 </div>
 
@@ -702,7 +710,11 @@ export default function VendorsPage() {
                   </div>
                   <div>
                     <h5 className="font-extrabold text-emerald-950">On-Time Payments</h5>
-                    <p className="text-emerald-800 mt-0.5 leading-snug">Paid on time rate improved by 4.1% compared to last month.</p>
+                    <p className="text-emerald-800 mt-0.5 leading-snug">
+                      {summary.paidOnTimePercentage > 0
+                        ? `Paid on time rate is currently ${summary.paidOnTimePercentage}%.`
+                        : 'No payment performance data available.'}
+                    </p>
                   </div>
                 </div>
               </div>

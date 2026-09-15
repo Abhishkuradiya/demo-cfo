@@ -5,7 +5,7 @@ export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Define public paths
-  const publicPaths = ['/login', '/register', '/api/auth/login', '/api/auth/register', '/api/db-status', '/api/xero/callback'];
+  const publicPaths = ['/login', '/register', '/api/auth/login', '/api/auth/register', '/api/db-status', '/api/xero/callback', '/api/amazon'];
   const isPublicPath = publicPaths.some(path => pathname === path || pathname.startsWith(path + '/'));
 
   // Let static next files and favicon pass through

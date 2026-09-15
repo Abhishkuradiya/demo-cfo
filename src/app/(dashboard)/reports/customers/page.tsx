@@ -58,11 +58,11 @@ export default function CustomersPage() {
   const [tableLoading, setTableLoading] = useState(false);
 
   const [summary, setSummary] = useState<SummaryData>({
-    totalCustomersCount: 156,
-    totalRevenue: 3782113,
-    avgRevenuePerCustomer: 24245,
-    totalOutstanding: 126450,
-    paidOnTimePercentage: 92.4
+    totalCustomersCount: 0,
+    totalRevenue: 0,
+    avgRevenuePerCustomer: 0,
+    totalOutstanding: 0,
+    paidOnTimePercentage: 0
   });
 
   const [topCustomers, setTopCustomers] = useState<CustomerRow[]>([]);
@@ -350,9 +350,9 @@ export default function CustomersPage() {
             </div>
             <div>
               <span className="text-[10.5px] font-bold text-slate-500 uppercase tracking-wider block">Total Customers</span>
-              <span className="text-xl font-black text-slate-900 block leading-tight">{summary.totalCustomersCount || 156}</span>
+              <span className="text-xl font-black text-slate-900 block leading-tight">{summary.totalCustomersCount ?? 0}</span>
               <span className="text-[9.5px] text-emerald-600 font-bold mt-0.5 flex items-center gap-0.5">
-                <ArrowUpRight className="h-3 w-3" /> 12 vs previous period
+                <ArrowUpRight className="h-3 w-3" /> {summary.totalCustomersCount > 0 ? '12 vs previous period' : '0 vs previous period'}
               </span>
             </div>
           </div>
@@ -364,9 +364,9 @@ export default function CustomersPage() {
             </div>
             <div>
               <span className="text-[10.5px] font-bold text-slate-500 uppercase tracking-wider block">Total Revenue</span>
-              <span className="text-xl font-black text-slate-900 block leading-tight">{formatCurrency(summary.totalRevenue || 3782113)}</span>
+              <span className="text-xl font-black text-slate-900 block leading-tight">{formatCurrency(summary.totalRevenue ?? 0)}</span>
               <span className="text-[9.5px] text-emerald-600 font-bold mt-0.5 flex items-center gap-0.5">
-                <ArrowUpRight className="h-3 w-3" /> 18.6% vs previous period
+                <ArrowUpRight className="h-3 w-3" /> {summary.totalRevenue > 0 ? '18.6% vs previous period' : '0% vs previous period'}
               </span>
             </div>
           </div>
@@ -378,9 +378,9 @@ export default function CustomersPage() {
             </div>
             <div>
               <span className="text-[10.5px] font-bold text-slate-500 uppercase tracking-wider block">Avg Revenue / Customer</span>
-              <span className="text-xl font-black text-slate-900 block leading-tight">{formatCurrency(summary.avgRevenuePerCustomer || 24245)}</span>
+              <span className="text-xl font-black text-slate-900 block leading-tight">{formatCurrency(summary.avgRevenuePerCustomer ?? 0)}</span>
               <span className="text-[9.5px] text-emerald-600 font-bold mt-0.5 flex items-center gap-0.5">
-                <ArrowUpRight className="h-3 w-3" /> 6.3% vs previous period
+                <ArrowUpRight className="h-3 w-3" /> {summary.avgRevenuePerCustomer > 0 ? '6.3% vs previous period' : '0% vs previous period'}
               </span>
             </div>
           </div>
@@ -392,9 +392,9 @@ export default function CustomersPage() {
             </div>
             <div>
               <span className="text-[10.5px] font-bold text-slate-500 uppercase tracking-wider block">Outstanding Receivables</span>
-              <span className="text-xl font-black text-slate-900 block leading-tight">{formatCurrency(summary.totalOutstanding || 126450)}</span>
+              <span className="text-xl font-black text-slate-900 block leading-tight">{formatCurrency(summary.totalOutstanding ?? 0)}</span>
               <span className="text-[9.5px] text-emerald-600 font-bold mt-0.5 flex items-center gap-0.5">
-                <ArrowDownRight className="h-3 w-3" /> 8.7% vs previous period
+                <ArrowDownRight className="h-3 w-3" /> {summary.totalOutstanding > 0 ? '8.7% vs previous period' : '0% vs previous period'}
               </span>
             </div>
           </div>
@@ -406,9 +406,9 @@ export default function CustomersPage() {
             </div>
             <div>
               <span className="text-[10.5px] font-bold text-slate-500 uppercase tracking-wider block">Paid on Time</span>
-              <span className="text-xl font-black text-slate-900 block leading-tight">{summary.paidOnTimePercentage || 92.4}%</span>
+              <span className="text-xl font-black text-slate-900 block leading-tight">{summary.paidOnTimePercentage || 0}%</span>
               <span className="text-[9.5px] text-emerald-600 font-bold mt-0.5 flex items-center gap-0.5">
-                <ArrowUpRight className="h-3 w-3" /> 3.6% vs previous period
+                <ArrowUpRight className="h-3 w-3" /> {summary.totalCustomersCount > 0 ? '3.6% vs previous period' : '0% vs previous period'}
               </span>
             </div>
           </div>
@@ -446,7 +446,7 @@ export default function CustomersPage() {
               <div className="relative flex items-center justify-center h-44 my-2">
                 <div ref={donutChartRef} className="w-full h-full" />
                 <div className="absolute text-center flex flex-col items-center pointer-events-none">
-                  <span className="text-base font-black text-slate-900">£3.78M</span>
+                  <span className="text-base font-black text-slate-900">{formatCurrency(summary.totalRevenue)}</span>
                   <span className="text-[8.5px] font-extrabold text-slate-400 uppercase mt-0.5">Total Revenue</span>
                 </div>
               </div>
@@ -676,7 +676,11 @@ export default function CustomersPage() {
                   </div>
                   <div>
                     <h5 className="font-extrabold text-blue-950">Top Revenue Contributor</h5>
-                    <p className="text-blue-800 mt-0.5 leading-snug">Stripe Payments contributes 49.0% of total revenue.</p>
+                    <p className="text-blue-800 mt-0.5 leading-snug">
+                      {topCustomers.length > 0
+                        ? `${topCustomers[0].name} contributes ${topCustomers[0].pctOfRevenue}% of total revenue.`
+                        : 'No customer revenue recorded yet.'}
+                    </p>
                   </div>
                 </div>
 
@@ -687,7 +691,11 @@ export default function CustomersPage() {
                   </div>
                   <div>
                     <h5 className="font-extrabold text-emerald-950">Improving Payments</h5>
-                    <p className="text-emerald-800 mt-0.5 leading-snug">Paid on time improved by 3.6% compared to previous period.</p>
+                    <p className="text-emerald-800 mt-0.5 leading-snug">
+                      {summary.paidOnTimePercentage > 0
+                        ? `Paid on time rate is currently ${summary.paidOnTimePercentage}%.`
+                        : 'No customer payment performance recorded.'}
+                    </p>
                   </div>
                 </div>
 
@@ -698,7 +706,11 @@ export default function CustomersPage() {
                   </div>
                   <div>
                     <h5 className="font-extrabold text-amber-950">High Outstanding</h5>
-                    <p className="text-amber-800 mt-0.5 leading-snug">2 customers have outstanding balances above £20,000.</p>
+                    <p className="text-amber-800 mt-0.5 leading-snug">
+                      {topCustomers.filter(c => c.outstanding > 0).length > 0
+                        ? `${topCustomers.filter(c => c.outstanding > 0).length} customers have outstanding balances.`
+                        : 'No high outstanding customer balances.'}
+                    </p>
                   </div>
                 </div>
               </div>

@@ -98,7 +98,8 @@ export function TrendIndicator({ value, suffix = "%", inverted = false }: { valu
 // ==================================================
 // VALUE FORMATTER COMPONENT
 // ==================================================
-export function ValueFormatter({ value, type, currency = "INR" }: { value: number, type: 'currency' | 'days' | 'percent', currency?: string }) {
+// ==================================================
+export function ValueFormatter({ value, type, currency = "GBP" }: { value: number, type: 'currency' | 'days' | 'percent', currency?: string }) {
   if (type === 'percent') {
     return (
       <span className="select-all font-sans font-extrabold text-[19px] text-slate-800 tracking-tight">
@@ -116,17 +117,17 @@ export function ValueFormatter({ value, type, currency = "INR" }: { value: numbe
 
   let formatted = "";
   if (!currency) {
-    formatted = new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
-  } else if (currency === 'INR') {
-    formatted = '₹' + new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
-  } else if (currency === 'USD') {
-    formatted = '$' + new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+    formatted = new Intl.NumberFormat('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
   } else if (currency === 'GBP') {
     formatted = '£' + new Intl.NumberFormat('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+  } else if (currency === 'USD') {
+    formatted = '$' + new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+  } else if (currency === 'INR') {
+    formatted = '₹' + new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
   } else if (currency === 'EUR') {
     formatted = '€' + new Intl.NumberFormat('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
   } else {
-    formatted = currency + ' ' + new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+    formatted = currency + ' ' + new Intl.NumberFormat('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
   }
 
   const parts = formatted.split('.');
@@ -164,7 +165,7 @@ export function KpiCard({
   tooltipText,
   value,
   valueType,
-  currency = "INR",
+  currency = "GBP",
   subtitle,
   history,
   sparklineColor,
@@ -218,12 +219,13 @@ export function KpiCard({
 // KPIS ROW COMPONENT (6 CARDS GRID)
 // ==================================================
 interface KpisRowProps {
-  currency: string;
-  fromDate: string | null;
-  toDate: string | null;
+  currency?: string;
+  fromDate?: string | null;
+  toDate?: string | null;
+  loading?: boolean;
 }
 
-export function KpisRow({ currency, fromDate, toDate }: KpisRowProps) {
+export function KpisRow({ currency = "GBP", fromDate, toDate, loading: parentLoading }: KpisRowProps) {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -268,7 +270,9 @@ export function KpisRow({ currency, fromDate, toDate }: KpisRowProps) {
     };
   }, [fromDate, toDate]);
 
-  if (error) {
+  const isRowLoading = loading || !!parentLoading;
+
+  if (error && !isRowLoading) {
     return (
       <div className="bg-red-50/50 border border-red-200/60 rounded-xl p-5 text-center text-[11px] font-bold text-[#ef4444] select-none shadow-2xs">
         {error}
@@ -295,7 +299,7 @@ export function KpisRow({ currency, fromDate, toDate }: KpisRowProps) {
         subtitle="Formula: Bank + CA - CL"
         history={wc.history}
         sparklineColor="#10b981"
-        loading={loading}
+        loading={isRowLoading}
         icon={Briefcase}
       />
       <KpiCard
@@ -307,7 +311,7 @@ export function KpisRow({ currency, fromDate, toDate }: KpisRowProps) {
         subtitle={`${or.percentage}% of Accounts Receivable`}
         history={or.history}
         sparklineColor="#ef4444"
-        loading={loading}
+        loading={isRowLoading}
         icon={Clock}
       />
       <KpiCard
@@ -319,7 +323,7 @@ export function KpisRow({ currency, fromDate, toDate }: KpisRowProps) {
         subtitle={`${ob.percentage}% of Accounts Payable`}
         history={ob.history}
         sparklineColor="#f59e0b"
-        loading={loading}
+        loading={isRowLoading}
         icon={FileText}
       />
       <KpiCard
@@ -331,7 +335,7 @@ export function KpisRow({ currency, fromDate, toDate }: KpisRowProps) {
         subtitle="Period collection rate"
         history={cr.history}
         sparklineColor="#10b981"
-        loading={loading}
+        loading={isRowLoading}
         icon={TrendingUp}
       />
       <KpiCard
@@ -345,7 +349,7 @@ export function KpisRow({ currency, fromDate, toDate }: KpisRowProps) {
         subtitle="vs. Previous Period"
         history={ac.history}
         sparklineColor={ac.difference <= 0 ? "#10b981" : "#ef4444"}
-        loading={loading}
+        loading={isRowLoading}
         icon={CalendarClock}
       />
       <KpiCard
@@ -359,7 +363,7 @@ export function KpisRow({ currency, fromDate, toDate }: KpisRowProps) {
         subtitle="vs. Previous Period"
         history={ap.history}
         sparklineColor={ap.difference >= 0 ? "#10b981" : "#ef4444"}
-        loading={loading}
+        loading={isRowLoading}
         icon={Hourglass}
       />
     </div>

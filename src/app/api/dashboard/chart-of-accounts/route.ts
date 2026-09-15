@@ -166,11 +166,7 @@ export async function GET(req: NextRequest) {
 
     // 4. Fallback if empty or disconnected
     if (accountsList.length === 0) {
-      accountsList = MOCK_ACCOUNTS.map((acc, idx) => ({
-        id: String(idx + 1),
-        ...acc,
-        currency: orgBaseCurrency
-      }));
+      accountsList = [];
     }
 
     // Overall KPI distribution calculation across all active accounts

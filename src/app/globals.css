@@ -307,3 +307,21 @@
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite linear;
 }
+
+@keyframes card-shimmer-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  50%, 100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-card-shimmer {
+  animation: card-shimmer-sweep 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.animate-card-shimmer-fast {
+  animation: card-shimmer-sweep 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+

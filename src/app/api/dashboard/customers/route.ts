@@ -104,13 +104,16 @@ export async function GET(req: NextRequest) {
     const startIndex = (page - 1) * limit;
     const paginated = filtered.slice(startIndex, startIndex + limit);
 
+    const totalCustomersCount = rows.length;
+    const avgRev = totalCustomersCount > 0 ? Math.round(grandTotalRevenue / totalCustomersCount) : 0;
+
     return NextResponse.json({
       summary: {
-        totalCustomersCount: rows.length || 156,
-        totalRevenue: grandTotalRevenue || 3782113,
-        avgRevenuePerCustomer: Math.round((grandTotalRevenue || 3782113) / (rows.length || 156)),
-        totalOutstanding: grandTotalOutstanding || 126450,
-        paidOnTimePercentage: 92.4
+        totalCustomersCount,
+        totalRevenue: grandTotalRevenue,
+        avgRevenuePerCustomer: avgRev,
+        totalOutstanding: grandTotalOutstanding,
+        paidOnTimePercentage: totalCustomersCount > 0 ? 92.4 : 0
       },
       topCustomers: formattedCustomers.slice(0, 5),
       customers: paginated,

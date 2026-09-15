@@ -1342,6 +1342,7 @@ export default function OverviewPage() {
         currency={data.currency}
         fromDate={searchParams.get('from_date')}
         toDate={searchParams.get('to_date')}
+        loading={isLoading}
       />
 
       {/* 2.8 New Fourth Row: 4 Accounts/Reconciliation Summary Cards */}

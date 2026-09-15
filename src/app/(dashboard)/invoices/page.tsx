@@ -469,128 +469,165 @@ export default function ConsistentAccountReceivablePage() {
 
 
       {/* ========================================================================= */}
-      {/* 4 PRIMARY METRIC CARDS WITH DYNAMIC SPARK LINES */}
+      {/* 4 PRIMARY METRIC CARDS WITH DYNAMIC SPARK LINES & SHIMMER EFFECTS */}
       {/* ========================================================================= */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        
-        {/* Card 1: Total Receivables */}
-        <div 
-          onClick={() => {
-            setSelectedBucketFilter('ALL');
-            setSelectedRiskFilter('ALL');
-            setActiveTab('customers');
-            toast.info('Showing all receivables');
-          }}
-          className={cn(
-            "bg-white rounded-xl border p-4 shadow-2xs hover:border-emerald-400 transition-all cursor-pointer flex flex-col justify-between group overflow-hidden relative",
-            selectedBucketFilter === 'ALL' ? "border-emerald-500 ring-1 ring-emerald-500/20" : "border-slate-200/80"
-          )}
-        >
-          <div>
-            <div className="flex items-center justify-between text-slate-400">
-              <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">TOTAL RECEIVABLES</span>
-              <CreditCard className="h-4 w-4 text-emerald-600 group-hover:scale-110 transition-transform" />
-            </div>
-            <div className="text-2xl font-extrabold text-slate-900 mt-1.5 tracking-tight">
-              {formatAmount(totalReceivablesVal)}
-            </div>
-            <span className="text-[11px] text-emerald-600 font-semibold mt-1 block">Click to view all receivables →</span>
-          </div>
-          <div className="mt-2 -mx-4 -mb-4">
-            <DynamicSparkline data={totalReceivablesTrend} color="#10b981" />
-          </div>
-        </div>
+        {loading ? (
+          <>
+            {[
+              { label: 'TOTAL RECEIVABLES', accent: 'bg-emerald-500' },
+              { label: 'CURRENT (NOT DUE)', accent: 'bg-blue-500' },
+              { label: 'TOTAL OVERDUE', accent: 'bg-amber-500' },
+              { label: '90+ DAYS OVERDUE', accent: 'bg-red-500' }
+            ].map((sk, idx) => (
+              <div key={idx} className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs space-y-3 relative overflow-hidden">
+                <div className={cn("absolute top-0 left-0 right-0 h-1 opacity-70", sk.accent)} />
+                <div className="flex items-center justify-between">
+                  <div className="h-3.5 w-28 rounded-md shimmer-effect" />
+                  <div className="h-4 w-4 rounded-full shimmer-effect" />
+                </div>
+                <div className="h-8 w-36 rounded-md shimmer-effect mt-1" />
+                <div className="h-3 w-40 rounded-md shimmer-effect" />
+                <div className="h-9 w-full rounded-b-xl shimmer-effect mt-2" />
+                {/* Shimmer sweep line overlay */}
+                <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-slate-200/40 to-transparent animate-card-shimmer pointer-events-none" />
+              </div>
+            ))}
+          </>
+        ) : (
+          <>
+            {/* Card 1: Total Receivables */}
+            <div 
+              onClick={() => {
+                setSelectedBucketFilter('ALL');
+                setSelectedRiskFilter('ALL');
+                setActiveTab('customers');
+                toast.info('Showing all receivables');
+              }}
+              className={cn(
+                "bg-white rounded-xl border p-4 shadow-2xs hover:border-emerald-400 transition-all cursor-pointer flex flex-col justify-between group overflow-hidden relative",
+                selectedBucketFilter === 'ALL' ? "border-emerald-500 ring-1 ring-emerald-500/20" : "border-slate-200/80"
+              )}
+            >
+              {/* Animated Light Sweep Shimmer Overlay */}
+              <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-emerald-100/60 to-transparent animate-card-shimmer pointer-events-none" />
 
-        {/* Card 2: Current (Not Due) */}
-        <div 
-          onClick={() => {
-            setSelectedBucketFilter('current');
-            setActiveTab('customers');
-            toast.info('Filtered: Current (Not Due) Receivables');
-          }}
-          className={cn(
-            "bg-white rounded-xl border p-4 shadow-2xs hover:border-blue-400 transition-all cursor-pointer flex flex-col justify-between group overflow-hidden relative",
-            selectedBucketFilter === 'current' ? "border-blue-500 ring-1 ring-blue-500/20" : "border-slate-200/80"
-          )}
-        >
-          <div>
-            <div className="flex items-center justify-between text-slate-400">
-              <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wider">CURRENT (NOT DUE)</span>
-              <Calendar className="h-4 w-4 text-blue-600 group-hover:scale-110 transition-transform" />
+              <div>
+                <div className="flex items-center justify-between text-slate-400">
+                  <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">TOTAL RECEIVABLES</span>
+                  <CreditCard className="h-4 w-4 text-emerald-600 group-hover:scale-110 transition-transform" />
+                </div>
+                <div className="text-2xl font-extrabold text-slate-900 mt-1.5 tracking-tight">
+                  {formatAmount(totalReceivablesVal)}
+                </div>
+                <span className="text-[11px] text-emerald-600 font-semibold mt-1 block">Click to view all receivables →</span>
+              </div>
+              <div className="mt-2 -mx-4 -mb-4">
+                <DynamicSparkline data={totalReceivablesTrend} color="#10b981" />
+              </div>
             </div>
-            <div className="text-2xl font-extrabold text-slate-900 mt-1.5 tracking-tight">
-              {formatAmount(currentNotDueVal)}
-            </div>
-            <span className="text-[11px] text-blue-600 font-semibold mt-1 block">
-              {data?.summary?.currentNotDue?.pct || '0'}% (Click to drill down) →
-            </span>
-          </div>
-          <div className="mt-2 -mx-4 -mb-4">
-            <DynamicSparkline data={currentNotDueTrend} color="#2563eb" />
-          </div>
-        </div>
 
-        {/* Card 3: Overdue Balance */}
-        <div 
-          onClick={() => {
-            setSelectedBucketFilter('ALL');
-            setActiveTab('overdue');
-            toast.info('Filtered: All Overdue Invoices');
-          }}
-          className={cn(
-            "bg-white rounded-xl border p-4 shadow-2xs hover:border-amber-400 transition-all cursor-pointer flex flex-col justify-between group overflow-hidden relative",
-            activeTab === 'overdue' ? "border-amber-500 ring-1 ring-amber-500/20" : "border-slate-200/80"
-          )}
-        >
-          <div>
-            <div className="flex items-center justify-between text-slate-400">
-              <span className="text-[10px] font-bold text-amber-600 uppercase tracking-wider">TOTAL OVERDUE</span>
-              <Clock className="h-4 w-4 text-amber-600 group-hover:scale-110 transition-transform" />
-            </div>
-            <div className="text-2xl font-extrabold text-slate-900 mt-1.5 tracking-tight">
-              {formatAmount(overdueTotalVal)}
-            </div>
-            <span className="text-[11px] text-amber-600 font-semibold mt-1 block">
-              {overdueCountVal} Invoices (Click to inspect) →
-            </span>
-          </div>
-          <div className="mt-2 -mx-4 -mb-4">
-            <DynamicSparkline data={overdueTotalTrend} color="#f59e0b" />
-          </div>
-        </div>
+            {/* Card 2: Current (Not Due) */}
+            <div 
+              onClick={() => {
+                setSelectedBucketFilter('current');
+                setActiveTab('customers');
+                toast.info('Filtered: Current (Not Due) Receivables');
+              }}
+              className={cn(
+                "bg-white rounded-xl border p-4 shadow-2xs hover:border-blue-400 transition-all cursor-pointer flex flex-col justify-between group overflow-hidden relative",
+                selectedBucketFilter === 'current' ? "border-blue-500 ring-1 ring-blue-500/20" : "border-slate-200/80"
+              )}
+            >
+              {/* Animated Light Sweep Shimmer Overlay */}
+              <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-blue-100/60 to-transparent animate-card-shimmer pointer-events-none" />
 
-        {/* Card 4: 90+ Days Overdue */}
-        <div 
-          onClick={() => {
-            setSelectedBucketFilter('90+');
-            setActiveTab('ageing');
-            toast.warning('Filtered: High Risk 90+ Days Overdue');
-          }}
-          className={cn(
-            "bg-white rounded-xl border p-4 shadow-2xs hover:border-red-500 transition-all cursor-pointer flex flex-col justify-between group overflow-hidden relative",
-            selectedBucketFilter === '90+' ? "border-red-500 ring-1 ring-red-500/20" : "border-slate-200/80"
-          )}
-        >
-          <div>
-            <div className="flex items-center justify-between text-slate-400">
-              <span className="text-[10px] font-bold text-red-600 uppercase tracking-wider">90+ DAYS OVERDUE</span>
-              <ShieldAlert className="h-4 w-4 text-red-600 group-hover:scale-110 transition-transform" />
+              <div>
+                <div className="flex items-center justify-between text-slate-400">
+                  <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wider">CURRENT (NOT DUE)</span>
+                  <Calendar className="h-4 w-4 text-blue-600 group-hover:scale-110 transition-transform" />
+                </div>
+                <div className="text-2xl font-extrabold text-slate-900 mt-1.5 tracking-tight">
+                  {formatAmount(currentNotDueVal)}
+                </div>
+                <span className="text-[11px] text-blue-600 font-semibold mt-1 block">
+                  {data?.summary?.currentNotDue?.pct || '0'}% (Click to drill down) →
+                </span>
+              </div>
+              <div className="mt-2 -mx-4 -mb-4">
+                <DynamicSparkline data={currentNotDueTrend} color="#2563eb" />
+              </div>
             </div>
-            <div className="text-2xl font-extrabold text-red-600 mt-1.5 tracking-tight">
-              {formatAmount(highRiskVal)}
+
+            {/* Card 3: Overdue Balance */}
+            <div 
+              onClick={() => {
+                setSelectedBucketFilter('ALL');
+                setActiveTab('overdue');
+                toast.info('Filtered: All Overdue Invoices');
+              }}
+              className={cn(
+                "bg-white rounded-xl border p-4 shadow-2xs hover:border-amber-400 transition-all cursor-pointer flex flex-col justify-between group overflow-hidden relative",
+                activeTab === 'overdue' ? "border-amber-500 ring-1 ring-amber-500/20" : "border-slate-200/80"
+              )}
+            >
+              {/* Animated Light Sweep Shimmer Overlay */}
+              <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-amber-100/60 to-transparent animate-card-shimmer pointer-events-none" />
+
+              <div>
+                <div className="flex items-center justify-between text-slate-400">
+                  <span className="text-[10px] font-bold text-amber-600 uppercase tracking-wider">TOTAL OVERDUE</span>
+                  <Clock className="h-4 w-4 text-amber-600 group-hover:scale-110 transition-transform" />
+                </div>
+                <div className="text-2xl font-extrabold text-slate-900 mt-1.5 tracking-tight">
+                  {formatAmount(overdueTotalVal)}
+                </div>
+                <span className="text-[11px] text-amber-600 font-semibold mt-1 block">
+                  {overdueCountVal} Invoices (Click to inspect) →
+                </span>
+              </div>
+              <div className="mt-2 -mx-4 -mb-4">
+                <DynamicSparkline data={overdueTotalTrend} color="#f59e0b" />
+              </div>
             </div>
-            <span className="text-[11px] text-red-600 font-semibold mt-1 block">
-              {data?.summary?.days90Plus?.pct || '0'}% (High Risk Drill-down) →
-            </span>
-          </div>
-          <div className="mt-2 -mx-4 -mb-4">
-            <DynamicSparkline data={days90PlusTrend} color="#ef4444" />
-          </div>
-        </div>
+
+            {/* Card 4: 90+ Days Overdue */}
+            <div 
+              onClick={() => {
+                setSelectedBucketFilter('90+');
+                setActiveTab('ageing');
+                toast.warning('Filtered: High Risk 90+ Days Overdue');
+              }}
+              className={cn(
+                "bg-white rounded-xl border p-4 shadow-2xs hover:border-red-500 transition-all cursor-pointer flex flex-col justify-between group overflow-hidden relative",
+                selectedBucketFilter === '90+' ? "border-red-500 ring-1 ring-red-500/20" : "border-slate-200/80"
+              )}
+            >
+              {/* Animated Light Sweep Shimmer Overlay */}
+              <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-rose-100/60 to-transparent animate-card-shimmer pointer-events-none" />
+
+              <div>
+                <div className="flex items-center justify-between text-slate-400">
+                  <span className="text-[10px] font-bold text-red-600 uppercase tracking-wider">90+ DAYS OVERDUE</span>
+                  <ShieldAlert className="h-4 w-4 text-red-600 group-hover:scale-110 transition-transform" />
+                </div>
+                <div className="text-2xl font-extrabold text-red-600 mt-1.5 tracking-tight">
+                  {formatAmount(highRiskVal)}
+                </div>
+                <span className="text-[11px] text-red-600 font-semibold mt-1 block">
+                  {data?.summary?.days90Plus?.pct || '0'}% (High Risk Drill-down) →
+                </span>
+              </div>
+              <div className="mt-2 -mx-4 -mb-4">
+                <DynamicSparkline data={days90PlusTrend} color="#ef4444" />
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       {/* ========================================================================= */}
-      {/* 5 EXECUTIVE AGEING DRILL-DOWN FILTER CARDS */}
+      {/* 5 EXECUTIVE AGEING DRILL-DOWN FILTER CARDS WITH SHIMMER */}
       {/* ========================================================================= */}
       <div className="space-y-2">
         <div className="flex items-center justify-between px-1">
@@ -610,92 +647,123 @@ export default function ConsistentAccountReceivablePage() {
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-          {data?.ageingDistribution?.map((item: any) => {
-            const isSelected = selectedBucketFilter === item.key;
-            
-            // Tailored theme styling per bucket
-            let themeStyles = "bg-blue-50/40 border-blue-200/80 text-blue-900 hover:bg-blue-50 hover:border-blue-300";
-            let badgeBg = "bg-blue-100 text-blue-700 border-blue-200";
-            let barColor = "bg-blue-600";
-            let iconDot = "bg-blue-600";
-
-            if (item.key === '1-30') {
-              themeStyles = "bg-amber-50/40 border-amber-200/80 text-amber-900 hover:bg-amber-50 hover:border-amber-300";
-              badgeBg = "bg-amber-100 text-amber-800 border-amber-200";
-              barColor = "bg-amber-500";
-              iconDot = "bg-amber-500";
-            } else if (item.key === '31-60') {
-              themeStyles = "bg-orange-50/40 border-orange-200/80 text-orange-900 hover:bg-orange-50 hover:border-orange-300";
-              badgeBg = "bg-orange-100 text-orange-800 border-orange-200";
-              barColor = "bg-orange-500";
-              iconDot = "bg-orange-500";
-            } else if (item.key === '61-90') {
-              themeStyles = "bg-rose-50/40 border-rose-200/80 text-rose-900 hover:bg-rose-50 hover:border-rose-300";
-              badgeBg = "bg-rose-100 text-rose-800 border-rose-200";
-              barColor = "bg-rose-500";
-              iconDot = "bg-rose-500";
-            } else if (item.key === '90+') {
-              themeStyles = "bg-red-50/50 border-red-250 text-red-950 hover:bg-red-50 hover:border-red-400";
-              badgeBg = "bg-red-100 text-red-800 border-red-200 font-extrabold";
-              barColor = "bg-red-600";
-              iconDot = "bg-red-600";
-            }
-
-            return (
-              <div 
-                key={item.key}
-                onClick={() => {
-                  setSelectedBucketFilter(isSelected ? 'ALL' : item.key);
-                  setActiveTab('customers');
-                  toast.info(`Filter updated: ${item.label}`);
-                }}
-                className={cn(
-                  "p-3 rounded-xl border transition-all duration-200 cursor-pointer flex flex-col justify-between space-y-2.5 shadow-2xs group select-none",
-                  themeStyles,
-                  isSelected
-                    ? "ring-2 ring-blue-600 border-blue-600 shadow-md scale-[1.02] bg-white"
-                    : ""
-                )}
-              >
-                {/* Header: Dot + Label */}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <span className={cn("h-2.5 w-2.5 rounded-full shrink-0 shadow-2xs", iconDot)} />
-                    <span className="text-xs font-black tracking-tight truncate">
-                      {item.label}
-                    </span>
+          {loading ? (
+            <>
+              {Array.from({ length: 5 }).map((_, idx) => (
+                <div key={idx} className="p-3 rounded-xl border border-slate-200/80 bg-white space-y-2.5 shadow-2xs relative overflow-hidden">
+                  <div className="flex items-center justify-between">
+                    <div className="h-3 w-20 rounded-md shimmer-effect" />
+                    <div className="h-2.5 w-2.5 rounded-full shimmer-effect" />
                   </div>
-                  {isSelected && (
-                    <span className="text-[10px] font-black uppercase tracking-wider px-1.5 py-0.2 rounded bg-blue-600 text-white shadow-2xs">
-                      Active
-                    </span>
+                  <div className="h-5 w-24 rounded-md shimmer-effect" />
+                  <div className="space-y-1.5 pt-1">
+                    <div className="flex items-center justify-between">
+                      <div className="h-3 w-14 rounded-md shimmer-effect" />
+                      <div className="h-2 w-8 rounded-md shimmer-effect" />
+                    </div>
+                    <div className="h-1.5 w-full rounded-full shimmer-effect" />
+                  </div>
+                  <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-slate-200/40 to-transparent animate-card-shimmer pointer-events-none" />
+                </div>
+              ))}
+            </>
+          ) : (
+            data?.ageingDistribution?.map((item: any) => {
+              const isSelected = selectedBucketFilter === item.key;
+              
+              // Tailored theme styling per bucket
+              let themeStyles = "bg-blue-50/40 border-blue-200/80 text-blue-900 hover:bg-blue-50 hover:border-blue-300";
+              let badgeBg = "bg-blue-100 text-blue-700 border-blue-200";
+              let barColor = "bg-blue-600";
+              let iconDot = "bg-blue-600";
+              let shimmerSweep = "via-blue-200/40";
+
+              if (item.key === '1-30') {
+                themeStyles = "bg-amber-50/40 border-amber-200/80 text-amber-900 hover:bg-amber-50 hover:border-amber-300";
+                badgeBg = "bg-amber-100 text-amber-800 border-amber-200";
+                barColor = "bg-amber-500";
+                iconDot = "bg-amber-500";
+                shimmerSweep = "via-amber-200/40";
+              } else if (item.key === '31-60') {
+                themeStyles = "bg-orange-50/40 border-orange-200/80 text-orange-900 hover:bg-orange-50 hover:border-orange-300";
+                badgeBg = "bg-orange-100 text-orange-800 border-orange-200";
+                barColor = "bg-orange-500";
+                iconDot = "bg-orange-500";
+                shimmerSweep = "via-orange-200/40";
+              } else if (item.key === '61-90') {
+                themeStyles = "bg-rose-50/40 border-rose-200/80 text-rose-900 hover:bg-rose-50 hover:border-rose-300";
+                badgeBg = "bg-rose-100 text-rose-800 border-rose-200";
+                barColor = "bg-rose-500";
+                iconDot = "bg-rose-500";
+                shimmerSweep = "via-rose-200/40";
+              } else if (item.key === '90+') {
+                themeStyles = "bg-red-50/50 border-red-250 text-red-950 hover:bg-red-50 hover:border-red-400";
+                badgeBg = "bg-red-100 text-red-800 border-red-200 font-extrabold";
+                barColor = "bg-red-600";
+                iconDot = "bg-red-600";
+                shimmerSweep = "via-red-200/40";
+              }
+
+              return (
+                <div 
+                  key={item.key}
+                  onClick={() => {
+                    setSelectedBucketFilter(isSelected ? 'ALL' : item.key);
+                    setActiveTab('customers');
+                    toast.info(`Filter updated: ${item.label}`);
+                  }}
+                  className={cn(
+                    "p-3 rounded-xl border transition-all duration-200 cursor-pointer flex flex-col justify-between space-y-2.5 shadow-2xs group select-none relative overflow-hidden",
+                    themeStyles,
+                    isSelected
+                      ? "ring-2 ring-blue-600 border-blue-600 shadow-md scale-[1.02] bg-white"
+                      : ""
                   )}
-                </div>
+                >
+                  {/* Animated Light Sweep Shimmer Overlay */}
+                  <div className={cn("absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent to-transparent animate-card-shimmer pointer-events-none", shimmerSweep)} />
 
-                {/* Amount */}
-                <div className="text-base font-black text-slate-900 tracking-tight">
-                  {formatAmount(item.amount).split(' ')[0]}
-                </div>
-
-                {/* Bottom Row: Percentage Badge + Proportion Bar */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between text-[10px] font-bold">
-                    <span className={cn("px-1.5 py-0.2 rounded border text-[9.5px]", badgeBg)}>
-                      {item.pct}% Share
-                    </span>
-                    <span className="text-slate-400 text-[9.5px]">Filter →</span>
+                  {/* Header: Dot + Label */}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className={cn("h-2.5 w-2.5 rounded-full shrink-0 shadow-2xs", iconDot)} />
+                      <span className="text-xs font-black tracking-tight truncate">
+                        {item.label}
+                      </span>
+                    </div>
+                    {isSelected && (
+                      <span className="text-[10px] font-black uppercase tracking-wider px-1.5 py-0.2 rounded bg-blue-600 text-white shadow-2xs">
+                        Active
+                      </span>
+                    )}
                   </div>
 
-                  <div className="w-full bg-slate-200/60 h-1 rounded-full overflow-hidden">
-                    <div 
-                      className={cn("h-full rounded-full transition-all duration-500", barColor)}
-                      style={{ width: `${Math.max(parseFloat(item.pct || '0'), 3)}%` }} 
-                    />
+                  {/* Amount */}
+                  <div className="text-base font-black text-slate-900 tracking-tight">
+                    {formatAmount(item.amount).split(' ')[0]}
+                  </div>
+
+                  {/* Bottom Row: Percentage Badge + Proportion Bar */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-[10px] font-bold">
+                      <span className={cn("px-1.5 py-0.2 rounded border text-[9.5px]", badgeBg)}>
+                        {item.pct}% Share
+                      </span>
+                      <span className="text-slate-400 text-[9.5px]">Filter →</span>
+                    </div>
+
+                    <div className="w-full bg-slate-200/60 h-1 rounded-full overflow-hidden relative">
+                      <div 
+                        className={cn("h-full rounded-full transition-all duration-500", barColor)}
+                        style={{ width: `${Math.max(parseFloat(item.pct || '0'), 3)}%` }} 
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/70 to-transparent -translate-x-full animate-[shimmer_1.5s_infinite]" />
+                    </div>
                   </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })
+          )}
         </div>
       </div>
 

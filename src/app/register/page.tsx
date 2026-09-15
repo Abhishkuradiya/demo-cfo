@@ -67,8 +67,7 @@ export default function RegisterPage() {
         });
         
         // Redirect to dashboard
-        router.push('/overview');
-        router.refresh();
+        window.location.href = '/overview';
       } else {
         toast.error(data.message || 'Registration failed. Email might already be taken.');
       }

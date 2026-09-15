@@ -73,7 +73,7 @@ interface PLData {
 }
 
 export default function ProfitAndLossPage() {
-  const [viewMode, setViewMode] = useState<'statement' | 'analytics'>('statement');
+  const [viewMode, setViewMode] = useState<'statement' | 'cards' | 'analytics'>('cards');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   // Accordion open state (collapsed by default)
@@ -1004,7 +1004,7 @@ export default function ProfitAndLossPage() {
               <button
                 onClick={() => setViewMode('statement')}
                 className={cn(
-                  "px-3.5 py-1.5 rounded-lg font-extrabold text-xs transition cursor-pointer flex items-center gap-1.5",
+                  "px-3 py-1.5 rounded-lg font-extrabold text-xs transition cursor-pointer flex items-center gap-1.5",
                   viewMode === 'statement' ? "bg-[#0064eb] text-white shadow-2xs" : "text-slate-600 hover:text-slate-900"
                 )}
               >
@@ -1012,9 +1012,19 @@ export default function ProfitAndLossPage() {
                 <span>Statement View</span>
               </button>
               <button
+                onClick={() => setViewMode('cards')}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg font-extrabold text-xs transition cursor-pointer flex items-center gap-1.5",
+                  viewMode === 'cards' ? "bg-[#0064eb] text-white shadow-2xs" : "text-slate-600 hover:text-slate-900"
+                )}
+              >
+                <CreditCard className="h-3.5 w-3.5" />
+                <span>Card View</span>
+              </button>
+              <button
                 onClick={() => setViewMode('analytics')}
                 className={cn(
-                  "px-3.5 py-1.5 rounded-lg font-extrabold text-xs transition cursor-pointer flex items-center gap-1.5",
+                  "px-3 py-1.5 rounded-lg font-extrabold text-xs transition cursor-pointer flex items-center gap-1.5",
                   viewMode === 'analytics' ? "bg-[#0064eb] text-white shadow-2xs" : "text-slate-600 hover:text-slate-900"
                 )}
               >
@@ -1332,6 +1342,269 @@ export default function ProfitAndLossPage() {
               <div className="col-span-3 md:col-span-3 text-right text-xl font-sans tabular-nums font-black tracking-tight">
                 {formatAmount(netVal)}
               </div>
+            </div>
+
+          </div>
+        )}
+
+        {/* MODE 3: CARD VIEW (BALANCE SHEET STYLE SIDE-BY-SIDE CARDS) */}
+        {viewMode === 'cards' && (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+            
+            {/* LEFT COLUMN: TURNOVER & INCOME CARDS */}
+            <div className="lg:col-span-5 space-y-4">
+              
+              {/* TURNOVER (REVENUE) CARD */}
+              <div className="bg-white rounded-xl border border-slate-200/90 shadow-2xs overflow-hidden">
+                <div className="border-l-4 border-emerald-500 bg-emerald-50/50 p-3.5 flex items-center justify-between border-b border-emerald-100">
+                  <div className="flex items-center gap-2">
+                    <span className="font-extrabold text-xs text-emerald-950 uppercase tracking-wider">1. Turnover (Revenue)</span>
+                    <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
+                      {filterItems(turnoverList).length} Accounts
+                    </span>
+                  </div>
+                  <span className="text-sm font-black text-emerald-900 font-sans tabular-nums">{formatAmount(turnoverVal)}</span>
+                </div>
+
+                <div className="divide-y divide-slate-100 max-h-[420px] overflow-y-auto">
+                  {filterItems(turnoverList).length === 0 ? (
+                    <div className="p-4 text-xs text-slate-400 italic text-center">No revenue accounts</div>
+                  ) : (
+                    filterItems(turnoverList).map((item, idx) => (
+                      <div
+                        key={idx}
+                        onClick={() => openAccountTransactions(item)}
+                        className="flex items-center justify-between px-4 py-2.5 hover:bg-emerald-50/30 transition cursor-pointer text-xs group"
+                        title={`View ${item.name} transactions`}
+                      >
+                        <div className="flex items-center gap-2 truncate pr-2">
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" />
+                          <span className="font-semibold text-slate-800 group-hover:text-emerald-700 group-hover:underline truncate">
+                            {item.name}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3 shrink-0">
+                          <span className="text-[10.5px] font-medium text-slate-400 font-sans">{item.code || `REV-${200 + idx}`}</span>
+                          <span className="font-bold text-slate-900 font-sans tabular-nums text-xs">{formatAmount(item.value)}</span>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <div className="p-3 bg-emerald-50/70 border-t border-emerald-100 flex items-center justify-between text-xs font-black text-emerald-950">
+                  <span>Total Turnover</span>
+                  <span className="text-sm font-sans tabular-nums">{formatAmount(turnoverVal)}</span>
+                </div>
+              </div>
+
+              {/* OTHER INCOME CARD */}
+              <div className="bg-white rounded-xl border border-slate-200/90 shadow-2xs overflow-hidden">
+                <div className="border-l-4 border-teal-500 bg-teal-50/50 p-3.5 flex items-center justify-between border-b border-teal-100">
+                  <div className="flex items-center gap-2">
+                    <span className="font-extrabold text-xs text-teal-950 uppercase tracking-wider">4. Other Income</span>
+                    <span className="text-[10px] font-bold bg-teal-100 text-teal-800 px-2 py-0.5 rounded-full">
+                      {filterItems(otherIncomeList).length} Accounts
+                    </span>
+                  </div>
+                  <span className="text-sm font-black text-teal-900 font-sans tabular-nums">{formatAmount(otherIncomeVal)}</span>
+                </div>
+
+                <div className="divide-y divide-slate-100 max-h-[220px] overflow-y-auto">
+                  {filterItems(otherIncomeList).map((item, idx) => (
+                    <div
+                      key={idx}
+                      onClick={() => openAccountTransactions(item)}
+                      className="flex items-center justify-between px-4 py-2.5 hover:bg-teal-50/30 transition cursor-pointer text-xs group"
+                    >
+                      <div className="flex items-center gap-2 truncate pr-2">
+                        <span className="h-1.5 w-1.5 rounded-full bg-teal-500 shrink-0" />
+                        <span className="font-semibold text-slate-800 group-hover:text-teal-700 group-hover:underline truncate">
+                          {item.name}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3 shrink-0">
+                        <span className="text-[10.5px] font-medium text-slate-400 font-sans">{item.code || `INC-${200 + idx}`}</span>
+                        <span className="font-bold text-slate-900 font-sans tabular-nums text-xs">{formatAmount(item.value)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* TOTAL INCOME SUMMARY CARD */}
+              <div className="bg-gradient-to-r from-emerald-600 to-teal-700 text-white rounded-xl p-4 shadow-sm flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] font-extrabold uppercase tracking-widest opacity-80 block">TOTAL REVENUE & INCOME</span>
+                  <span className="text-xs font-medium opacity-90">Combined Income Accounts</span>
+                </div>
+                <span className="text-xl font-black font-sans tabular-nums">{formatAmount(turnoverVal + otherIncomeVal)}</span>
+              </div>
+
+            </div>
+
+            {/* MIDDLE COLUMN: COSTS & EXPENSES CARDS */}
+            <div className="lg:col-span-4 space-y-4">
+              
+              {/* COST OF SALES (COGS) CARD */}
+              <div className="bg-white rounded-xl border border-slate-200/90 shadow-2xs overflow-hidden">
+                <div className="border-l-4 border-blue-500 bg-blue-50/50 p-3.5 flex items-center justify-between border-b border-blue-100">
+                  <div className="flex items-center gap-2">
+                    <span className="font-extrabold text-xs text-blue-950 uppercase tracking-wider">2. Cost of Sales (COGS)</span>
+                    <span className="text-[10px] font-bold bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full">
+                      {filterItems(cogsList).length} Accounts
+                    </span>
+                  </div>
+                  <span className="text-sm font-black text-blue-900 font-sans tabular-nums">{formatAmount(cogsVal)}</span>
+                </div>
+
+                <div className="divide-y divide-slate-100 max-h-[300px] overflow-y-auto">
+                  {filterItems(cogsList).map((item, idx) => (
+                    <div
+                      key={idx}
+                      onClick={() => openAccountTransactions(item)}
+                      className="flex items-center justify-between px-4 py-2.5 hover:bg-blue-50/30 transition cursor-pointer text-xs group"
+                    >
+                      <div className="flex items-center gap-2 truncate pr-2">
+                        <span className="h-1.5 w-1.5 rounded-full bg-blue-500 shrink-0" />
+                        <span className="font-semibold text-slate-800 group-hover:text-blue-700 group-hover:underline truncate">
+                          {item.name}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3 shrink-0">
+                        <span className="text-[10.5px] font-medium text-slate-400 font-sans">{item.code || `COG-${200 + idx}`}</span>
+                        <span className="font-bold text-slate-900 font-sans tabular-nums text-xs">{formatAmount(item.value)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* ADMINISTRATIVE EXPENSES CARD */}
+              <div className="bg-white rounded-xl border border-slate-200/90 shadow-2xs overflow-hidden">
+                <div className="border-l-4 border-amber-500 bg-amber-50/50 p-3.5 flex items-center justify-between border-b border-amber-100">
+                  <div className="flex items-center gap-2">
+                    <span className="font-extrabold text-xs text-amber-950 uppercase tracking-wider">3. Administrative Costs</span>
+                    <span className="text-[10px] font-bold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
+                      {filterItems(expensesList).length} Accounts
+                    </span>
+                  </div>
+                  <span className="text-sm font-black text-amber-900 font-sans tabular-nums">{formatAmount(expensesVal)}</span>
+                </div>
+
+                <div className="divide-y divide-slate-100 max-h-[350px] overflow-y-auto">
+                  {filterItems(expensesList).map((item, idx) => (
+                    <div
+                      key={idx}
+                      onClick={() => openAccountTransactions(item)}
+                      className="flex items-center justify-between px-4 py-2.5 hover:bg-amber-50/30 transition cursor-pointer text-xs group"
+                    >
+                      <div className="flex items-center gap-2 truncate pr-2">
+                        <span className="h-1.5 w-1.5 rounded-full bg-amber-500 shrink-0" />
+                        <span className="font-semibold text-slate-800 group-hover:text-amber-700 group-hover:underline truncate">
+                          {item.name}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3 shrink-0">
+                        <span className="text-[10.5px] font-medium text-slate-400 font-sans">{item.code || `EXP-${200 + idx}`}</span>
+                        <span className="font-bold text-slate-900 font-sans tabular-nums text-xs">{formatAmount(item.value)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* TOTAL EXPENSES SUMMARY CARD */}
+              <div className="bg-slate-900 text-white rounded-xl p-4 shadow-sm flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 block">TOTAL OPERATING COSTS</span>
+                  <span className="text-xs font-medium text-slate-300">COGS + Administrative Expenses</span>
+                </div>
+                <span className="text-xl font-black font-sans tabular-nums text-rose-400">{formatAmount(cogsVal + expensesVal)}</span>
+              </div>
+
+            </div>
+
+            {/* RIGHT COLUMN: QUICK ACTIONS & PROFITABILITY VERIFICATION (Matching Balance Sheet) */}
+            <div className="lg:col-span-3 space-y-4">
+              
+              {/* QUICK ACTIONS CARD */}
+              <div className="bg-white rounded-xl border border-slate-200/90 p-4 shadow-2xs space-y-3">
+                <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block border-b border-slate-100 pb-2">
+                  Quick Actions
+                </span>
+
+                <div className="space-y-2">
+                  <button
+                    onClick={() => toast.success('Exporting PDF Statement')}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 bg-slate-50 hover:bg-blue-50 hover:text-blue-700 text-slate-700 rounded-lg text-xs font-bold transition border border-slate-200/80 cursor-pointer"
+                  >
+                    <FileText className="h-4 w-4 text-blue-600" />
+                    <span>Export PDF Report</span>
+                  </button>
+
+                  <button
+                    onClick={() => toast.success('Exporting Excel Statement')}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 bg-slate-50 hover:bg-emerald-50 hover:text-emerald-700 text-slate-700 rounded-lg text-xs font-bold transition border border-slate-200/80 cursor-pointer"
+                  >
+                    <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+                    <span>Export Excel Matrix</span>
+                  </button>
+
+                  <button
+                    onClick={() => window.print()}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-lg text-xs font-bold transition border border-slate-200/80 cursor-pointer"
+                  >
+                    <Printer className="h-4 w-4 text-slate-600" />
+                    <span>Print Statement</span>
+                  </button>
+
+                  <button
+                    onClick={fetchProfitAndLoss}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-lg text-xs font-bold transition border border-slate-200/80 cursor-pointer"
+                  >
+                    <RefreshCw className="h-4 w-4 text-slate-600" />
+                    <span>Refresh Data</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* PROFITABILITY VERIFICATION CARD */}
+              <div className="bg-white rounded-xl border border-slate-200/90 p-4 shadow-2xs space-y-3.5">
+                <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block border-b border-slate-100 pb-2">
+                  Statement Verification
+                </span>
+
+                <div className={cn(
+                  "p-3 rounded-lg border flex items-center gap-2.5 text-xs font-bold",
+                  netVal >= 0 ? "bg-emerald-50 border-emerald-200 text-emerald-900" : "bg-red-50 border-red-200 text-red-900"
+                )}>
+                  <CheckCircle2 className={cn("h-4 w-4 shrink-0", netVal >= 0 ? "text-emerald-600" : "text-red-600")} />
+                  <span>{netVal >= 0 ? 'Operating Profit Verified' : 'Operating Deficit Verified'}</span>
+                </div>
+
+                <div className="space-y-2 text-xs">
+                  <div className="flex justify-between items-center text-slate-600 font-semibold">
+                    <span>Gross Margin %:</span>
+                    <strong className="text-slate-900 font-sans">{turnoverVal > 0 ? `${((grossVal / turnoverVal) * 100).toFixed(1)}%` : '0.0%'}</strong>
+                  </div>
+
+                  <div className="flex justify-between items-center text-slate-600 font-semibold">
+                    <span>Net Margin %:</span>
+                    <strong className={cn("font-sans font-bold", netVal >= 0 ? "text-emerald-700" : "text-red-600")}>
+                      {turnoverVal > 0 ? `${((netVal / turnoverVal) * 100).toFixed(1)}%` : '0.0%'}
+                    </strong>
+                  </div>
+
+                  <div className="flex justify-between items-center text-slate-600 font-semibold border-t border-slate-100 pt-2">
+                    <span>Net Operating Result:</span>
+                    <strong className={cn("font-sans font-black text-sm", netVal >= 0 ? "text-emerald-700" : "text-red-600")}>
+                      {formatAmount(netVal)}
+                    </strong>
+                  </div>
+                </div>
+              </div>
+
             </div>
 
           </div>

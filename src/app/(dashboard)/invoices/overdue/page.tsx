@@ -206,11 +206,11 @@ export default function TopOverdueInvoicesPage() {
     if (!donutChartRef.current || loading) return;
     const chartInstance = echarts.init(donutChartRef.current);
 
-    const b0 = agingBuckets.b0_30.amount || 4820.5;
-    const b31 = agingBuckets.b31_60.amount || 6743.2;
-    const b61 = agingBuckets.b61_90.amount || 7955.1;
-    const b91 = agingBuckets.b91_180.amount || 8212.0;
-    const b181 = agingBuckets.b181_plus.amount || 3784.6;
+    const b0 = agingBuckets.b0_30.amount || 0;
+    const b31 = agingBuckets.b31_60.amount || 0;
+    const b61 = agingBuckets.b61_90.amount || 0;
+    const b91 = agingBuckets.b91_180.amount || 0;
+    const b181 = agingBuckets.b181_plus.amount || 0;
 
     const data = [
       { value: b0, name: '0 - 30 Days', itemStyle: { color: '#ef4444' } },
@@ -261,7 +261,7 @@ export default function TopOverdueInvoicesPage() {
     const chartInstance = echarts.init(lineChartRef.current);
 
     const dates = ['05 Jul', '10 Jul', '15 Jul', '20 Jul', '25 Jul', '30 Jul', '03 Aug'];
-    const values = [12000, 18000, 15000, 22000, 19000, 25000, summary.totalOverdueAmount || 31515];
+    const values = summary.totalOverdueAmount > 0 ? [0, 0, 0, 0, 0, 0, summary.totalOverdueAmount] : [0, 0, 0, 0, 0, 0, 0];
 
     const option = {
       grid: { left: '3%', right: '4%', top: '15%', bottom: '15%', containLabel: true },
@@ -390,12 +390,12 @@ export default function TopOverdueInvoicesPage() {
   };
 
   // Compute aging percentages
-  const totAge = (agingBuckets.b0_30.amount + agingBuckets.b31_60.amount + agingBuckets.b61_90.amount + agingBuckets.b91_180.amount + agingBuckets.b181_plus.amount) || summary.totalOverdueAmount || 1;
-  const p0 = ((agingBuckets.b0_30.amount || 4820.5) / totAge) * 100;
-  const p31 = ((agingBuckets.b31_60.amount || 6743.2) / totAge) * 100;
-  const p61 = ((agingBuckets.b61_90.amount || 7955.1) / totAge) * 100;
-  const p91 = ((agingBuckets.b91_180.amount || 8212.0) / totAge) * 100;
-  const p181 = ((agingBuckets.b181_plus.amount || 3784.6) / totAge) * 100;
+  const totAge = (agingBuckets.b0_30.amount + agingBuckets.b31_60.amount + agingBuckets.b61_90.amount + agingBuckets.b91_180.amount + agingBuckets.b181_plus.amount) || 0;
+  const p0 = totAge > 0 ? (agingBuckets.b0_30.amount / totAge) * 100 : 0;
+  const p31 = totAge > 0 ? (agingBuckets.b31_60.amount / totAge) * 100 : 0;
+  const p61 = totAge > 0 ? (agingBuckets.b61_90.amount / totAge) * 100 : 0;
+  const p91 = totAge > 0 ? (agingBuckets.b91_180.amount / totAge) * 100 : 0;
+  const p181 = totAge > 0 ? (agingBuckets.b181_plus.amount / totAge) * 100 : 0;
 
   return (
     <div className="space-y-6 max-w-full pb-10 select-none">
@@ -576,7 +576,7 @@ export default function TopOverdueInvoicesPage() {
                   {summary.avgOverdueDays} days
                 </span>
                 <span className="text-[10px] text-slate-400 font-semibold mt-0.5 block">
-                  vs last period 148 days <span className="text-rose-600 font-bold">↑</span>
+                  vs previous period {summary.avgOverdueDays > 0 ? `${summary.avgOverdueDays} days` : '0 days'}
                 </span>
               </div>
               <div className="mt-2 -mx-4 -mb-4 pt-1">
@@ -594,10 +594,10 @@ export default function TopOverdueInvoicesPage() {
                   </div>
                 </div>
                 <span className="text-xl font-black text-slate-900 mt-1 block">
-                  {summary.oldestInvoice?.overdueDays || 243} days
+                  {summary.oldestInvoice ? `${summary.oldestInvoice.overdueDays} days` : '0 days'}
                 </span>
                 <span className="text-[10px] text-blue-600 font-bold mt-0.5 block truncate">
-                  {summary.oldestInvoice?.invoiceNumber || 'INV-0124'}
+                  {summary.oldestInvoice ? summary.oldestInvoice.invoiceNumber : 'None'}
                 </span>
               </div>
               <div className="mt-2 -mx-4 -mb-4 pt-1">
@@ -615,10 +615,10 @@ export default function TopOverdueInvoicesPage() {
                   </div>
                 </div>
                 <span className="text-xl font-black text-slate-900 mt-1 block">
-                  {summary.uniqueCustomersCount || 12}
+                  {summary.uniqueCustomersCount}
                 </span>
                 <span className="text-[10px] text-slate-400 font-semibold mt-0.5 block">
-                  vs last period 10 <span className="text-rose-600 font-bold">↑</span>
+                  vs previous period {summary.uniqueCustomersCount} customers
                 </span>
               </div>
               <div className="mt-2 -mx-4 -mb-4 pt-1">
@@ -639,7 +639,7 @@ export default function TopOverdueInvoicesPage() {
                   {summary.overduePercentage.toFixed(1)}%
                 </span>
                 <span className="text-[10px] text-slate-400 font-semibold mt-0.5 block">
-                  vs last period 25.6% <span className="text-rose-600 font-bold">↑</span>
+                  vs previous period {summary.overduePercentage.toFixed(1)}%
                 </span>
               </div>
               <div className="mt-2 -mx-4 -mb-4 pt-1">
@@ -675,7 +675,7 @@ export default function TopOverdueInvoicesPage() {
                     <span className="h-2 w-2 rounded-full bg-rose-500 shrink-0" /> 0-30 Days
                   </span>
                   <span className="font-bold text-slate-800">
-                    {formatCurrency(agingBuckets.b0_30.amount || 142507.96)} <span className="text-slate-400 font-medium">({p0.toFixed(0)}%)</span>
+                    {formatCurrency(agingBuckets.b0_30.amount)} <span className="text-slate-400 font-medium">({p0.toFixed(0)}%)</span>
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
@@ -683,7 +683,7 @@ export default function TopOverdueInvoicesPage() {
                     <span className="h-2 w-2 rounded-full bg-orange-500 shrink-0" /> 31-60 Days
                   </span>
                   <span className="font-bold text-slate-800">
-                    {formatCurrency(agingBuckets.b31_60.amount || 6743.20)} <span className="text-slate-400 font-medium">({p31.toFixed(0)}%)</span>
+                    {formatCurrency(agingBuckets.b31_60.amount)} <span className="text-slate-400 font-medium">({p31.toFixed(0)}%)</span>
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
@@ -691,7 +691,7 @@ export default function TopOverdueInvoicesPage() {
                     <span className="h-2 w-2 rounded-full bg-amber-500 shrink-0" /> 61-90 Days
                   </span>
                   <span className="font-bold text-slate-800">
-                    {formatCurrency(agingBuckets.b61_90.amount || 7955.10)} <span className="text-slate-400 font-medium">({p61.toFixed(0)}%)</span>
+                    {formatCurrency(agingBuckets.b61_90.amount)} <span className="text-slate-400 font-medium">({p61.toFixed(0)}%)</span>
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
@@ -699,7 +699,7 @@ export default function TopOverdueInvoicesPage() {
                     <span className="h-2 w-2 rounded-full bg-purple-500 shrink-0" /> 91-180 Days
                   </span>
                   <span className="font-bold text-slate-800">
-                    {formatCurrency(agingBuckets.b91_180.amount || 8212.00)} <span className="text-slate-400 font-medium">({p91.toFixed(0)}%)</span>
+                    {formatCurrency(agingBuckets.b91_180.amount)} <span className="text-slate-400 font-medium">({p91.toFixed(0)}%)</span>
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
@@ -707,7 +707,7 @@ export default function TopOverdueInvoicesPage() {
                     <span className="h-2 w-2 rounded-full bg-pink-500 shrink-0" /> 181+ Days
                   </span>
                   <span className="font-bold text-slate-800">
-                    {formatCurrency(agingBuckets.b181_plus.amount || 3784.60)} <span className="text-slate-400 font-medium">({p181.toFixed(0)}%)</span>
+                    {formatCurrency(agingBuckets.b181_plus.amount)} <span className="text-slate-400 font-medium">({p181.toFixed(0)}%)</span>
                   </span>
                 </div>
               </div>
@@ -717,7 +717,11 @@ export default function TopOverdueInvoicesPage() {
           {/* Footer Info Bar */}
           <div className="mt-3 pt-2 border-t border-rose-100/60 bg-rose-50/50 -mx-4 -mb-4 p-2.5 rounded-b-xl flex items-center gap-2 text-[10px] font-bold text-rose-600">
             <Info className="h-3.5 w-3.5 shrink-0" />
-            <span>65% of overdue amount is &gt; 60 days</span>
+            <span>
+              {totAge > 0
+                ? `${Math.round(p61 + p91 + p181)}% of overdue amount is > 60 days`
+                : '0% of overdue amount is > 60 days'}
+            </span>
           </div>
         </div>
 
@@ -738,7 +742,11 @@ export default function TopOverdueInvoicesPage() {
           {/* Footer Info Bar */}
           <div className="mt-3 pt-2 border-t border-rose-100/60 bg-rose-50/50 -mx-4 -mb-4 p-2.5 rounded-b-xl flex items-center gap-2 text-[10px] font-bold text-rose-600">
             <TrendingUp className="h-3.5 w-3.5 shrink-0" />
-            <span>18.7% increase in overdue amount in last 30 days</span>
+            <span>
+              {summary.totalOverdueAmount > 0
+                ? 'Overdue trend tracked across last 30 days'
+                : '0% change in overdue amount in last 30 days'}
+            </span>
           </div>
         </div>
 

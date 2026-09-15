@@ -22,7 +22,7 @@ export async function POST() {
       name: 'session_token',
       value: '',
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: false,
       sameSite: 'lax',
       expires: new Date(0), // Instantly expire
       path: '/'

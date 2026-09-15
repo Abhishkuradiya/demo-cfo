@@ -18,6 +18,7 @@ import {
   Database,
   Cpu,
   Settings,
+  CreditCard,
   ChevronDown,
   ChevronLeft,
   HelpCircle,
@@ -37,11 +38,11 @@ interface MenuItem {
 
 export function Sidebar() {
   const pathname = usePathname();
-  const { isCollapsed, toggleSidebar, isOpenMobile, setOpenMobile } = useSidebarStore();
+  const { isCollapsed, toggleSidebar, setCollapsed, isOpenMobile, setOpenMobile } = useSidebarStore();
   const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>({});
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
- 
+
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const audio = new Audio('/woosh.mp3');
@@ -55,6 +56,10 @@ export function Sidebar() {
     if (
       pathname.startsWith('/reports/') ||
       pathname === '/overview' ||
+      pathname === '/sales' ||
+      pathname === '/expenses' ||
+      pathname === '/ap-ar-analytics' ||
+      pathname === '/ap-ar-simple' ||
       pathname.startsWith('/banking') ||
       pathname === '/tracking-categories' ||
       pathname === '/chart-of-accounts' ||
@@ -69,8 +74,8 @@ export function Sidebar() {
     if (audioRef.current) {
       try {
         audioRef.current.currentTime = 0;
-        audioRef.current.play().catch(() => {});
-      } catch (e) {}
+        audioRef.current.play().catch(() => { });
+      } catch (e) { }
     }
   };
 
@@ -80,25 +85,26 @@ export function Sidebar() {
 
   const menuItems: MenuItem[] = [
     { name: 'Overview', href: '/overview', icon: LayoutDashboard },
-    { 
-      name: 'Xero Analytics', 
-      href: '/overview', 
-      icon: LayoutGrid, 
-      badge: 'New', 
+    {
+      name: 'Xero Analytics',
+      href: '/overview',
+      icon: LayoutGrid,
+      badge: 'New',
       hasDropdown: true,
       subItems: [
         { name: 'Xero Dashboard', href: '/overview' },
-        { name: 'Chart of Accounts', href: '/chart-of-accounts' },
+        { name: 'Sales Dashboard', href: '/sales' },
+        { name: 'Unified AP & AR Analytics', href: '/ap-ar-analytics' },
         { name: 'Account Receivable', href: '/invoices' },
-        { name: 'Top Overdue Invoices', href: '/invoices/overdue' },
         { name: 'Account Payable', href: '/bills' },
-        { name: 'Aged Receivables Detail', href: '/reports/account-receivable' },
-        { name: 'Aged Receivables Summary', href: '/reports/aged-receivables' },
-        { name: 'Bank Accounts', href: '/banking/accounts' },
-        { name: 'Balance Sheet', href: '/reports/balance-sheet' },
+        { name: 'Purchases & Expenses', href: '/expenses' },
+        { name: 'Top Overdue Invoices', href: '/invoices/overdue' },
         { name: 'Profit & Loss', href: '/reports/profit-and-loss' },
+        { name: 'Balance Sheet', href: '/reports/balance-sheet' },
         { name: 'Cash Flow', href: '/reports/cash-flow' },
         { name: 'Trial Balance', href: '/reports/trial-balance' },
+        { name: 'Bank Accounts', href: '/banking/accounts' },
+        { name: 'Chart of Accounts', href: '/chart-of-accounts' },
         { name: 'Budget vs Actual', href: '/reports/budget-actual' },
         { name: 'Tax Center', href: '/reports/tax-center' },
         { name: 'Tracking Categories', href: '/tracking-categories' },
@@ -108,7 +114,8 @@ export function Sidebar() {
         { name: 'Inventory', href: '/products' }
       ]
     },
-    { name: 'Sales Dashboard', href: '/sales', icon: BarChart3 },
+    { name: 'Amazon Dashboard', href: '/amazon', icon: ShoppingBag, badge: 'Live' },
+    { name: 'Stripe Dashboard', href: '/stripe', icon: CreditCard, badge: 'SOON' },
     { name: 'Purchases', href: '/bills', icon: ShoppingBag },
     { name: 'Accounting', href: '/reports', icon: BookOpen },
     { name: 'Reports', href: '/reports', icon: FileText },
@@ -128,7 +135,7 @@ export function Sidebar() {
         "flex h-16 shrink-0 items-center border-b border-sidebar-border/30",
         isCollapsed ? "justify-center px-2" : "justify-between px-5"
       )}>
-        <div 
+        <div
           onClick={isCollapsed ? toggleSidebar : undefined}
           className={cn("flex items-center gap-3 font-semibold text-white", isCollapsed && "cursor-pointer")}
           title={isCollapsed ? "Expand Sidebar" : undefined}
@@ -143,7 +150,7 @@ export function Sidebar() {
             </Link>
           )}
         </div>
-        
+
         {/* Toggle Collapse for Desktop */}
         {!isCollapsed && (
           <button
@@ -154,7 +161,7 @@ export function Sidebar() {
           </button>
         )}
       </div>
- 
+
       {/* Navigation Menu List */}
       <nav className="flex-1 px-3 py-4 space-y-1">
         {menuItems.map((item) => {
@@ -162,6 +169,8 @@ export function Sidebar() {
 
           const isXeroAnalyticsActive = (
             pathname === '/overview' ||
+            pathname === '/ap-ar-analytics' ||
+            pathname === '/ap-ar-simple' ||
             pathname.startsWith('/reports/') ||
             pathname === '/invoices' ||
             pathname === '/bills' ||
@@ -171,16 +180,16 @@ export function Sidebar() {
           );
 
           // Exact match for active styling
-          const isActive = item.name === 'Overview' 
+          const isActive = item.name === 'Overview'
             ? (pathname === '/overview' && !expandedMenus['Xero Analytics'])
             : item.name === 'Xero Analytics'
               ? isXeroAnalyticsActive
               : (pathname === item.href && !isXeroAnalyticsActive);
- 
+
           if (isCollapsed) {
             return (
-              <div 
-                key={item.name} 
+              <div
+                key={item.name}
                 className="py-0.5 relative"
                 onMouseEnter={() => {
                   setHoveredItem(item.name);
@@ -190,7 +199,15 @@ export function Sidebar() {
               >
                 <Link
                   href={item.href}
-                  onClick={() => setOpenMobile(false)}
+                  onClick={() => {
+                    if (isCollapsed) {
+                      setCollapsed(false);
+                      if (item.hasDropdown) {
+                        setExpandedMenus(prev => ({ ...prev, [item.name]: true }));
+                      }
+                    }
+                    setOpenMobile(false);
+                  }}
                   className={cn(
                     "relative flex h-10 w-10 items-center justify-center rounded-lg mx-auto transition-all duration-200 outline-none hover:bg-sidebar-accent hover:text-white",
                     isActive ? "bg-[#133863] text-white" : "text-sidebar-foreground/80"
@@ -201,7 +218,7 @@ export function Sidebar() {
                   )}
                   <Icon className={cn("h-4.5 w-4.5 shrink-0 transition-colors", isActive ? "text-[#00b7e2]" : "text-sidebar-foreground/60")} />
                 </Link>
- 
+
                 {/* Swipe-up Left-to-Right Animated Tooltip Popup */}
                 {hoveredItem === item.name && (
                   <div className="absolute left-[54px] top-1/2 z-50 pointer-events-none whitespace-nowrap animate-tooltip-swipe">
@@ -214,7 +231,7 @@ export function Sidebar() {
               </div>
             );
           }
- 
+
           return (
             <div key={item.name} className="space-y-0.5">
               <Link
@@ -233,13 +250,18 @@ export function Sidebar() {
                     : "text-sidebar-foreground/80"
                 )}
               >
-                <div className="flex items-center gap-3.5">
+                <div className="flex items-center gap-3.5 min-w-0">
                   <Icon className={cn("h-4.5 w-4.5 shrink-0 transition-colors", isActive ? "text-[#00b7e2]" : "text-sidebar-foreground/60")} />
                   <span className="truncate">{item.name}</span>
                 </div>
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 shrink-0">
                   {item.badge && (
-                    <span className="text-[9px] font-semibold bg-[#22c55e]/90 text-white px-1.5 py-0.5 rounded-full uppercase tracking-wider scale-90">
+                    <span className={cn(
+                      "text-[9px] font-extrabold px-2 py-0.5 rounded-md uppercase tracking-wider whitespace-nowrap shrink-0 shadow-2xs",
+                      item.badge === 'SOON' || item.badge === 'Coming Soon'
+                        ? "bg-amber-500/20 text-amber-300 border border-amber-400/40"
+                        : "bg-[#22c55e]/90 text-white"
+                    )}>
                       {item.badge}
                     </span>
                   )}
@@ -248,7 +270,7 @@ export function Sidebar() {
                   )}
                 </div>
               </Link>
-              
+
               {/* Dropdown Menu Sub-items mock rendering for realism */}
               {item.hasDropdown && expandedMenus[item.name] && (
                 item.subItems ? (
@@ -296,7 +318,7 @@ export function Sidebar() {
           );
         })}
       </nav>
- 
+
       {/* Footer Blocks (Connected, Plan & Support) */}
       {!isCollapsed && (
         <div className="p-4 space-y-3.5 border-t border-sidebar-border/30 bg-black/10 shrink-0">
@@ -310,7 +332,7 @@ export function Sidebar() {
               Manage Subscription
             </button>
           </div>
- 
+
           {/* Help Block */}
           <Link href="/support" className="flex items-center gap-2.5 text-[12px] text-sidebar-foreground/70 hover:text-white transition py-1">
             <HelpCircle className="h-4 w-4 shrink-0 text-sidebar-foreground/50" />
@@ -318,9 +340,10 @@ export function Sidebar() {
           </Link>
         </div>
       )}
-  
+
       {/* Dynamic Keyframe Injection */}
-      <style dangerouslySetInnerHTML={{ __html: `
+      <style dangerouslySetInnerHTML={{
+        __html: `
         @keyframes tooltipSwipe {
           0% {
             opacity: 0;
@@ -347,7 +370,7 @@ export function Sidebar() {
       )}>
         {sidebarContent}
       </aside>
- 
+
       {/* Mobile Drawer */}
       {isOpenMobile ? (
         <div className="fixed inset-0 z-40 flex md:hidden">

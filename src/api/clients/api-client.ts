@@ -21,7 +21,7 @@ export class ApiError extends Error {
   }
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 const TIMEOUT = Number(process.env.NEXT_PUBLIC_API_TIMEOUT) || 30000;
 
 export const apiClient: AxiosInstance = axios.create({

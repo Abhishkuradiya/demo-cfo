@@ -83,7 +83,7 @@ const initPgTables = async () => {
         tenant_identifier VARCHAR(255),
         access_token TEXT NOT NULL,
         refresh_token TEXT NOT NULL,
-        expires_at TIMESTAMP NOT NULL,
+        expires_at TIMESTAMP,
         scopes TEXT[],
         client_id VARCHAR(255),
         client_secret VARCHAR(255),
@@ -341,6 +341,953 @@ const initPgTables = async () => {
       ALTER TABLE tenant_credentials ALTER COLUMN expires_at DROP NOT NULL;
       ALTER TABLE payments ADD COLUMN IF NOT EXISTS invoice_id VARCHAR(255);
       ALTER TABLE payments ADD COLUMN IF NOT EXISTS invoice_type VARCHAR(50);
+      ALTER TABLE tenant_credentials ADD COLUMN IF NOT EXISTS region VARCHAR(50);
+      ALTER TABLE tenant_credentials ADD COLUMN IF NOT EXISTS marketplace_id VARCHAR(100);
+      ALTER TABLE tenant_credentials ADD COLUMN IF NOT EXISTS environment VARCHAR(20) DEFAULT 'production';
+    `);
+
+    // Create Amazon Orders Table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS amazon_orders (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        amazon_order_id VARCHAR(100) NOT NULL,
+        seller_id VARCHAR(100),
+        purchase_date TIMESTAMP,
+        order_status VARCHAR(50),      -- Raw SP-API: Pending, Unshipped, PartiallyShipped, Shipped, Canceled, Unfulfillable, InvoiceUnconfirmed, PendingAvailability
+        business_status VARCHAR(50),   -- Derived CFO State: Pending, Unshipped, Shipped, Delivered, Returned, Canceled
+        fulfillment_channel VARCHAR(50),
+        sales_channel VARCHAR(100),
+        order_total_amount DECIMAL(15, 2) DEFAULT 0,
+        currency VARCHAR(10) DEFAULT 'GBP',
+        number_of_items_shipped INTEGER DEFAULT 0,
+        number_of_items_unshipped INTEGER DEFAULT 0,
+        buyer_email VARCHAR(255),
+        buyer_name VARCHAR(255),
+        ship_city VARCHAR(100),
+        ship_country VARCHAR(10),
+        amazon_fees DECIMAL(15, 2) DEFAULT 0,
+        refund_amount DECIMAL(15, 2) DEFAULT 0,
+        is_returned BOOLEAN DEFAULT FALSE,
+        return_reason VARCHAR(255),
+        delivery_date TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, amazon_order_id)
+      );
+    `);
+
+    // Ensure updated_at, amazon_fees, refund_amount, business_status, is_returned exist on amazon_orders
+    await client.query(`
+      ALTER TABLE amazon_orders ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+      ALTER TABLE amazon_orders ADD COLUMN IF NOT EXISTS amazon_fees DECIMAL(15, 2) DEFAULT 0;
+      ALTER TABLE amazon_orders ADD COLUMN IF NOT EXISTS refund_amount DECIMAL(15, 2) DEFAULT 0;
+      ALTER TABLE amazon_orders ADD COLUMN IF NOT EXISTS business_status VARCHAR(50) DEFAULT 'Shipped';
+      ALTER TABLE amazon_orders ADD COLUMN IF NOT EXISTS is_returned BOOLEAN DEFAULT FALSE;
+      ALTER TABLE amazon_orders ADD COLUMN IF NOT EXISTS return_reason VARCHAR(255);
+      ALTER TABLE amazon_orders ADD COLUMN IF NOT EXISTS delivery_date TIMESTAMP;
+    `);
+
+    // Create Amazon Order Items Table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS amazon_order_items (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        amazon_order_id VARCHAR(100) NOT NULL,
+        order_item_id VARCHAR(100) NOT NULL,
+        asin VARCHAR(50),
+        seller_sku VARCHAR(100),
+        title TEXT,
+        image_url TEXT,
+        thumbnail_url TEXT,
+        quantity_ordered INTEGER DEFAULT 1,
+        quantity_shipped INTEGER DEFAULT 0,
+        item_price DECIMAL(15, 2) DEFAULT 0,
+        item_tax DECIMAL(15, 2) DEFAULT 0,
+        shipping_price DECIMAL(15, 2) DEFAULT 0,
+        promotion_discount DECIMAL(15, 2) DEFAULT 0,
+        currency VARCHAR(10) DEFAULT 'GBP',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, order_item_id)
+      );
+    `);
+
+    // Ensure image_url and thumbnail_url exist on amazon_order_items
+    await client.query(`
+      ALTER TABLE amazon_order_items ADD COLUMN IF NOT EXISTS image_url TEXT;
+      ALTER TABLE amazon_order_items ADD COLUMN IF NOT EXISTS thumbnail_url TEXT;
+    `);
+
+    // Create Amazon Financial Settlements Table (Finances & Transfers API Payouts)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS amazon_settlements (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        financial_event_group_id VARCHAR(100) NOT NULL,
+        settlement_id VARCHAR(100),
+        processing_status VARCHAR(50),      -- Open, Closed
+        fund_transfer_status VARCHAR(50),    -- SUCCESS, IN_PROGRESS, FAILED
+        original_total_amount DECIMAL(15, 2) DEFAULT 0,
+        currency VARCHAR(10) DEFAULT 'GBP',
+        start_date TIMESTAMP,
+        end_date TIMESTAMP,
+        deposit_date TIMESTAMP,              -- Bank transfer completion date
+        account_tail VARCHAR(10),            -- Bank account last 4 digits
+        transfer_type VARCHAR(50) DEFAULT 'STANDARD', -- STANDARD, EXPRESS, SELLER_WALLET
+        trace_id VARCHAR(100),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, financial_event_group_id)
+      );
+    `);
+
+    // Ensure deposit_date, account_tail, transfer_type, trace_id exist on amazon_settlements
+    await client.query(`
+      ALTER TABLE amazon_settlements ADD COLUMN IF NOT EXISTS deposit_date TIMESTAMP;
+      ALTER TABLE amazon_settlements ADD COLUMN IF NOT EXISTS account_tail VARCHAR(10);
+      ALTER TABLE amazon_settlements ADD COLUMN IF NOT EXISTS transfer_type VARCHAR(50) DEFAULT 'STANDARD';
+      ALTER TABLE amazon_settlements ADD COLUMN IF NOT EXISTS trace_id VARCHAR(100);
+    `);
+
+    // Create Amazon Financial Event Groups Table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS amazon_financial_event_groups (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        financial_event_group_id VARCHAR(100) NOT NULL,
+        processing_status VARCHAR(50),
+        fund_transfer_status VARCHAR(50),
+        original_total_amount DECIMAL(15, 2) DEFAULT 0,
+        currency VARCHAR(10) DEFAULT 'GBP',
+        start_date TIMESTAMP,
+        end_date TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, financial_event_group_id)
+      );
+    `);
+
+    // Create Amazon Transfers Table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS amazon_transfers (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        transfer_id VARCHAR(100),
+        financial_event_group_id VARCHAR(100),
+        transfer_type VARCHAR(50) DEFAULT 'STANDARD',
+        amount DECIMAL(15, 2) DEFAULT 0,
+        currency VARCHAR(10) DEFAULT 'GBP',
+        status VARCHAR(50) DEFAULT 'SUCCESS',
+        deposit_date TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Create Amazon Products (Catalog, Pricing & Intelligence) Table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS amazon_products (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        asin VARCHAR(50) NOT NULL,
+        seller_sku VARCHAR(100),
+        title TEXT,
+        brand VARCHAR(100),
+        product_group VARCHAR(100),
+        category_name VARCHAR(255),                    -- Category title from Catalog Items salesRanks
+        image_url TEXT,
+        sales_rank INTEGER DEFAULT 0,                  -- Catalog Items API: Primary Sales Rank (BSR)
+        display_group_rank INTEGER DEFAULT 0,          -- Catalog Items API: Sub-category display group rank
+        price DECIMAL(15, 2) DEFAULT 0,
+        cogs DECIMAL(15, 2) DEFAULT 0,                 -- Cost of Goods Sold per unit
+        shipping_cost DECIMAL(15, 2) DEFAULT 0,        -- Other shipping / handling costs
+        units_sold INTEGER DEFAULT 0,                  -- Derived Orders API Units
+        total_revenue DECIMAL(15, 2) DEFAULT 0,       -- Derived Revenue
+        total_fees DECIMAL(15, 2) DEFAULT 0,          -- Derived Finances API Fees
+        total_refunds DECIMAL(15, 2) DEFAULT 0,       -- Derived Refunds
+        contribution_profit DECIMAL(15, 2) DEFAULT 0, -- Revenue - Fees - Refunds - COGS - Shipping
+        margin_percentage DECIMAL(10, 2) DEFAULT 0,   -- Margin %
+        buy_box_price DECIMAL(15, 2) DEFAULT 0,        -- Product Pricing API v2022-05-01: Buy Box / Featured Offer
+        lowest_offer_price DECIMAL(15, 2) DEFAULT 0,   -- Product Pricing API: Lowest Offer
+        competitor_price DECIMAL(15, 2) DEFAULT 0,     -- Product Pricing API: Competitor Price Summary
+        is_buy_box_winner BOOLEAN DEFAULT TRUE,        -- Buy Box Winner status
+        reference_price DECIMAL(15, 2) DEFAULT 0,      -- List / MSRP Reference Price
+        estimated_referral_fee DECIMAL(15, 2) DEFAULT 0, -- Product Fees API (getMyFeesEstimates)
+        estimated_fba_fee DECIMAL(15, 2) DEFAULT 0,      -- Product Fees API (getMyFeesEstimates)
+        estimated_total_fee DECIMAL(15, 2) DEFAULT 0,    -- Product Fees API (getMyFeesEstimates)
+        currency VARCHAR(10) DEFAULT 'GBP',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, asin)
+      );
+    `);
+
+    // Ensure all Product Intelligence, Pricing & Fee Estimation columns exist on amazon_products
+    await client.query(`
+      ALTER TABLE amazon_products ADD COLUMN IF NOT EXISTS category_name VARCHAR(255);
+      ALTER TABLE amazon_products ADD COLUMN IF NOT EXISTS image_url TEXT;
+      ALTER TABLE amazon_products ADD COLUMN IF NOT EXISTS sales_rank INTEGER DEFAULT 0;
+      ALTER TABLE amazon_products ADD COLUMN IF NOT EXISTS display_group_rank INTEGER DEFAULT 0;
+      ALTER TABLE amazon_products ADD COLUMN IF NOT EXISTS cogs DECIMAL(15, 2) DEFAULT 0;
+      ALTER TABLE amazon_products ADD COLUMN IF NOT EXISTS shipping_cost DECIMAL(15, 2) DEFAULT 0;
+      ALTER TABLE amazon_products ADD COLUMN IF NOT EXISTS units_sold INTEGER DEFAULT 0;
+      ALTER TABLE amazon_products ADD COLUMN IF NOT EXISTS total_revenue DECIMAL(15, 2) DEFAULT 0;
+      ALTER TABLE amazon_products ADD COLUMN IF NOT EXISTS total_fees DECIMAL(15, 2) DEFAULT 0;
+      ALTER TABLE amazon_products ADD COLUMN IF NOT EXISTS total_refunds DECIMAL(15, 2) DEFAULT 0;
+      ALTER TABLE amazon_products ADD COLUMN IF NOT EXISTS contribution_profit DECIMAL(15, 2) DEFAULT 0;
+      ALTER TABLE amazon_products ADD COLUMN IF NOT EXISTS margin_percentage DECIMAL(10, 2) DEFAULT 0;
+      ALTER TABLE amazon_products ADD COLUMN IF NOT EXISTS buy_box_price DECIMAL(15, 2) DEFAULT 0;
+      ALTER TABLE amazon_products ADD COLUMN IF NOT EXISTS lowest_offer_price DECIMAL(15, 2) DEFAULT 0;
+      ALTER TABLE amazon_products ADD COLUMN IF NOT EXISTS competitor_price DECIMAL(15, 2) DEFAULT 0;
+      ALTER TABLE amazon_products ADD COLUMN IF NOT EXISTS is_buy_box_winner BOOLEAN DEFAULT TRUE;
+      ALTER TABLE amazon_products ADD COLUMN IF NOT EXISTS reference_price DECIMAL(15, 2) DEFAULT 0;
+      ALTER TABLE amazon_products ADD COLUMN IF NOT EXISTS estimated_referral_fee DECIMAL(15, 2) DEFAULT 0;
+      ALTER TABLE amazon_products ADD COLUMN IF NOT EXISTS estimated_fba_fee DECIMAL(15, 2) DEFAULT 0;
+      ALTER TABLE amazon_products ADD COLUMN IF NOT EXISTS estimated_total_fee DECIMAL(15, 2) DEFAULT 0;
+    `);
+
+    // Create Amazon Item Review Trends & Customer Insights Table (getItemReviewTrends API)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS amazon_product_reviews (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        asin VARCHAR(50) NOT NULL,
+        seller_sku VARCHAR(100),
+        title TEXT,
+        average_rating DECIMAL(3, 2) DEFAULT 4.50,
+        total_reviews INTEGER DEFAULT 0,
+        positive_sentiment_percent DECIMAL(5, 2) DEFAULT 88.00,
+        negative_sentiment_percent DECIMAL(5, 2) DEFAULT 12.00,
+        recent_reviews_count INTEGER DEFAULT 0,
+        review_sentiment VARCHAR(50) DEFAULT 'POSITIVE',
+        top_topics JSONB,
+        last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, asin)
+      );
+    `);
+
+    // Create Amazon Product Fee Estimates Table (Product Fees API: getMyFeesEstimates)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS amazon_product_fee_estimates (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        asin VARCHAR(50) NOT NULL,
+        seller_sku VARCHAR(100),
+        listing_price DECIMAL(15, 2) DEFAULT 0,
+        estimated_referral_fee DECIMAL(15, 2) DEFAULT 0,
+        estimated_fba_fulfillment_fee DECIMAL(15, 2) DEFAULT 0,
+        estimated_variable_closing_fee DECIMAL(15, 2) DEFAULT 0,
+        estimated_total_fee DECIMAL(15, 2) DEFAULT 0,
+        currency VARCHAR(10) DEFAULT 'GBP',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, asin)
+      );
+    `);
+
+    // Create Amazon Product Pricing Table (Product Pricing API v2022-05-01 Competitive History)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS amazon_product_pricing (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        asin VARCHAR(50) NOT NULL,
+        seller_sku VARCHAR(100),
+        your_price DECIMAL(15, 2) DEFAULT 0,
+        buy_box_price DECIMAL(15, 2) DEFAULT 0,
+        lowest_offer_price DECIMAL(15, 2) DEFAULT 0,
+        competitor_price DECIMAL(15, 2) DEFAULT 0,
+        is_buy_box_winner BOOLEAN DEFAULT TRUE,
+        currency VARCHAR(10) DEFAULT 'GBP',
+        recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Create Amazon FBA Inbound Shipments Table (Fulfillment Inbound API v2024-03-20)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS amazon_inbound_shipments (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        shipment_id VARCHAR(100) NOT NULL,
+        shipment_name VARCHAR(255),
+        shipment_status VARCHAR(50),       -- WORKING, SHIPPED, IN_TRANSIT, DELIVERED, CHECKED_IN, RECEIVING, CLOSED, CANCELLED
+        destination_fulfillment_center_id VARCHAR(50),
+        expected_units INTEGER DEFAULT 0,
+        received_units INTEGER DEFAULT 0,
+        created_date TIMESTAMP,
+        last_updated_date TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, shipment_id)
+      );
+    `);
+
+    // Create Amazon FBA Inbound Items Table (Fulfillment Inbound API v2024-03-20 Line Items)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS amazon_inbound_items (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        shipment_id VARCHAR(100) NOT NULL,
+        seller_sku VARCHAR(100) NOT NULL,
+        asin VARCHAR(50),
+        title TEXT,
+        quantity_shipped INTEGER DEFAULT 0,   -- Expected Units
+        quantity_received INTEGER DEFAULT 0,  -- Received Units
+        quantity_in_case INTEGER DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Create Amazon FBA Outbound Fulfillment Orders Table (Fulfillment Outbound API v2020-07-01 / MCF)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS amazon_outbound_fulfillment_orders (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        seller_fulfillment_order_id VARCHAR(100) NOT NULL,
+        displayable_order_id VARCHAR(100),
+        fulfillment_action VARCHAR(50) DEFAULT 'SHIP',
+        fulfillment_policy VARCHAR(50) DEFAULT 'FILL_ALL',
+        fulfillment_order_status VARCHAR(50),  -- RECEIVED, PLANNING, PROCESSING, COMPLETE, UNFULFILLABLE, CANCELLED
+        shipping_speed_category VARCHAR(50),    -- STANDARD, EXPEDITED, PRIORITY
+        destination_name VARCHAR(255),
+        destination_city VARCHAR(100),
+        destination_country VARCHAR(10),
+        total_items_count INTEGER DEFAULT 1,
+        displayable_order_date TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, seller_fulfillment_order_id)
+      );
+    `);
+
+    // Create Amazon FBA Outbound Fulfillment Items Table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS amazon_outbound_fulfillment_items (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        seller_fulfillment_order_id VARCHAR(100) NOT NULL,
+        seller_sku VARCHAR(100) NOT NULL,
+        seller_fulfillment_order_item_id VARCHAR(100),
+        quantity INTEGER DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Create Amazon Listings Health Table (Listings Items API v2021-08-01)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS amazon_listings_health (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        seller_sku VARCHAR(100) NOT NULL,
+        asin VARCHAR(50),
+        title TEXT,
+        status VARCHAR(50) DEFAULT 'ACTIVE',            -- ACTIVE, INACTIVE, SUPPRESSED, DISCONTINUED
+        status_reason VARCHAR(255),
+        is_buyable BOOLEAN DEFAULT TRUE,
+        is_search_suppressed BOOLEAN DEFAULT FALSE,
+        issues_count INTEGER DEFAULT 0,
+        fulfillment_channel VARCHAR(50) DEFAULT 'AMAZON_NA',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, seller_sku)
+      );
+    `);
+
+    // Create Amazon Listing Issues Table (Listings Items API Errors & Policy Warnings)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS amazon_listing_issues (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        seller_sku VARCHAR(100) NOT NULL,
+        asin VARCHAR(50),
+        issue_code VARCHAR(100),
+        severity VARCHAR(20) DEFAULT 'WARNING',           -- ERROR, WARNING, INFO
+        message TEXT,
+        attribute_names TEXT[],
+        status VARCHAR(20) DEFAULT 'OPEN',               -- OPEN, RESOLVED
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Create Amazon Listing Restrictions Table (Listings Restrictions API v2021-08-01)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS amazon_listing_restrictions (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        asin VARCHAR(50) NOT NULL,
+        seller_sku VARCHAR(100),
+        title TEXT,
+        restriction_type VARCHAR(100),                   -- APPROVAL_REQUIRED, BRAND_GATING, HAZMAT, CATEGORY_RESTRICTION
+        reason_code VARCHAR(100),
+        condition_type VARCHAR(50) DEFAULT 'new_new',
+        approval_link TEXT,                              -- Direct Seller Central Approval URL
+        status VARCHAR(50) DEFAULT 'RESTRICTED',         -- RESTRICTED, APPROVAL_PENDING, APPROVED
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, asin, condition_type)
+      );
+    `);
+
+    // Create Amazon Product Type Definitions Table (Product Type Definitions API v2020-09-01)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS amazon_product_type_definitions (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        product_type VARCHAR(100) NOT NULL,              -- LUGGAGE, CLOTHING, SHOES, ELECTRONIC_COMPONENT
+        marketplace_id VARCHAR(50) NOT NULL,
+        schema_version VARCHAR(50) DEFAULT 'v2020-09-01',
+        product_type_version VARCHAR(50) DEFAULT 'v1',
+        requirements VARCHAR(100) DEFAULT 'LISTING_PRODUCT_ONLY',
+        schema_json JSONB,                               -- Full JSON schema defining required fields, attributes, enums, rules
+        required_attributes JSONB,                      -- Array of required field names like title, brand, manufacturer
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, product_type, marketplace_id)
+      );
+    `);
+
+    // Create Amazon Sync Runs Table (Module 23: Data Coverage & Pipeline Sync Tracking)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS amazon_sync_runs (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        connection_id VARCHAR(100),
+        api_name VARCHAR(100) NOT NULL,                  -- Orders, Finances, Reports, Inventory, Catalog, Listings, Pricing, Fees
+        started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        completed_at TIMESTAMP,
+        records_fetched INTEGER DEFAULT 0,
+        status VARCHAR(50) DEFAULT 'Healthy',             -- Healthy, Syncing, Failed, Warning
+        error TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Create Amazon Report Jobs Table (Reports API v2021-06-30 Workflow Engine)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS amazon_report_jobs (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        report_id VARCHAR(100) NOT NULL,
+        report_type VARCHAR(100) NOT NULL,              -- GET_FBA_MYI_UNSUPPRESSED_INVENTORY_DATA, GET_VAT_TRANSACTION_DATA, etc.
+        report_category VARCHAR(50) NOT NULL,          -- INVENTORY, ORDER, RETURN, TAX, PERFORMANCE, FBA
+        processing_status VARCHAR(50) DEFAULT 'SUBMITTED', -- SUBMITTED, IN_PROGRESS, CANCELLED, DONE, FATAL
+        report_document_id VARCHAR(100),
+        download_url TEXT,                              -- Pre-signed S3 download URL
+        compression_algorithm VARCHAR(20) DEFAULT 'NONE', -- GZIP, NONE
+        data_start_time TIMESTAMP,
+        data_end_time TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, report_id)
+      );
+    `);
+
+    // Create Amazon Inventory (FBA Stock & Fulfillment) Table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS amazon_inventory (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        seller_sku VARCHAR(100) NOT NULL,
+        asin VARCHAR(50),
+        fn_sku VARCHAR(100),
+        fulfillable_quantity INTEGER DEFAULT 0,
+        inbound_working_quantity INTEGER DEFAULT 0,
+        inbound_shipped_quantity INTEGER DEFAULT 0,
+        inbound_receiving_quantity INTEGER DEFAULT 0,
+        reserved_quantity INTEGER DEFAULT 0,
+        unfulfillable_quantity INTEGER DEFAULT 0,
+        researching_quantity INTEGER DEFAULT 0,
+        total_quantity INTEGER DEFAULT 0,
+        avg_daily_sales DECIMAL(10, 2) DEFAULT 0,
+        days_of_cover DECIMAL(10, 1) DEFAULT 0,
+        is_low_stock BOOLEAN DEFAULT FALSE,
+        warehouse_location VARCHAR(100),
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, seller_sku)
+      );
+    `);
+
+    // Ensure all FBA Inventory columns exist on amazon_inventory
+    await client.query(`
+      ALTER TABLE amazon_inventory ADD COLUMN IF NOT EXISTS inbound_receiving_quantity INTEGER DEFAULT 0;
+      ALTER TABLE amazon_inventory ADD COLUMN IF NOT EXISTS unfulfillable_quantity INTEGER DEFAULT 0;
+      ALTER TABLE amazon_inventory ADD COLUMN IF NOT EXISTS researching_quantity INTEGER DEFAULT 0;
+      ALTER TABLE amazon_inventory ADD COLUMN IF NOT EXISTS total_quantity INTEGER DEFAULT 0;
+      ALTER TABLE amazon_inventory ADD COLUMN IF NOT EXISTS avg_daily_sales DECIMAL(10, 2) DEFAULT 0;
+      ALTER TABLE amazon_inventory ADD COLUMN IF NOT EXISTS days_of_cover DECIMAL(10, 1) DEFAULT 0;
+      ALTER TABLE amazon_inventory ADD COLUMN IF NOT EXISTS is_low_stock BOOLEAN DEFAULT FALSE;
+      CREATE UNIQUE INDEX IF NOT EXISTS amazon_inventory_tenant_sku_idx ON amazon_inventory (tenant_id, seller_sku);
+    `);
+
+    // Create Amazon Inventory Alerts Table (CFO Intelligence Layer Generated Low Stock Alerts)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS amazon_inventory_alerts (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        seller_sku VARCHAR(100) NOT NULL,
+        asin VARCHAR(50),
+        title TEXT,
+        current_stock INTEGER DEFAULT 0,
+        avg_daily_sales DECIMAL(10, 2) DEFAULT 0,
+        days_of_cover DECIMAL(10, 1) DEFAULT 0,
+        threshold_days INTEGER DEFAULT 14,
+        severity VARCHAR(20) NOT NULL,  -- 'OUT_OF_STOCK', 'CRITICAL', 'WARNING'
+        recommended_reorder_qty INTEGER DEFAULT 0,
+        status VARCHAR(20) DEFAULT 'ACTIVE',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, seller_sku, status)
+      );
+    `);
+
+    // Create Amazon Sales Metrics Table (Time-Series Aggregations for Business Performance Chart)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS amazon_sales_metrics (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        metric_date DATE NOT NULL,
+        granularity VARCHAR(20) DEFAULT 'DAY',
+        total_sales DECIMAL(15, 2) DEFAULT 0,
+        order_count INTEGER DEFAULT 0,
+        unit_count INTEGER DEFAULT 0,
+        order_item_count INTEGER DEFAULT 0,
+        average_unit_price DECIMAL(15, 2) DEFAULT 0,
+        net_revenue DECIMAL(15, 2) DEFAULT 0,
+        amazon_fees DECIMAL(15, 2) DEFAULT 0,
+        refund_amount DECIMAL(15, 2) DEFAULT 0,
+        currency VARCHAR(10) DEFAULT 'GBP',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, metric_date, granularity)
+      );
+    `);
+
+    // Create Amazon Financial Events Table (Finances API breakdown)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS amazon_financial_events (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        event_id VARCHAR(100),
+        amazon_order_id VARCHAR(100),
+        posted_date TIMESTAMP,
+        event_type VARCHAR(50),  -- Shipment, Refund, Fee, Adjustment, ServiceFee, Promotion, Tax
+        fee_type VARCHAR(100),    -- Principal, Tax, Commission, FBAPerUnitFulfillmentFee, PromotionDiscount, StorageFee, RefundCommission
+        amount DECIMAL(15, 2) DEFAULT 0,
+        currency VARCHAR(10) DEFAULT 'GBP',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Create Amazon Refunds Table (Finances API: Monetary Refund Value Breakdown)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS amazon_refunds (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        amazon_order_id VARCHAR(100) NOT NULL,
+        refund_event_id VARCHAR(100),
+        posted_date TIMESTAMP,
+        principal_refund DECIMAL(15, 2) DEFAULT 0,       -- Gross Refund Value (£ / $ / ₹)
+        tax_refund DECIMAL(15, 2) DEFAULT 0,
+        refund_fee_commission DECIMAL(15, 2) DEFAULT 0,   -- Amazon Fee Deduction on Refund
+        net_refund_amount DECIMAL(15, 2) DEFAULT 0,
+        currency VARCHAR(10) DEFAULT 'GBP',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Create Amazon Returns Reports Table (Reports API: Physical Return Units & Dispositions)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS amazon_returns_reports (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        amazon_order_id VARCHAR(100) NOT NULL,
+        return_date TIMESTAMP,
+        seller_sku VARCHAR(100),
+        asin VARCHAR(50),
+        title TEXT,
+        quantity_returned INTEGER DEFAULT 1,              -- Physical Return Units Count
+        fulfillment_center_id VARCHAR(50),
+        detailed_disposition VARCHAR(50),                 -- SELLABLE, CUSTOMER_DAMAGED, DEFECTIVE, EXPIRED
+        reason TEXT,                                      -- Customer Return Reason
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Create Amazon Waterfall Summary Table (Money Flow: Customer Sales -> Discounts -> Refunds -> Amazon Fees -> Net Proceeds -> Payouts)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS amazon_waterfall_summary (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        period_start DATE NOT NULL,
+        period_end DATE NOT NULL,
+        customer_sales DECIMAL(15, 2) DEFAULT 0,       -- Gross Principal Sales
+        discounts DECIMAL(15, 2) DEFAULT 0,            -- Promotional Discounts
+        tax DECIMAL(15, 2) DEFAULT 0,                  -- Tax
+        refunds DECIMAL(15, 2) DEFAULT 0,              -- Returns & Refunds
+        commission_fees DECIMAL(15, 2) DEFAULT 0,      -- Amazon Referral Commission
+        fba_fulfillment_fees DECIMAL(15, 2) DEFAULT 0, -- FBA Per Unit Fulfillment Fees
+        other_fees DECIMAL(15, 2) DEFAULT 0,           -- Storage, Subscription & Service Fees
+        net_proceeds DECIMAL(15, 2) DEFAULT 0,         -- Net Proceeds (Sales - Discounts - Refunds - Fees)
+        payouts DECIMAL(15, 2) DEFAULT 0,              -- Payout Disbursements
+        currency VARCHAR(10) DEFAULT 'GBP',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, period_start, period_end)
+      );
+    `);
+
+    // Create Amazon Marketplaces Mapping Reference Table (Requirement 3)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS amazon_marketplaces (
+        id SERIAL PRIMARY KEY,
+        marketplace_id VARCHAR(50) UNIQUE NOT NULL,
+        marketplace_name VARCHAR(100) NOT NULL,
+        country_code VARCHAR(10) NOT NULL,
+        currency_code VARCHAR(10) NOT NULL,
+        region VARCHAR(50) NOT NULL,
+        amazon_domain VARCHAR(100) NOT NULL,
+        timezone VARCHAR(50) DEFAULT 'UTC',
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      ALTER TABLE amazon_marketplaces ADD COLUMN IF NOT EXISTS marketplace_name VARCHAR(100);
+      ALTER TABLE amazon_marketplaces ADD COLUMN IF NOT EXISTS currency_code VARCHAR(10);
+      ALTER TABLE amazon_marketplaces ADD COLUMN IF NOT EXISTS amazon_domain VARCHAR(100);
+      ALTER TABLE amazon_marketplaces ADD COLUMN IF NOT EXISTS timezone VARCHAR(50) DEFAULT 'UTC';
+      ALTER TABLE amazon_marketplaces ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;
+    `);
+
+    // Fix legacy columns: old schema had country_name (NOT NULL) and currency (NOT NULL)
+    // which are no longer used. Make them nullable so INSERTs don't fail.
+    try {
+      await client.query(`
+        ALTER TABLE amazon_marketplaces ALTER COLUMN country_name DROP NOT NULL;
+        ALTER TABLE amazon_marketplaces ALTER COLUMN currency DROP NOT NULL;
+      `);
+    } catch (legacyErr: any) {
+      // Columns may not exist on fresh installs — that's fine
+    }
+
+    await client.query(`
+      INSERT INTO amazon_marketplaces (marketplace_id, country_code, marketplace_name, region, currency_code, amazon_domain, timezone)
+      VALUES 
+        ('A21TJRUUN4KGV', 'IN', 'Amazon India', 'us-west-2', 'INR', 'amazon.in', 'Asia/Kolkata'),
+        ('ATVPDKIKX0DER', 'US', 'Amazon United States', 'us-east-1', 'USD', 'amazon.com', 'America/New_York'),
+        ('A1F83G8C2ARO7P', 'GB', 'Amazon United Kingdom', 'eu-west-1', 'GBP', 'amazon.co.uk', 'Europe/London'),
+        ('A1PA6795UKMFR9', 'DE', 'Amazon Germany', 'eu-west-1', 'EUR', 'amazon.de', 'Europe/Berlin'),
+        ('F21TE56469C93', 'FR', 'Amazon France', 'eu-west-1', 'EUR', 'amazon.fr', 'Europe/Paris'),
+        ('APJ6JRA9NG5V4', 'IT', 'Amazon Italy', 'eu-west-1', 'EUR', 'amazon.it', 'Europe/Rome'),
+        ('A1RKKUPIHCS9HS', 'ES', 'Amazon Spain', 'eu-west-1', 'EUR', 'amazon.es', 'Europe/Madrid'),
+        ('A1VC38T7YXB528', 'JP', 'Amazon Japan', 'us-west-2', 'JPY', 'amazon.co.jp', 'Asia/Tokyo'),
+        ('A39IBJ37TRP1C6', 'AU', 'Amazon Australia', 'us-west-2', 'AUD', 'amazon.com.au', 'Australia/Sydney'),
+        ('A2EUQ1WTGCTBG2', 'CA', 'Amazon Canada', 'us-east-1', 'CAD', 'amazon.ca', 'America/Toronto')
+      ON CONFLICT (marketplace_id) DO UPDATE SET 
+        marketplace_name = EXCLUDED.marketplace_name,
+        currency_code = EXCLUDED.currency_code,
+        amazon_domain = EXCLUDED.amazon_domain;
+    `);
+
+    // Clean up hardcoded mock Amazon inventory items & alerts from DB
+    try {
+      await client.query(`
+        DELETE FROM amazon_inventory;
+        DELETE FROM amazon_inventory_alerts;
+        DELETE FROM amazon_order_items WHERE seller_sku IN ('STAND-LAPTOP-ALU', 'CHARGER-20W-USB', 'EARBUDS-BLK', 'WATCH-SMART-PRO', 'CABLE-USBC-BRAIDED', 'SKU-PROD');
+        DELETE FROM amazon_products WHERE seller_sku IN ('STAND-LAPTOP-ALU', 'CHARGER-20W-USB', 'EARBUDS-BLK', 'WATCH-SMART-PRO', 'CABLE-USBC-BRAIDED', 'SKU-PROD');
+        DELETE FROM amazon_orders WHERE amazon_order_id IN ('406-6907320-8418469', '408-2849102-3918241', '402-9918274-1294810', '114-8827361-9928174', '203-7728194-0019284', '305-6615243-8819204');
+        DELETE FROM amazon_financial_event_groups WHERE financial_event_group_id LIKE 'FEG-IN-%' OR financial_event_group_id LIKE 'FEG-US-%';
+        DELETE FROM amazon_settlements WHERE financial_event_group_id LIKE 'FEG-IN-%' OR financial_event_group_id LIKE 'FEG-US-%';
+      `);
+    } catch (cleanErr: any) {
+      // Ignore if table doesn't exist yet
+    }
+
+    // Create Amazon Financial Event Groups Table (Requirement 4)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS amazon_financial_event_groups (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        connection_id VARCHAR(100) DEFAULT 'default',
+        financial_event_group_id VARCHAR(100) NOT NULL,
+        processing_status VARCHAR(50) DEFAULT 'Open',
+        fund_transfer_status VARCHAR(50) DEFAULT 'IN_PROGRESS',
+        original_total_amount DECIMAL(15, 2) DEFAULT 0,
+        original_currency VARCHAR(10) DEFAULT 'INR',
+        reporting_total_amount DECIMAL(15, 2) DEFAULT 0,
+        reporting_currency VARCHAR(10) DEFAULT 'INR',
+        start_date TIMESTAMP,
+        end_date TIMESTAMP,
+        trace_id VARCHAR(100),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, connection_id, financial_event_group_id)
+      );
+    `);
+
+    // Create Amazon Bank Transfers / Payouts Table (Requirement 4)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS amazon_transfers (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        connection_id VARCHAR(100) DEFAULT 'default',
+        transfer_id VARCHAR(100) NOT NULL,
+        settlement_id VARCHAR(100),
+        financial_event_group_id VARCHAR(100),
+        amount DECIMAL(15, 2) DEFAULT 0,
+        currency VARCHAR(10) DEFAULT 'INR',
+        reporting_amount DECIMAL(15, 2) DEFAULT 0,
+        reporting_currency VARCHAR(10) DEFAULT 'INR',
+        transfer_status VARCHAR(50) DEFAULT 'SUCCESS',
+        transfer_date TIMESTAMP,
+        destination_account_reference TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, connection_id, transfer_id)
+      );
+    `);
+
+    // Create Amazon Raw API Responses Storage Table (Requirement 5)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS amazon_raw_api_responses (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        connection_id VARCHAR(100) DEFAULT 'default',
+        api_name VARCHAR(100) NOT NULL,
+        api_version VARCHAR(50) NOT NULL,
+        endpoint TEXT,
+        http_method VARCHAR(10) DEFAULT 'GET',
+        request_hash VARCHAR(64),
+        amazon_resource_id VARCHAR(100),
+        marketplace_id VARCHAR(50),
+        response_json JSONB NOT NULL,
+        response_status INTEGER DEFAULT 200,
+        fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_amazon_raw_api_res ON amazon_raw_api_responses(tenant_id, connection_id, api_name, amazon_resource_id);
+    `);
+
+    // Create Dedicated Product Costs Table (Requirement 6)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS amazon_product_costs (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        marketplace_id VARCHAR(50) DEFAULT 'A21TJRUUN4KGV',
+        sku VARCHAR(100) NOT NULL,
+        asin VARCHAR(50),
+        cost_type VARCHAR(50) NOT NULL,                 -- COGS, SHIPPING, PACKAGING, WAREHOUSE, OTHER
+        amount DECIMAL(12, 2) NOT NULL,
+        currency VARCHAR(10) DEFAULT 'INR',
+        effective_from TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        effective_to TIMESTAMP,
+        source VARCHAR(100) DEFAULT 'CFO_CONFIG',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, sku, cost_type, effective_from)
+      );
+    `);
+
+    // Alter Amazon Tables to add multi-tenant connection_id, FX conversion fields, and sync run metrics
+    await client.query(`
+      ALTER TABLE amazon_orders ADD COLUMN IF NOT EXISTS connection_id VARCHAR(100) DEFAULT 'default';
+      ALTER TABLE amazon_orders ADD COLUMN IF NOT EXISTS marketplace_id VARCHAR(50) DEFAULT 'A21TJRUUN4KGV';
+      ALTER TABLE amazon_orders ADD COLUMN IF NOT EXISTS original_amount DECIMAL(15, 2);
+      ALTER TABLE amazon_orders ADD COLUMN IF NOT EXISTS original_currency VARCHAR(10);
+      ALTER TABLE amazon_orders ADD COLUMN IF NOT EXISTS reporting_amount DECIMAL(15, 2);
+      ALTER TABLE amazon_orders ADD COLUMN IF NOT EXISTS reporting_currency VARCHAR(10) DEFAULT 'INR';
+      ALTER TABLE amazon_orders ADD COLUMN IF NOT EXISTS exchange_rate DECIMAL(10, 4) DEFAULT 1.0;
+      ALTER TABLE amazon_orders ADD COLUMN IF NOT EXISTS exchange_rate_date TIMESTAMP;
+      ALTER TABLE amazon_orders ADD COLUMN IF NOT EXISTS exchange_rate_source VARCHAR(50) DEFAULT 'AUTOMATIC';
+
+      ALTER TABLE amazon_order_items ADD COLUMN IF NOT EXISTS connection_id VARCHAR(100) DEFAULT 'default';
+      ALTER TABLE amazon_order_items ADD COLUMN IF NOT EXISTS marketplace_id VARCHAR(50) DEFAULT 'A21TJRUUN4KGV';
+      ALTER TABLE amazon_order_items ADD COLUMN IF NOT EXISTS original_price DECIMAL(15, 2);
+      ALTER TABLE amazon_order_items ADD COLUMN IF NOT EXISTS original_currency VARCHAR(10);
+      ALTER TABLE amazon_order_items ADD COLUMN IF NOT EXISTS reporting_price DECIMAL(15, 2);
+      ALTER TABLE amazon_order_items ADD COLUMN IF NOT EXISTS reporting_currency VARCHAR(10) DEFAULT 'INR';
+
+      ALTER TABLE amazon_settlements ADD COLUMN IF NOT EXISTS connection_id VARCHAR(100) DEFAULT 'default';
+      ALTER TABLE amazon_settlements ADD COLUMN IF NOT EXISTS marketplace_id VARCHAR(50) DEFAULT 'A21TJRUUN4KGV';
+      ALTER TABLE amazon_settlements ADD COLUMN IF NOT EXISTS reporting_total_amount DECIMAL(15, 2);
+      ALTER TABLE amazon_settlements ADD COLUMN IF NOT EXISTS reporting_currency VARCHAR(10) DEFAULT 'INR';
+
+      ALTER TABLE amazon_financial_events ADD COLUMN IF NOT EXISTS connection_id VARCHAR(100) DEFAULT 'default';
+      ALTER TABLE amazon_financial_events ADD COLUMN IF NOT EXISTS marketplace_id VARCHAR(50) DEFAULT 'A21TJRUUN4KGV';
+      ALTER TABLE amazon_financial_events ADD COLUMN IF NOT EXISTS raw_event_reference TEXT;
+      ALTER TABLE amazon_financial_events ADD COLUMN IF NOT EXISTS reporting_amount DECIMAL(15, 2);
+      ALTER TABLE amazon_financial_events ADD COLUMN IF NOT EXISTS reporting_currency VARCHAR(10) DEFAULT 'INR';
+
+      ALTER TABLE amazon_sync_runs ADD COLUMN IF NOT EXISTS connection_id VARCHAR(100) DEFAULT 'default';
+      ALTER TABLE amazon_sync_runs ADD COLUMN IF NOT EXISTS records_inserted INTEGER DEFAULT 0;
+      ALTER TABLE amazon_sync_runs ADD COLUMN IF NOT EXISTS records_updated INTEGER DEFAULT 0;
+      ALTER TABLE amazon_sync_runs ADD COLUMN IF NOT EXISTS records_failed INTEGER DEFAULT 0;
+      ALTER TABLE amazon_sync_runs ADD COLUMN IF NOT EXISTS retry_count INTEGER DEFAULT 0;
+    `);
+
+    // Create eBay Orders Table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS ebay_orders (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        ebay_order_id VARCHAR(100) NOT NULL,
+        legacy_order_id VARCHAR(100),
+        creation_date TIMESTAMP,
+        order_status VARCHAR(50),
+        payment_status VARCHAR(50),
+        total_amount DECIMAL(15, 2) DEFAULT 0,
+        currency VARCHAR(10) DEFAULT 'GBP',
+        buyer_username VARCHAR(255),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, ebay_order_id)
+      );
+    `);
+
+    // Create eBay Order Items Table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS ebay_order_items (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        ebay_order_id VARCHAR(100) NOT NULL,
+        line_item_id VARCHAR(100) NOT NULL,
+        title TEXT,
+        sku VARCHAR(100),
+        quantity INTEGER DEFAULT 1,
+        price DECIMAL(15, 2) DEFAULT 0,
+        currency VARCHAR(10) DEFAULT 'GBP',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, line_item_id)
+      );
+    `);
+
+    // Create eBay Financial Transactions Table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS ebay_transactions (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        transaction_id VARCHAR(100) NOT NULL,
+        ebay_order_id VARCHAR(100),
+        transaction_type VARCHAR(50),
+        amount DECIMAL(15, 2) DEFAULT 0,
+        fee_amount DECIMAL(15, 2) DEFAULT 0,
+        currency VARCHAR(10) DEFAULT 'GBP',
+        transaction_date TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, transaction_id)
+      );
+    `);
+
+    // Create Stripe Charges Table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS stripe_charges (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        charge_id VARCHAR(100) NOT NULL,
+        amount DECIMAL(15, 2) DEFAULT 0,
+        amount_refunded DECIMAL(15, 2) DEFAULT 0,
+        currency VARCHAR(10) DEFAULT 'USD',
+        status VARCHAR(50),
+        customer_id VARCHAR(100),
+        description TEXT,
+        payment_method VARCHAR(50),
+        charge_created_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, charge_id)
+      );
+    `);
+
+    // Create Stripe Customers Table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS stripe_customers (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        customer_id VARCHAR(100) NOT NULL,
+        email VARCHAR(255),
+        name VARCHAR(255),
+        phone VARCHAR(50),
+        currency VARCHAR(10) DEFAULT 'USD',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, customer_id)
+      );
+    `);
+
+    // Create Stripe Invoices Table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS stripe_invoices (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        invoice_id VARCHAR(100) NOT NULL,
+        invoice_number VARCHAR(100),
+        customer_id VARCHAR(100),
+        amount_due DECIMAL(15, 2) DEFAULT 0,
+        amount_paid DECIMAL(15, 2) DEFAULT 0,
+        status VARCHAR(50),
+        currency VARCHAR(10) DEFAULT 'USD',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, invoice_id)
+      );
+    `);
+
+    // Create Stripe Payouts Table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS stripe_payouts (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        payout_id VARCHAR(100) NOT NULL,
+        amount DECIMAL(15, 2) DEFAULT 0,
+        currency VARCHAR(10) DEFAULT 'USD',
+        status VARCHAR(50),
+        arrival_date TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, payout_id)
+      );
+    `);
+
+    // Create Stripe Subscriptions Table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS stripe_subscriptions (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        subscription_id VARCHAR(100) NOT NULL,
+        customer_id VARCHAR(100),
+        plan_name VARCHAR(255),
+        mrr_amount DECIMAL(15, 2) DEFAULT 0,
+        currency VARCHAR(10) DEFAULT 'INR',
+        status VARCHAR(50) DEFAULT 'active',
+        current_period_end TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, subscription_id)
+      );
+    `);
+
+    // Create Stripe Disputes Table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS stripe_disputes (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        dispute_id VARCHAR(100) NOT NULL,
+        charge_id VARCHAR(100),
+        amount DECIMAL(15, 2) DEFAULT 0,
+        currency VARCHAR(10) DEFAULT 'INR',
+        status VARCHAR(50) DEFAULT 'under_review',
+        dispute_created_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, dispute_id)
+      );
+    `);
+
+    // Create Stripe Products Table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS stripe_products (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        product_id VARCHAR(100) NOT NULL,
+        name VARCHAR(255),
+        price DECIMAL(15, 2) DEFAULT 0,
+        sales_count INTEGER DEFAULT 0,
+        revenue DECIMAL(15, 2) DEFAULT 0,
+        currency VARCHAR(10) DEFAULT 'INR',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, product_id)
+      );
     `);
 
     client.release();
@@ -488,6 +1435,23 @@ export const db = {
     scopes?: string[];
     last_synced_at?: Date | string;
   }): Promise<void> => {
+    // If client_id is changing, clear old tokens and tenant_identifier
+    if (fields.client_id) {
+      try {
+        const existing = await db.getCredentials(tenantId, provider);
+        if (existing && existing.client_id && fields.client_id !== existing.client_id) {
+          if (isPgConnected) {
+            await pgPool.query(
+              `UPDATE tenant_credentials SET access_token = NULL, refresh_token = NULL, expires_at = NULL, tenant_identifier = NULL WHERE tenant_id = $1 AND provider = $2`,
+              [tenantId, provider]
+            );
+          }
+        }
+      } catch (err) {
+        console.error('Failed to check existing client_id on change:', err);
+      }
+    }
+
     // If the tenant_identifier (Xero Org ID) is changing, auto-clear old cached records
     if (fields.tenant_identifier) {
       try {
@@ -1696,6 +2660,133 @@ export const db = {
       json.tenant_credentials[idx].expires_at = null;
       json.tenant_credentials[idx].scopes = null;
       writeJsonDb(json);
+    }
+  },
+
+  getAmazonStats: async (tenantId: number): Promise<{ recordsCount: number; ordersCount: number; settlementsCount: number }> => {
+    if (isPgConnected) {
+      try {
+        const { rows: oRows } = await pgPool.query('SELECT COUNT(*) as count FROM amazon_orders WHERE tenant_id = $1', [tenantId]);
+        const { rows: sRows } = await pgPool.query('SELECT COUNT(*) as count FROM amazon_settlements WHERE tenant_id = $1', [tenantId]);
+        const ordersCount = parseInt(oRows[0]?.count || '0', 10);
+        const settlementsCount = parseInt(sRows[0]?.count || '0', 10);
+        return {
+          recordsCount: ordersCount + settlementsCount,
+          ordersCount,
+          settlementsCount
+        };
+      } catch (e) {
+        console.error("Database query failed in getAmazonStats:", e);
+      }
+    }
+    return { recordsCount: 0, ordersCount: 0, settlementsCount: 0 };
+  },
+
+  clearAmazonTokens: async (tenantId: number): Promise<void> => {
+    if (isPgConnected) {
+      try {
+        // Delete all Amazon data tables for this tenant (order matters for FK constraints)
+        await pgPool.query("DELETE FROM amazon_order_items WHERE tenant_id = $1", [tenantId]);
+        await pgPool.query("DELETE FROM amazon_orders WHERE tenant_id = $1", [tenantId]);
+        await pgPool.query("DELETE FROM amazon_settlements WHERE tenant_id = $1", [tenantId]);
+        await pgPool.query("DELETE FROM amazon_product_fee_estimates WHERE tenant_id = $1", [tenantId]);
+        await pgPool.query("DELETE FROM amazon_product_pricing WHERE tenant_id = $1", [tenantId]);
+        await pgPool.query("DELETE FROM amazon_products WHERE tenant_id = $1", [tenantId]);
+        await pgPool.query("DELETE FROM amazon_inventory_alerts WHERE tenant_id = $1", [tenantId]);
+        await pgPool.query("DELETE FROM amazon_inventory WHERE tenant_id = $1", [tenantId]);
+        await pgPool.query("DELETE FROM amazon_sales_metrics WHERE tenant_id = $1", [tenantId]);
+        await pgPool.query("DELETE FROM amazon_inbound_items WHERE tenant_id = $1", [tenantId]);
+        await pgPool.query("DELETE FROM amazon_inbound_shipments WHERE tenant_id = $1", [tenantId]);
+        await pgPool.query("DELETE FROM amazon_outbound_fulfillment_items WHERE tenant_id = $1", [tenantId]);
+        await pgPool.query("DELETE FROM amazon_outbound_fulfillment_orders WHERE tenant_id = $1", [tenantId]);
+        await pgPool.query("DELETE FROM amazon_listing_issues WHERE tenant_id = $1", [tenantId]);
+        await pgPool.query("DELETE FROM amazon_listings_health WHERE tenant_id = $1", [tenantId]);
+        await pgPool.query("DELETE FROM amazon_listing_restrictions WHERE tenant_id = $1", [tenantId]);
+        await pgPool.query("DELETE FROM amazon_product_type_definitions WHERE tenant_id = $1", [tenantId]);
+        await pgPool.query("DELETE FROM amazon_sync_runs WHERE tenant_id = $1", [tenantId]);
+        await pgPool.query("DELETE FROM amazon_report_jobs WHERE tenant_id = $1", [tenantId]);
+        // Finally, remove the Amazon credential itself
+        await pgPool.query("DELETE FROM tenant_credentials WHERE tenant_id = $1 AND provider = 'amazon'", [tenantId]);
+        console.log(`[clearAmazonTokens] All Amazon data wiped for tenant ${tenantId}`);
+      } catch (e) {
+        console.error("Database query failed in clearAmazonTokens:", e);
+        throw e;
+      }
+    }
+  },
+
+  getEbayStats: async (tenantId: number): Promise<{ recordsCount: number; ordersCount: number; transactionsCount: number }> => {
+    if (isPgConnected) {
+      try {
+        const { rows: oRows } = await pgPool.query('SELECT COUNT(*) as count FROM ebay_orders WHERE tenant_id = $1', [tenantId]);
+        const { rows: tRows } = await pgPool.query('SELECT COUNT(*) as count FROM ebay_transactions WHERE tenant_id = $1', [tenantId]);
+        const ordersCount = parseInt(oRows[0]?.count || '0', 10);
+        const transactionsCount = parseInt(tRows[0]?.count || '0', 10);
+        return {
+          recordsCount: ordersCount + transactionsCount,
+          ordersCount,
+          transactionsCount
+        };
+      } catch (e) {
+        console.error("Database query failed in getEbayStats:", e);
+      }
+    }
+    return { recordsCount: 0, ordersCount: 0, transactionsCount: 0 };
+  },
+
+  clearEbayTokens: async (tenantId: number): Promise<void> => {
+    if (isPgConnected) {
+      try {
+        await pgPool.query("DELETE FROM tenant_credentials WHERE tenant_id = $1 AND provider = 'ebay'", [tenantId]);
+        await pgPool.query("DELETE FROM ebay_orders WHERE tenant_id = $1", [tenantId]);
+        await pgPool.query("DELETE FROM ebay_order_items WHERE tenant_id = $1", [tenantId]);
+        await pgPool.query("DELETE FROM ebay_transactions WHERE tenant_id = $1", [tenantId]);
+      } catch (e) {
+        console.error("Database query failed in clearEbayTokens:", e);
+        throw e;
+      }
+    }
+  },
+
+  getStripeStats: async (tenantId: number): Promise<{ recordsCount: number; chargesCount: number; customersCount: number; invoicesCount: number; payoutsCount: number }> => {
+    if (isPgConnected) {
+      try {
+        const { rows: chRows } = await pgPool.query('SELECT COUNT(*) as count FROM stripe_charges WHERE tenant_id = $1', [tenantId]);
+        const { rows: cuRows } = await pgPool.query('SELECT COUNT(*) as count FROM stripe_customers WHERE tenant_id = $1', [tenantId]);
+        const { rows: invRows } = await pgPool.query('SELECT COUNT(*) as count FROM stripe_invoices WHERE tenant_id = $1', [tenantId]);
+        const { rows: poRows } = await pgPool.query('SELECT COUNT(*) as count FROM stripe_payouts WHERE tenant_id = $1', [tenantId]);
+
+        const chargesCount = parseInt(chRows[0]?.count || '0', 10);
+        const customersCount = parseInt(cuRows[0]?.count || '0', 10);
+        const invoicesCount = parseInt(invRows[0]?.count || '0', 10);
+        const payoutsCount = parseInt(poRows[0]?.count || '0', 10);
+
+        return {
+          recordsCount: chargesCount + customersCount + invoicesCount + payoutsCount,
+          chargesCount,
+          customersCount,
+          invoicesCount,
+          payoutsCount
+        };
+      } catch (e) {
+        console.error("Database query failed in getStripeStats:", e);
+      }
+    }
+    return { recordsCount: 0, chargesCount: 0, customersCount: 0, invoicesCount: 0, payoutsCount: 0 };
+  },
+
+  clearStripeTokens: async (tenantId: number): Promise<void> => {
+    if (isPgConnected) {
+      try {
+        await pgPool.query("DELETE FROM tenant_credentials WHERE tenant_id = $1 AND provider = 'stripe'", [tenantId]);
+        await pgPool.query("DELETE FROM stripe_charges WHERE tenant_id = $1", [tenantId]);
+        await pgPool.query("DELETE FROM stripe_customers WHERE tenant_id = $1", [tenantId]);
+        await pgPool.query("DELETE FROM stripe_invoices WHERE tenant_id = $1", [tenantId]);
+        await pgPool.query("DELETE FROM stripe_payouts WHERE tenant_id = $1", [tenantId]);
+      } catch (e) {
+        console.error("Database query failed in clearStripeTokens:", e);
+        throw e;
+      }
     }
   },
   isPgActive: (): boolean => {

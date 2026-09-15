@@ -45,31 +45,18 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Default mockup contact list matches screenshots exactly if Xero has no data
+    // Default empty response if Xero has no data
     if (!rawContacts || !Array.isArray(rawContacts) || rawContacts.length === 0) {
-      const mockContacts: ContactItem[] = [
-        { id: '1', name: 'ABC Corporation', type: 'Customer', email: 'accounts@abccorp.com', phone: '+1 555-0101', outstanding: 2450.00 },
-        { id: '2', name: 'Global Solutions Ltd', type: 'Customer', email: 'billing@globalsolutions.com', phone: '+1 555-0102', outstanding: 1850.75 },
-        { id: '3', name: 'Tech Innovators Inc', type: 'Customer', email: 'info@techinnovators.com', phone: '+1 555-0103', outstanding: 1210.50 },
-        { id: '4', name: 'Premium Retail Group', type: 'Customer', email: 'finance@premiumretail.com', phone: '+1 555-0104', outstanding: 980.00 },
-        { id: '5', name: 'XYZ Supplies', type: 'Supplier', email: 'orders@xyzsupplies.com', phone: '+1 555-0201', outstanding: -1250.00 },
-        { id: '6', name: 'Advanced Components', type: 'Supplier', email: 'accounts@advcomp.com', phone: '+1 555-0202', outstanding: -890.45 },
-        { id: '7', name: 'Global Materials Co', type: 'Supplier', email: 'billing@globalmaterials.com', phone: '+1 555-0203', outstanding: -765.30 },
-        { id: '8', name: 'Industrial Solutions', type: 'Supplier', email: 'info@industrialsolutions.com', phone: '+1 555-0204', outstanding: -654.25 },
-        { id: '9', name: 'NextGen Technologies', type: 'Customer', email: 'contact@nextgen.com', phone: '+1 555-0105', outstanding: 456.00 },
-        { id: '10', name: 'Office Essentials Ltd', type: 'Supplier', email: 'sales@officeessentials.com', phone: '+1 555-0205', outstanding: -420.26 }
-      ];
-
       return NextResponse.json({
-        connected: true,
+        connected: isConnected,
         summary: {
-          customers: 14,
-          suppliers: 17,
-          totalOutstanding: 9194.51,
-          arTotal: 6491.25,
-          apTotal: 2703.26
+          customers: 0,
+          suppliers: 0,
+          totalOutstanding: 0,
+          arTotal: 0,
+          apTotal: 0
         },
-        contacts: mockContacts,
+        contacts: [],
         meta: { currency: orgCurrency, calculatedAt: new Date().toISOString() }
       });
     }

@@ -78,28 +78,28 @@ export default function ChartOfAccountsPage() {
   const [isSyncing, setIsSyncing] = useState(false);
 
   const [summary, setSummary] = useState<SummaryData>({
-    totalAccounts: 125,
+    totalAccounts: 0,
     distribution: {
-      assets: 22,
-      assetsPct: '17.6',
-      liabilities: 22,
-      liabilitiesPct: '17.6',
-      equity: 3,
-      equityPct: '2.4',
-      revenue: 14,
-      revenuePct: '11.2',
-      expenses: 62,
-      expensesPct: '49.6'
+      assets: 0,
+      assetsPct: '0',
+      liabilities: 0,
+      liabilitiesPct: '0',
+      equity: 0,
+      equityPct: '0',
+      revenue: 0,
+      revenuePct: '0',
+      expenses: 0,
+      expensesPct: '0'
     }
   });
 
   const [pagination, setPagination] = useState<PaginationData>({
-    totalItems: 125,
-    totalPages: 13,
+    totalItems: 0,
+    totalPages: 1,
     currentPage: 1,
     limit: 10,
-    startIndex: 1,
-    endIndex: 10
+    startIndex: 0,
+    endIndex: 0
   });
 
   const [accounts, setAccounts] = useState<AccountItem[]>([]);

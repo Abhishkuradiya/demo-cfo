@@ -86,17 +86,6 @@ export async function GET(req: NextRequest) {
       const invDueDate = parseXeroDate(inv.DueDate || inv.due_date || inv.Date || inv.invoice_date);
       const total = parseFloat(inv.Total || inv.total || 0);
       
-      let rawAmountDue = 0;
-      if (st === 'PAID') {
-        rawAmountDue = 0;
-      } else if (inv.AmountDue !== undefined && inv.AmountDue !== null) {
-        rawAmountDue = parseFloat(inv.AmountDue);
-      } else if (inv.amount_due !== undefined && inv.amount_due !== null) {
-        rawAmountDue = parseFloat(inv.amount_due);
-      } else {
-        rawAmountDue = total;
-      }
-
       let amountPaid = 0;
       if (st === 'PAID') {
         amountPaid = total;
@@ -104,8 +93,17 @@ export async function GET(req: NextRequest) {
         amountPaid = parseFloat(inv.AmountPaid);
       } else if (inv.amount_paid !== undefined && inv.amount_paid !== null) {
         amountPaid = parseFloat(inv.amount_paid);
+      }
+
+      let rawAmountDue = 0;
+      if (st === 'PAID' || (amountPaid >= total && total > 0)) {
+        rawAmountDue = 0;
+      } else if (inv.AmountDue !== undefined && inv.AmountDue !== null) {
+        rawAmountDue = parseFloat(inv.AmountDue);
+      } else if (inv.amount_due !== undefined && inv.amount_due !== null) {
+        rawAmountDue = parseFloat(inv.amount_due);
       } else {
-        amountPaid = total - rawAmountDue;
+        rawAmountDue = Math.max(0, total - amountPaid);
       }
 
       const isCreditNote = t === 'ACCRECCRED' || t === 'CREDITNOTE';
@@ -162,7 +160,14 @@ export async function GET(req: NextRequest) {
     });
 
     // Unpaid & Active Receivables (Including negative credit notes, strictly excluding PAID, VOIDED, DELETED, DRAFT)
-    const activeReceivables = processedInvoices.filter(inv => Math.abs(inv.amountDue) > 0.001 && inv.rawStatus !== 'PAID' && inv.rawStatus !== 'VOIDED' && inv.rawStatus !== 'DELETED' && inv.rawStatus !== 'DRAFT');
+    const activeReceivables = processedInvoices.filter(inv => 
+      Math.abs(inv.amountDue) > 0.001 && 
+      inv.rawStatus !== 'PAID' && 
+      inv.rawStatus !== 'VOIDED' && 
+      inv.rawStatus !== 'DELETED' && 
+      inv.rawStatus !== 'DRAFT' &&
+      (Math.abs(inv.total) > 0 ? inv.amountPaid < Math.abs(inv.total) : true)
+    );
 
     // KPI Summary Calculations
     let totalReceivables = 0;

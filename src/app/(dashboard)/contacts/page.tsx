@@ -169,25 +169,25 @@ export default function ContactsPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">TOTAL CUSTOMERS</span>
-            <span className="text-xl font-black text-slate-900 mt-1 block">{data?.summary?.customers || 156}</span>
+            <span className="text-xl font-black text-slate-900 mt-1 block">{data?.summary?.customers ?? 0}</span>
             <span className="text-[10px] text-emerald-600 font-bold mt-1 block">Active Xero Customers</span>
           </div>
 
           <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">TOTAL SUPPLIERS</span>
-            <span className="text-xl font-black text-slate-900 mt-1 block">{data?.summary?.suppliers || 42}</span>
+            <span className="text-xl font-black text-slate-900 mt-1 block">{data?.summary?.suppliers ?? 0}</span>
             <span className="text-[10px] text-blue-600 font-bold mt-1 block">Active Vendors</span>
           </div>
 
           <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">OUTSTANDING RECEIVABLES</span>
-            <span className="text-xl font-black text-emerald-600 mt-1 block">{formatAmount(data?.summary?.arTotal || 126450)}</span>
+            <span className="text-xl font-black text-emerald-600 mt-1 block">{formatAmount(data?.summary?.arTotal ?? 0)}</span>
             <span className="text-[10px] text-emerald-600 font-bold mt-1 block">Accounts Receivable</span>
           </div>
 
           <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">OUTSTANDING PAYABLES</span>
-            <span className="text-xl font-black text-rose-600 mt-1 block">{formatAmount(data?.summary?.apTotal || 45210)}</span>
+            <span className="text-xl font-black text-rose-600 mt-1 block">{formatAmount(data?.summary?.apTotal ?? 0)}</span>
             <span className="text-[10px] text-rose-600 font-bold mt-1 block">Accounts Payable</span>
           </div>
         </div>
@@ -201,19 +201,19 @@ export default function ContactsPage() {
                 onClick={() => setActiveTab('All')}
                 className={cn("px-3 py-1 rounded text-xs font-bold transition cursor-pointer", activeTab === 'All' ? "bg-white text-blue-600 shadow-2xs" : "text-slate-600")}
               >
-                All ({data?.contacts?.length || 198})
+                All ({data?.contacts?.length ?? 0})
               </button>
               <button
                 onClick={() => setActiveTab('Customer')}
                 className={cn("px-3 py-1 rounded text-xs font-bold transition cursor-pointer", activeTab === 'Customer' ? "bg-white text-blue-600 shadow-2xs" : "text-slate-600")}
               >
-                Customers ({data?.summary?.customers || 156})
+                Customers ({data?.summary?.customers ?? 0})
               </button>
               <button
                 onClick={() => setActiveTab('Supplier')}
                 className={cn("px-3 py-1 rounded text-xs font-bold transition cursor-pointer", activeTab === 'Supplier' ? "bg-white text-blue-600 shadow-2xs" : "text-slate-600")}
               >
-                Suppliers ({data?.summary?.suppliers || 42})
+                Suppliers ({data?.summary?.suppliers ?? 0})
               </button>
             </div>
 

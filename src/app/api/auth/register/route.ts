@@ -42,6 +42,7 @@ export async function POST(req: Request) {
     await db.createSession(user.id, sessionToken, expiresAt);
 
     // 4. Create Response and set cookie
+    const isHttps = req.headers.get('x-forwarded-proto') === 'https' || req.url.startsWith('https://');
     const response = NextResponse.json({
       success: true,
       message: 'Registration successful',
@@ -52,7 +53,7 @@ export async function POST(req: Request) {
       name: 'session_token',
       value: sessionToken,
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: isHttps,
       sameSite: 'lax',
       expires: expiresAt,
       path: '/'
