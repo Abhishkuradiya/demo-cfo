@@ -343,12 +343,56 @@ export default function APARAnalyticsDashboard() {
 
   const selectedBankBalance = useMemo(() => {
     if (exportSelectedBankId === 'NONE') return 0;
+    let baseBal = 0;
     if (exportSelectedBankId === 'ALL') {
-      return availableBankAccounts.reduce((sum: number, acc: any) => sum + (acc.balance || 0), 0);
+      baseBal = availableBankAccounts.reduce((sum: number, acc: any) => sum + (acc.balance || 0), 0);
+    } else {
+      const found = availableBankAccounts.find((acc: any) => acc.accountId === exportSelectedBankId || acc.accountName === exportSelectedBankId);
+      baseBal = found ? (found.balance || 0) : 0;
     }
-    const found = availableBankAccounts.find((acc: any) => acc.accountId === exportSelectedBankId || acc.accountName === exportSelectedBankId);
-    return found ? (found.balance || 0) : 0;
-  }, [exportSelectedBankId, availableBankAccounts]);
+
+    if (!exportFromDate) return baseBal;
+
+    const baseDStr = asOnDate || new Date().toISOString().split('T')[0];
+    const baseD = new Date(baseDStr);
+    baseD.setHours(0, 0, 0, 0);
+
+    const startD = new Date(exportFromDate);
+    startD.setHours(0, 0, 0, 0);
+
+    if (isNaN(baseD.getTime()) || isNaN(startD.getTime()) || startD.getTime() === baseD.getTime()) {
+      return baseBal;
+    }
+
+    // Dynamically adjust bank balance for invoices/bills due between baseD and startD
+    let netChange = 0;
+    (rawInvoicesList || []).forEach((inv: any) => {
+      const invDateStr = inv.dueDate || inv.due_date || inv.Date || inv.date || inv.invoice_date;
+      if (!invDateStr) return;
+      const invDueDate = new Date(invDateStr);
+      invDueDate.setHours(0, 0, 0, 0);
+
+      if (startD.getTime() > baseD.getTime()) {
+        if (invDueDate.getTime() >= baseD.getTime() && invDueDate.getTime() < startD.getTime()) {
+          if (inv.category === 'AR') {
+            netChange += (inv.amountDue || 0);
+          } else {
+            netChange -= (inv.amountDue || 0);
+          }
+        }
+      } else {
+        if (invDueDate.getTime() >= startD.getTime() && invDueDate.getTime() < baseD.getTime()) {
+          if (inv.category === 'AR') {
+            netChange -= (inv.amountDue || 0);
+          } else {
+            netChange += (inv.amountDue || 0);
+          }
+        }
+      }
+    });
+
+    return baseBal + netChange;
+  }, [exportSelectedBankId, availableBankAccounts, exportFromDate, asOnDate, rawInvoicesList]);
 
   // Filter & Sort Invoices
   const filteredInvoices = useMemo(() => {

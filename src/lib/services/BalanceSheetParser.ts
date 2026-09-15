@@ -147,10 +147,6 @@ export class BalanceSheetParser {
             ];
             const isBank = bankKeywords.some(keyword => label.includes(keyword));
             if (isBank) {
-              // Invert balance if the account is in a liabilities section
-              if (currentInLiabilities) {
-                balance = -balance;
-              }
               accounts.push({ name, balance });
             }
           }
