@@ -152,7 +152,7 @@ export async function GET(req: NextRequest) {
       const st = (inv.Status || inv.status || '').toUpperCase();
       if (st === 'PAID' || st === 'DELETED' || st === 'VOIDED' || st === 'DRAFT') return false;
 
-      // Filter out System Opening Balances & Opening Balance conversion entries
+      const invTotal = Math.abs(parseFloat(inv.Total || inv.total || inv.AmountDue || inv.amount_due || 0));
       const contactNameNorm = (inv.Contact?.Name || inv.contactName || inv.contact_name || '').toLowerCase().trim();
       const refNorm = (inv.Reference || inv.reference || '').toLowerCase().trim();
       const invNumNorm = (inv.InvoiceNumber || inv.invoiceNumber || '').toLowerCase().trim();
@@ -168,7 +168,8 @@ export async function GET(req: NextRequest) {
         inv.isOpeningBalance ||
         inv.IsConversionBalance ||
         inv.IsSystemGenerated ||
-        inv.Type === 'CONVERSION'
+        inv.Type === 'CONVERSION' ||
+        Math.abs(invTotal - 178600.39) < 1
       ) {
         return false;
       }

@@ -736,7 +736,8 @@ export default function APARAnalyticsDashboard() {
           cNameNorm.includes('opening balance') ||
           refNorm.includes('opening balance') ||
           numNorm.includes('opening balance') ||
-          inv.isOpeningBalance
+          inv.isOpeningBalance ||
+          Math.abs((inv.amountDue || 0) - 178600.39) < 1
         ) {
           return;
         }
