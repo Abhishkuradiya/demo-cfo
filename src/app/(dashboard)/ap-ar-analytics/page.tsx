@@ -2416,7 +2416,7 @@ export default function APARAnalyticsDashboard() {
                   <div className="bg-blue-50/80 border border-blue-200/80 rounded-lg p-2.5 flex items-center justify-between text-xs">
                     <span className="font-semibold text-blue-950 flex items-center gap-1.5">
                       <Building2 className="h-4 w-4 text-blue-600 shrink-0" />
-                      Initial Opening Bank Balance:
+                      Initial Opening Bank Balance (as of {formatToDDMMYYYY(exportFromDate || asOnDate)}):
                     </span>
                     <span className="font-extrabold text-blue-900 text-xs">
                       £{selectedBankBalance.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
