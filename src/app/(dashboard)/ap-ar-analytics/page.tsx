@@ -180,6 +180,14 @@ export default function APARAnalyticsDashboard() {
       setSavingCreditLimit(false);
     }
   };
+  // Right-to-Left Sliding Drawer State
+  const [showCreditDrawer, setShowCreditDrawer] = useState<boolean>(false);
+  const [drawerSearchTerm, setDrawerSearchTerm] = useState<string>('');
+  const [drawerTab, setDrawerTab] = useState<'all' | 'breached' | 'ar' | 'ap'>('all');
+  const [drawerEditingContactId, setDrawerEditingContactId] = useState<string | null>(null);
+  const [drawerEditLimit, setDrawerEditLimit] = useState<number>(100000);
+  const [drawerEditTerms, setDrawerEditTerms] = useState<number>(90);
+  const [drawerSaving, setDrawerSaving] = useState<boolean>(false);
 
   // Fetch API Data with Date Range support
   const fetchData = async () => {
@@ -215,6 +223,94 @@ export default function APARAnalyticsDashboard() {
     }
     return [];
   }, [data]);
+
+  // Compute Drawer Contacts List with Live Exposure Percentage & Breach Totals
+  const drawerContacts = useMemo(() => {
+    const map = new Map<string, any>();
+
+    rawInvoicesList.forEach((inv: any) => {
+      const cId = inv.contactId || inv.contactName;
+      const existing = map.get(cId) || {
+        contactId: cId,
+        contactName: inv.contactName,
+        contactType: inv.category === 'AR' ? 'CUSTOMER' : 'VENDOR',
+        type: inv.category === 'AR' ? 'customer' : 'supplier',
+        totalReceivable: 0,
+        totalPayable: 0,
+        totalAmount: 0,
+        invoiceCount: 0,
+        creditLimit: inv.creditLimit || 0,
+        creditTermsDays: inv.creditTermsDays || 90,
+        limitStatus: 'OK',
+        excessAmount: 0
+      };
+
+      if (inv.category === 'AR') {
+        existing.totalReceivable += inv.amountDue;
+      } else {
+        existing.totalPayable += inv.amountDue;
+      }
+      existing.totalAmount = existing.totalReceivable + existing.totalPayable;
+      existing.invoiceCount += 1;
+
+      if (inv.creditLimit) existing.creditLimit = inv.creditLimit;
+      if (inv.creditTermsDays) existing.creditTermsDays = inv.creditTermsDays;
+
+      map.set(cId, existing);
+    });
+
+    const list = Array.from(map.values()).map(c => {
+      const isOver = c.creditLimit > 0 && c.totalAmount > c.creditLimit;
+      const excess = isOver ? c.totalAmount - c.creditLimit : 0;
+      const status = isOver ? 'EXCEEDED' : 'OK';
+
+      return {
+        ...c,
+        limitStatus: status,
+        excessAmount: excess
+      };
+    });
+
+    return list.sort((a, b) => {
+      if (a.limitStatus === 'EXCEEDED' && b.limitStatus !== 'EXCEEDED') return -1;
+      if (a.limitStatus !== 'EXCEEDED' && b.limitStatus === 'EXCEEDED') return 1;
+      return b.totalAmount - a.totalAmount;
+    });
+  }, [rawInvoicesList]);
+
+  // Drawer Summary Metrics
+  const drawerMetrics = useMemo(() => {
+    const breached = drawerContacts.filter(c => c.limitStatus === 'EXCEEDED');
+    const withLimit = drawerContacts.filter(c => c.creditLimit > 0);
+    const healthy = drawerContacts.filter(c => c.limitStatus !== 'EXCEEDED');
+    const totalLimit = withLimit.reduce((sum, c) => sum + c.creditLimit, 0);
+    const totalBreachAmount = breached.reduce((sum, c) => sum + c.excessAmount, 0);
+    const totalExposure = drawerContacts.reduce((sum, c) => sum + (c.totalAmount || 0), 0);
+
+    return {
+      totalLimit,
+      contactsWithLimitCount: withLimit.length,
+      breachedCount: breached.length,
+      totalBreachAmount,
+      healthyCount: healthy.length,
+      totalExposure
+    };
+  }, [drawerContacts]);
+
+  // Filtered Drawer Contacts according to Search & Tab Filter
+  const filteredDrawerContacts = useMemo(() => {
+    return drawerContacts.filter(c => {
+      const matchesSearch = !drawerSearchTerm ||
+        c.contactName.toLowerCase().includes(drawerSearchTerm.toLowerCase());
+
+      let matchesTab = true;
+      if (drawerTab === 'breached') matchesTab = c.limitStatus === 'EXCEEDED';
+      else if (drawerTab === 'ar') matchesTab = c.type === 'customer';
+      else if (drawerTab === 'ap') matchesTab = c.type === 'supplier';
+
+      return matchesSearch && matchesTab;
+    });
+  }, [drawerContacts, drawerSearchTerm, drawerTab]);
 
   // Unique Contacts List for the Contact Dropdown
   const uniqueContactsList = useMemo(() => {
@@ -1315,6 +1411,20 @@ export default function APARAnalyticsDashboard() {
             label="As On:"
           />
 
+          {/* Credit Policy & Limit Manager Button */}
+          <button
+            onClick={() => setShowCreditDrawer(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-bold transition cursor-pointer shadow-2xs text-xs relative"
+          >
+            <ShieldAlert className="h-3.5 w-3.5 text-amber-400" />
+            <span>Credit & Limit Policy</span>
+            {drawerMetrics.breachedCount > 0 && (
+              <span className="ml-0.5 px-1.5 py-0.2 bg-rose-500 text-white text-[10px] font-extrabold rounded-full animate-pulse">
+                {drawerMetrics.breachedCount} Breached
+              </span>
+            )}
+          </button>
+
           {/* Refresh Button */}
           <button
             onClick={fetchData}
@@ -2360,6 +2470,308 @@ export default function APARAnalyticsDashboard() {
                   <span>{savingCreditLimit ? 'Saving Policy...' : 'Save Credit Policy'}</span>
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* SLIDE-OVER CREDIT POLICY & LIMIT MANAGEMENT DRAWER (RIGHT-TO-LEFT) */}
+      {/* ========================================================================= */}
+      {showCreditDrawer && (
+        <div className="fixed inset-0 z-50 overflow-hidden">
+          {/* Dark Backdrop Overlay */}
+          <div 
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs transition-opacity animate-in fade-in duration-300"
+            onClick={() => setShowCreditDrawer(false)}
+          />
+
+          <div className="fixed inset-y-0 right-0 max-w-full flex pl-10">
+            <div className="w-screen max-w-xl bg-white shadow-2xl flex flex-col border-l border-slate-200 animate-in slide-in-from-right duration-300">
+              
+              {/* DRAWER HEADER */}
+              <div className="p-4 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800">
+                <div className="flex items-center gap-3">
+                  <div className="h-9 w-9 rounded-xl bg-blue-600/30 border border-blue-500/40 flex items-center justify-center text-blue-400">
+                    <ShieldAlert className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h2 className="text-base font-bold flex items-center gap-2">
+                      Credit Limit & Risk Policy Manager
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                        Xero Live Sync
+                      </span>
+                    </h2>
+                    <p className="text-xs text-slate-400">
+                      Monitor customer exposure, set terms, & highlight limit breaches
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowCreditDrawer(false)}
+                  className="h-8 w-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              {/* EXECUTIVE SUMMARY RIBBON */}
+              <div className="grid grid-cols-3 gap-2 p-3 bg-slate-50 border-b border-slate-200">
+                <div className="bg-white p-2.5 rounded-lg border border-slate-200 text-center">
+                  <span className="text-[10px] uppercase tracking-wider font-bold text-slate-500 block">Total Allocated</span>
+                  <span className="text-sm font-bold text-slate-900">£{drawerMetrics.totalLimit.toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
+                </div>
+                <div className="bg-white p-2.5 rounded-lg border border-slate-200 text-center">
+                  <span className="text-[10px] uppercase tracking-wider font-bold text-slate-500 block">Active Breaches</span>
+                  <span className={cn("text-sm font-extrabold", drawerMetrics.breachedCount > 0 ? "text-rose-600" : "text-emerald-600")}>
+                    {drawerMetrics.breachedCount} Contacts
+                  </span>
+                </div>
+                <div className="bg-white p-2.5 rounded-lg border border-slate-200 text-center">
+                  <span className="text-[10px] uppercase tracking-wider font-bold text-slate-500 block">Total Exposure</span>
+                  <span className="text-sm font-bold text-blue-700">£{drawerMetrics.totalExposure.toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
+                </div>
+              </div>
+
+              {/* SEARCH & TAB FILTERS */}
+              <div className="p-3 border-b border-slate-200 space-y-2 bg-white">
+                <div className="relative">
+                  <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Search contacts by name..."
+                    value={drawerSearchTerm}
+                    onChange={(e) => setDrawerSearchTerm(e.target.value)}
+                    className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 font-medium"
+                  />
+                  {drawerSearchTerm && (
+                    <button 
+                      onClick={() => setDrawerSearchTerm('')} 
+                      className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-600 text-xs"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg text-xs font-semibold">
+                  <button
+                    onClick={() => setDrawerTab('all')}
+                    className={cn("flex-1 py-1 rounded-md text-center transition cursor-pointer", drawerTab === 'all' ? "bg-white text-slate-900 shadow-2xs font-bold" : "text-slate-600 hover:text-slate-900")}
+                  >
+                    All ({drawerContacts.length})
+                  </button>
+                  <button
+                    onClick={() => setDrawerTab('breached')}
+                    className={cn("flex-1 py-1 rounded-md text-center transition cursor-pointer flex items-center justify-center gap-1", drawerTab === 'breached' ? "bg-rose-600 text-white font-bold shadow-2xs" : "text-rose-600 hover:bg-rose-50")}
+                  >
+                    <span>Breached</span>
+                    {drawerMetrics.breachedCount > 0 && (
+                      <span className="px-1.5 py-0.2 rounded-full text-[9px] bg-white text-rose-700 font-black">
+                        {drawerMetrics.breachedCount}
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => setDrawerTab('ar')}
+                    className={cn("flex-1 py-1 rounded-md text-center transition cursor-pointer", drawerTab === 'ar' ? "bg-white text-slate-900 shadow-2xs font-bold" : "text-slate-600 hover:text-slate-900")}
+                  >
+                    AR Customers
+                  </button>
+                  <button
+                    onClick={() => setDrawerTab('ap')}
+                    className={cn("flex-1 py-1 rounded-md text-center transition cursor-pointer", drawerTab === 'ap' ? "bg-white text-slate-900 shadow-2xs font-bold" : "text-slate-600 hover:text-slate-900")}
+                  >
+                    AP Suppliers
+                  </button>
+                </div>
+              </div>
+
+              {/* CONTACT LIST */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50/50">
+                {filteredDrawerContacts.length === 0 ? (
+                  <div className="text-center py-12 bg-white rounded-xl border border-slate-200 p-6">
+                    <ShieldAlert className="h-10 w-10 text-slate-300 mx-auto mb-2" />
+                    <p className="text-sm font-bold text-slate-700">No matching contacts found</p>
+                    <p className="text-xs text-slate-500 mt-1">Try adjusting your filter or search query.</p>
+                  </div>
+                ) : (
+                  filteredDrawerContacts.map((contact) => {
+                    const isEditing = drawerEditingContactId === contact.name;
+                    const isBreached = contact.limitStatus === 'EXCEEDED';
+                    const pct = Math.min(100, contact.creditLimit ? Math.round((contact.totalAmount / contact.creditLimit) * 100) : 0);
+
+                    return (
+                      <div 
+                        key={contact.name}
+                        className={cn(
+                          "bg-white rounded-xl border p-3.5 shadow-2xs transition-all",
+                          isBreached ? "border-rose-300 bg-rose-50/20" : "border-slate-200 hover:border-slate-300"
+                        )}
+                      >
+                        {/* Contact Main Info Row */}
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <div className={cn("h-8 w-8 rounded-lg flex items-center justify-center font-bold text-xs shrink-0", contact.type === 'customer' ? "bg-emerald-100 text-emerald-800 border border-emerald-200" : "bg-blue-100 text-blue-800 border border-blue-200")}>
+                              {contact.name.charAt(0).toUpperCase()}
+                            </div>
+                            <div className="min-w-0">
+                              <h4 className="text-xs font-bold text-slate-900 truncate flex items-center gap-1.5">
+                                {contact.name}
+                                <span className={cn("text-[9.5px] px-1.5 py-0.2 rounded font-semibold uppercase tracking-wider", contact.type === 'customer' ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-blue-50 text-blue-700 border border-blue-200")}>
+                                  {contact.type === 'customer' ? 'AR Customer' : 'AP Supplier'}
+                                </span>
+                              </h4>
+                              <p className="text-[11px] text-slate-500 font-medium">
+                                {contact.invoiceCount} open bill{contact.invoiceCount !== 1 ? 's' : ''} • Max Terms: <span className="font-semibold text-slate-700">{contact.creditTermsDays} days</span>
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Status Pill */}
+                          <div>
+                            {isBreached ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 text-[10px] font-extrabold border border-rose-300 animate-pulse">
+                                <AlertTriangle className="h-3 w-3 text-rose-600" />
+                                Breached (+£{contact.excessAmount.toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 0 })})
+                              </span>
+                            ) : contact.creditLimit ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-extrabold border border-emerald-300">
+                                <CheckCircle2 className="h-3 w-3 text-emerald-600" />
+                                Within Limit
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-[10px] font-bold border border-slate-200">
+                                No Limit Set
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Exposure Progress Gauge Bar */}
+                        <div className="mt-3 space-y-1">
+                          <div className="flex justify-between items-center text-[11px] font-semibold">
+                            <span className="text-slate-600">
+                              Outstanding Exposure: <strong className="text-slate-900">£{contact.totalAmount.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                            </span>
+                            <span className="text-slate-500">
+                              Limit: <strong className="text-slate-900">{contact.creditLimit ? `£${contact.creditLimit.toLocaleString('en-GB')}` : 'Uncapped'}</strong>
+                            </span>
+                          </div>
+
+                          {contact.creditLimit ? (
+                            <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden border border-slate-200 flex">
+                              <div
+                                style={{ width: `${pct}%` }}
+                                className={cn(
+                                  "h-full transition-all duration-500 rounded-full",
+                                  pct >= 100 ? "bg-rose-600" : pct >= 80 ? "bg-amber-500" : "bg-emerald-500"
+                                )}
+                              />
+                            </div>
+                          ) : (
+                            <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden border border-slate-200" />
+                          )}
+                        </div>
+
+                        {/* Quick Actions / Inline Editing Form */}
+                        <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between">
+                          {isEditing ? (
+                            <div className="w-full bg-slate-50 p-2.5 rounded-lg border border-slate-200 space-y-2">
+                              <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                  <label className="text-[10px] font-bold text-slate-600 uppercase block mb-1">Credit Limit (£)</label>
+                                  <input
+                                    type="number"
+                                    value={drawerEditLimit}
+                                    onChange={(e) => setDrawerEditLimit(Number(e.target.value))}
+                                    className="w-full px-2 py-1 bg-white border border-slate-300 rounded text-xs font-bold"
+                                    placeholder="50000"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-[10px] font-bold text-slate-600 uppercase block mb-1">Terms (Days)</label>
+                                  <input
+                                    type="number"
+                                    value={drawerEditTerms}
+                                    onChange={(e) => setDrawerEditTerms(Number(e.target.value))}
+                                    className="w-full px-2 py-1 bg-white border border-slate-300 rounded text-xs font-bold"
+                                    placeholder="30"
+                                  />
+                                </div>
+                              </div>
+                              <div className="flex justify-end gap-1.5 pt-1">
+                                <button
+                                  onClick={() => setDrawerEditingContactId(null)}
+                                  className="px-2.5 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold rounded transition cursor-pointer"
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  onClick={async () => {
+                                    try {
+                                      const res = await fetch('/api/dashboard/ap-ar-analytics', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({
+                                          contactName: contact.name,
+                                          creditLimit: drawerEditLimit,
+                                          creditTermsDays: drawerEditTerms
+                                        })
+                                      });
+                                      if (res.ok) {
+                                        toast.success(`Updated policy for ${contact.name}`);
+                                        setDrawerEditingContactId(null);
+                                        fetchData();
+                                      } else {
+                                        toast.error('Failed to update limit');
+                                      }
+                                    } catch {
+                                      toast.error('Network error updating limit');
+                                    }
+                                  }}
+                                  className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded transition shadow-2xs cursor-pointer"
+                                >
+                                  Save Policy
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              <span className="text-[11px] text-slate-500 italic">
+                                {contact.creditLimit ? `${pct}% of policy cap utilized` : 'Default 30d terms applies'}
+                              </span>
+                              <button
+                                onClick={() => {
+                                  setDrawerEditingContactId(contact.name);
+                                  setDrawerEditLimit(contact.creditLimit || 50000);
+                                  setDrawerEditTerms(contact.creditTermsDays || 30);
+                                }}
+                                className="text-xs text-blue-600 hover:text-blue-800 font-bold hover:underline cursor-pointer flex items-center gap-1"
+                              >
+                                <Edit3 className="h-3 w-3" />
+                                <span>Edit Policy</span>
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* FOOTER */}
+              <div className="p-3 bg-white border-t border-slate-200 flex items-center justify-between text-xs text-slate-500">
+                <span>Showing {filteredDrawerContacts.length} of {drawerContacts.length} total contacts</span>
+                <button
+                  onClick={() => setShowCreditDrawer(false)}
+                  className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg transition cursor-pointer"
+                >
+                  Close Panel
+                </button>
+              </div>
+
             </div>
           </div>
         </div>
