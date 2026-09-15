@@ -47,12 +47,16 @@ export class BankAccountMergeService {
           matchedBsNames.add(match.name.toLowerCase().trim());
         }
 
+        // Xero Trial Balance Debit balances are positive assets
+        const rawBal = match ? match.balance : 0;
+        const posBal = Math.abs(rawBal);
+
         results.push({
           accountId: acc.AccountID || acc.accountId || acc.Name,
           accountName: acc.Name,
           accountCode: acc.Code || "",
           currency: acc.CurrencyCode || "GBP",
-          balance: match ? match.balance : 0,
+          balance: posBal,
           status: acc.Status || "ACTIVE",
           type: acc.Type || "BANK"
         });
@@ -64,7 +68,6 @@ export class BankAccountMergeService {
       balanceSheetAccounts.forEach((bsAcc, idx) => {
         const bsNameNorm = bsAcc.name.toLowerCase().trim();
         if (!matchedBsNames.has(bsNameNorm)) {
-          // Check if already in results by exact name
           const exists = results.some(r => r.accountName.toLowerCase().trim() === bsNameNorm);
           if (!exists) {
             results.push({
@@ -72,7 +75,7 @@ export class BankAccountMergeService {
               accountName: bsAcc.name,
               accountCode: "",
               currency: "GBP",
-              balance: bsAcc.balance,
+              balance: Math.abs(bsAcc.balance),
               status: "ACTIVE",
               type: "BANK"
             });

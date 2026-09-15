@@ -147,7 +147,7 @@ export class BalanceSheetParser {
             ];
             const isBank = bankKeywords.some(keyword => label.includes(keyword));
             if (isBank) {
-              accounts.push({ name, balance });
+              accounts.push({ name, balance: Math.abs(balance) });
             }
           }
         }

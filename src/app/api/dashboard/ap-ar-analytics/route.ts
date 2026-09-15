@@ -86,6 +86,11 @@ export async function GET(req: NextRequest) {
       ];
     }
 
+    bankAccountsList = bankAccountsList.map(acc => ({
+      ...acc,
+      balance: Math.abs(acc.balance || 0)
+    }));
+
     // 2. Fetch Invoices & Credit Notes (Xero API with Status=="AUTHORISED" first, then DB reports fallback)
     let rawInvoicesList: any[] = [];
     if (isConnected) {
