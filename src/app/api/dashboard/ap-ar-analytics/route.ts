@@ -184,15 +184,20 @@ export async function GET(req: NextRequest) {
       const invNumRaw = (inv.InvoiceNumber || inv.invoice_number || '').toString().trim();
       const refRaw = (inv.Reference || inv.reference || '').toString().trim();
       const shortId = (inv.InvoiceID || inv.external_id || inv.id || '').toString().slice(-6).toUpperCase();
+      const isOpeningBalance = inv.IsConversionBalance || (!invNumRaw && !refRaw) || inv.IsSystemGenerated || inv.Type === 'CONVERSION';
 
       let resolvedInvNum = invNumRaw;
       if (!resolvedInvNum || resolvedInvNum === '—') {
-        resolvedInvNum = refRaw && refRaw !== '—' ? refRaw : (isAR ? `INV-${shortId || '7842'}` : `BILL-${shortId || '9120'}`);
+        if (refRaw && refRaw !== '—') {
+          resolvedInvNum = refRaw;
+        } else {
+          resolvedInvNum = isOpeningBalance ? 'Opening Balance' : (isAR ? `INV-${shortId || '7842'}` : `BILL-${shortId || '9120'}`);
+        }
       }
 
       let resolvedRef = refRaw;
       if (!resolvedRef || resolvedRef === '—') {
-        resolvedRef = invNumRaw && invNumRaw !== '—' ? invNumRaw : resolvedInvNum;
+        resolvedRef = invNumRaw && invNumRaw !== '—' ? invNumRaw : (isOpeningBalance ? 'System Opening Balance' : resolvedInvNum);
       }
 
       return {
@@ -213,6 +218,7 @@ export async function GET(req: NextRequest) {
         daysUntilDue,
         weekBucket,
         reference: resolvedRef,
+        isOpeningBalance,
         currency: inv.CurrencyCode || inv.currency || currency,
         lineItems: Array.isArray(inv.LineItems || inv.line_items)
           ? (inv.LineItems || inv.line_items).map((item: any) => ({

@@ -1674,9 +1674,10 @@ export default function APARAnalyticsDashboard() {
                   const isAR = inv.category === 'AR';
                   const isOverLimit = inv.isOverLimit;
 
+                  const isOpeningBal = inv.isOpeningBalance || inv.invoiceNumber === 'Opening Balance' || inv.reference === 'System Opening Balance';
                   const invNum = inv.invoiceNumber && inv.invoiceNumber !== '—'
                     ? inv.invoiceNumber
-                    : (inv.reference && inv.reference !== '—' ? inv.reference : (isAR ? `INV-XERO-${(inv.id || '').toString().slice(-6) || '7842'}` : `BILL-XERO-${(inv.id || '').toString().slice(-6) || '9120'}`));
+                    : (inv.reference && inv.reference !== '—' ? inv.reference : 'Opening Balance');
                   const refNum = inv.reference && inv.reference !== '—' && inv.reference !== invNum ? inv.reference : null;
 
                   return (
@@ -1746,10 +1747,15 @@ export default function APARAnalyticsDashboard() {
                         )}
                       </td>
 
-                      {/* Reference / Invoice # (No '—') */}
+                      {/* Reference / Invoice # (Opening Balance Flag) */}
                       <td className="py-2 px-3 border-r border-slate-200">
-                        <div className="font-bold text-blue-600 hover:underline cursor-pointer">
-                          {invNum}
+                        <div className="font-bold text-blue-600 hover:underline cursor-pointer flex items-center gap-1.5 flex-wrap">
+                          <span>{invNum}</span>
+                          {isOpeningBal && (
+                            <span className="px-1.5 py-0.2 rounded text-[9.5px] font-black uppercase bg-amber-100 text-amber-800 border border-amber-300">
+                              Conversion Bal
+                            </span>
+                          )}
                         </div>
                         {refNum && (
                           <div className="text-[10.5px] text-slate-400 font-mono truncate max-w-[200px]">
