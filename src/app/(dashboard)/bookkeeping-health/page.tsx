@@ -577,7 +577,7 @@ export default function BookkeepingHealthPage() {
             </div>
           </div>
         ) : (
-          filteredExceptions.map((item) => {
+          filteredExceptions.map((item, idx) => {
             const isExpanded = expandedExceptionId === item.id;
             const sevBadge = item.severity === 'CRITICAL' ? { label: 'CRITICAL', bg: 'bg-rose-100 text-rose-800 border-rose-300', icon: ShieldAlert } :
                              item.severity === 'REVIEW_REQUIRED' ? { label: 'REVIEW REQUIRED', bg: 'bg-amber-100 text-amber-800 border-amber-300', icon: AlertTriangle } :
@@ -588,7 +588,7 @@ export default function BookkeepingHealthPage() {
 
             return (
               <div
-                key={item.id}
+                key={`exception-${item.id || item.ruleCode || 'item'}-${idx}`}
                 className={cn(
                   "bg-white rounded-2xl border transition shadow-2xs overflow-hidden",
                   item.severity === 'CRITICAL' ? "border-rose-200 hover:border-rose-300" :

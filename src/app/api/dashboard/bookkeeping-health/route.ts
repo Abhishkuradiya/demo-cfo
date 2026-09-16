@@ -225,7 +225,7 @@ export async function GET(req: NextRequest) {
     if (enabledRulesMap.has('RULE_OVERPAYMENT')) {
       const rule = enabledRulesMap.get('RULE_OVERPAYMENT');
 
-      validInvoices.forEach((inv: any) => {
+      validInvoices.forEach((inv: any, invIdx: number) => {
         const total = parseFloat(inv.Total || inv.total || 0);
         const amountPaid = parseFloat(inv.AmountPaid || inv.amount_paid || 0);
 
@@ -236,7 +236,7 @@ export async function GET(req: NextRequest) {
           const dt = parseXeroDate(inv.Date || inv.invoice_date);
 
           exceptions.push({
-            id: `OVERPAY-${inv.InvoiceID || inv.id || num}`,
+            id: `OVERPAY-${inv.InvoiceID || inv.id || invIdx}-${invIdx}`,
             ruleCode: 'RULE_OVERPAYMENT',
             ruleName: rule.name || 'Payment Exceeds Total Amount',
             category: 'PAYMENT_MISMATCH',
@@ -263,7 +263,7 @@ export async function GET(req: NextRequest) {
     const today = new Date();
     if (enabledRulesMap.has('RULE_OVERDUE_AR')) {
       const rule = enabledRulesMap.get('RULE_OVERDUE_AR');
-      validInvoices.forEach((inv: any) => {
+      validInvoices.forEach((inv: any, invIdx: number) => {
         const t = (inv.Type || inv.type || '').toUpperCase();
         if (t !== 'ACCREC') return;
         const due = parseXeroDate(inv.DueDate || inv.due_date);
@@ -276,7 +276,7 @@ export async function GET(req: NextRequest) {
             const num = inv.InvoiceNumber || inv.invoiceNumber || 'INV';
 
             exceptions.push({
-              id: `OVERDUE-AR-${inv.InvoiceID || inv.id}`,
+              id: `OVERDUE-AR-${inv.InvoiceID || inv.id || invIdx}-${invIdx}`,
               ruleCode: 'RULE_OVERDUE_AR',
               ruleName: rule.name || 'Overdue Receivables (>30 Days)',
               category: 'PAYMENT_MISMATCH',
@@ -305,7 +305,7 @@ export async function GET(req: NextRequest) {
     // =========================================================================
     if (enabledRulesMap.has('RULE_MISSING_NUM')) {
       const rule = enabledRulesMap.get('RULE_MISSING_NUM');
-      validInvoices.forEach((inv: any) => {
+      validInvoices.forEach((inv: any, invIdx: number) => {
         const num = (inv.InvoiceNumber || inv.invoiceNumber || '').trim();
         const ref = (inv.Reference || inv.reference || '').trim();
         const amt = Math.abs(parseFloat(inv.Total || inv.total || inv.AmountDue || inv.amount_due || 0));
@@ -315,7 +315,7 @@ export async function GET(req: NextRequest) {
           const dt = parseXeroDate(inv.Date || inv.invoice_date);
 
           exceptions.push({
-            id: `MISSING-NUM-${inv.InvoiceID || inv.id}`,
+            id: `MISSING-NUM-${inv.InvoiceID || inv.id || invIdx}-${invIdx}`,
             ruleCode: 'RULE_MISSING_NUM',
             ruleName: rule.name || 'Missing Bill / Invoice Reference Number',
             category: 'INCOMPLETE_DATA',
@@ -341,7 +341,7 @@ export async function GET(req: NextRequest) {
 
     if (enabledRulesMap.has('RULE_MISSING_CONTACT')) {
       const rule = enabledRulesMap.get('RULE_MISSING_CONTACT');
-      validInvoices.forEach((inv: any) => {
+      validInvoices.forEach((inv: any, invIdx: number) => {
         const contactName = (inv.Contact?.Name || inv.contactName || inv.contact_name || '').trim();
         const amt = Math.abs(parseFloat(inv.Total || inv.total || inv.AmountDue || inv.amount_due || 0));
 
@@ -350,7 +350,7 @@ export async function GET(req: NextRequest) {
           const dt = parseXeroDate(inv.Date || inv.invoice_date);
 
           exceptions.push({
-            id: `MISSING-CONTACT-${inv.InvoiceID || inv.id}`,
+            id: `MISSING-CONTACT-${inv.InvoiceID || inv.id || invIdx}-${invIdx}`,
             ruleCode: 'RULE_MISSING_CONTACT',
             ruleName: rule.name || 'Missing Contact Information',
             category: 'INCOMPLETE_DATA',
@@ -379,7 +379,7 @@ export async function GET(req: NextRequest) {
     if (enabledRulesMap.has('RULE_UNUSUAL_CLASS')) {
       const rule = enabledRulesMap.get('RULE_UNUSUAL_CLASS');
 
-      validInvoices.forEach((inv: any) => {
+      validInvoices.forEach((inv: any, invIdx: number) => {
         const lineItems = Array.isArray(inv.LineItems || inv.line_items) ? (inv.LineItems || inv.line_items) : [];
         const contactName = (inv.Contact?.Name || inv.contactName || '').trim();
         const num = inv.InvoiceNumber || inv.invoiceNumber || 'INV';
@@ -393,7 +393,7 @@ export async function GET(req: NextRequest) {
           // Anomaly 1: Rent posted to Revenue/Sales account (e.g. 400 series)
           if ((desc.includes('rent') || desc.includes('lease')) && (accCode.startsWith('4') || accCode.startsWith('200'))) {
             exceptions.push({
-              id: `CLASS-RENT-${inv.InvoiceID || inv.id}-${lIdx}`,
+              id: `CLASS-RENT-${inv.InvoiceID || inv.id || invIdx}-${lIdx}-${invIdx}`,
               ruleCode: 'RULE_UNUSUAL_CLASS',
               ruleName: rule.name || 'Unusual Classification: Rent in Revenue/Liability',
               category: 'CLASSIFICATION_ANOMALY',
@@ -418,7 +418,7 @@ export async function GET(req: NextRequest) {
           // Anomaly 2: Advertising / Marketing posted to Fixed Asset / Equipment
           if ((desc.includes('google ads') || desc.includes('facebook ads') || desc.includes('amazon ads')) && accCode.startsWith('12')) {
             exceptions.push({
-              id: `CLASS-ADS-${inv.InvoiceID || inv.id}-${lIdx}`,
+              id: `CLASS-ADS-${inv.InvoiceID || inv.id || invIdx}-${lIdx}-${invIdx}`,
               ruleCode: 'RULE_UNUSUAL_CLASS',
               ruleName: rule.name || 'Unusual Classification: Advertising in Fixed Asset',
               category: 'CLASSIFICATION_ANOMALY',
@@ -450,7 +450,7 @@ export async function GET(req: NextRequest) {
       const rule = enabledRulesMap.get('RULE_FUTURE_DATE');
       const nowMs = new Date().getTime();
 
-      validInvoices.forEach((inv: any) => {
+      validInvoices.forEach((inv: any, invIdx: number) => {
         const invDate = parseXeroDate(inv.Date || inv.invoice_date);
         const amt = Math.abs(parseFloat(inv.Total || inv.total || inv.AmountDue || inv.amount_due || 0));
 
@@ -459,7 +459,7 @@ export async function GET(req: NextRequest) {
           const num = inv.InvoiceNumber || inv.invoiceNumber || 'INV';
 
           exceptions.push({
-            id: `FUTURE-DATE-${inv.InvoiceID || inv.id}`,
+            id: `FUTURE-DATE-${inv.InvoiceID || inv.id || invIdx}-${invIdx}`,
             ruleCode: 'RULE_FUTURE_DATE',
             ruleName: rule.name || 'Future-Dated Transaction',
             category: 'PERIOD_CHECK',
@@ -488,7 +488,7 @@ export async function GET(req: NextRequest) {
     if (enabledRulesMap.has('RULE_CN_EXCEEDS')) {
       const rule = enabledRulesMap.get('RULE_CN_EXCEEDS');
 
-      validInvoices.forEach((inv: any) => {
+      validInvoices.forEach((inv: any, invIdx: number) => {
         const t = (inv.Type || inv.type || '').toUpperCase();
         if (t !== 'ACCRECCRED' && t !== 'ACCPAYCRED' && t !== 'CREDITNOTE') return;
 
@@ -500,7 +500,7 @@ export async function GET(req: NextRequest) {
         // Check if Credit Note exceeds £50,000 or standalone without original invoice link
         if (cnAmt > 50000) {
           exceptions.push({
-            id: `CN-EXCEEDS-${inv.CreditNoteID || inv.id || num}`,
+            id: `CN-EXCEEDS-${inv.CreditNoteID || inv.id || invIdx}-${invIdx}`,
             ruleCode: 'RULE_CN_EXCEEDS',
             ruleName: rule.name || 'High Value Credit Note Anomaly',
             category: 'CREDIT_NOTE',
@@ -535,7 +535,7 @@ export async function GET(req: NextRequest) {
       const targetContact = (cfg.contactName || '').toLowerCase().trim();
       const requirePO = !!cfg.requirePO;
 
-      validInvoices.forEach((inv: any) => {
+      validInvoices.forEach((inv: any, invIdx: number) => {
         const amt = Math.abs(parseFloat(inv.Total || inv.total || inv.AmountDue || inv.amount_due || 0));
         const contact = (inv.Contact?.Name || inv.contactName || '').toLowerCase().trim();
         const ref = (inv.Reference || inv.reference || '').toLowerCase().trim();
@@ -567,7 +567,7 @@ export async function GET(req: NextRequest) {
 
         if (matchesRule) {
           exceptions.push({
-            id: `CUSTOM-${rule.ruleCode}-${inv.InvoiceID || inv.id}`,
+            id: `CUSTOM-${rule.ruleCode}-${inv.InvoiceID || inv.id || invIdx}-${invIdx}`,
             ruleCode: rule.ruleCode,
             ruleName: rule.name || 'User Custom Rule Violation',
             category: rule.category || 'CUSTOM_POLICY',
