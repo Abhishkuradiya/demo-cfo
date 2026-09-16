@@ -589,6 +589,31 @@ export async function GET(req: NextRequest) {
       });
     });
 
+    // Calculate Summary Metrics & Bookkeeping Health Score (0-100)
+    const criticalCount = exceptions.filter(e => e.severity === 'CRITICAL').length;
+    const reviewCount = exceptions.filter(e => e.severity === 'REVIEW_REQUIRED').length;
+    const dataQualityCount = exceptions.filter(e => e.severity === 'DATA_QUALITY').length;
+    const monitoringCount = exceptions.filter(e => e.severity === 'MONITORING').length;
+
+    const totalRiskExposure = exceptions.reduce((sum, e) => sum + (e.amount || 0), 0);
+
+    // Score Formula: 100 - (Critical*6 + Review*2.5 + DataQuality*0.5)
+    const penalty = (criticalCount * 6) + (reviewCount * 2.5) + (dataQualityCount * 0.5);
+    const healthScore = Math.max(0, Math.min(100, Math.round(100 - penalty)));
+
+    // Categorized Buckets Counts
+    const bucketCounts: Record<string, number> = {
+      DUPLICATE: exceptions.filter(e => e.category === 'DUPLICATE').length,
+      RECONCILIATION: exceptions.filter(e => e.category === 'RECONCILIATION').length,
+      PAYMENT_MISMATCH: exceptions.filter(e => e.category === 'PAYMENT_MISMATCH').length,
+      INCOMPLETE_DATA: exceptions.filter(e => e.category === 'INCOMPLETE_DATA').length,
+      CLASSIFICATION_ANOMALY: exceptions.filter(e => e.category === 'CLASSIFICATION_ANOMALY').length,
+      TAX_ANOMALY: exceptions.filter(e => e.category === 'TAX_ANOMALY').length,
+      PERIOD_CHECK: exceptions.filter(e => e.category === 'PERIOD_CHECK').length,
+      CREDIT_NOTE: exceptions.filter(e => e.category === 'CREDIT_NOTE').length,
+      CUSTOM_POLICY: exceptions.filter(e => e.category === 'CUSTOM_POLICY' || e.isCustomRule).length
+    };
+
     // Calculate Dynamic Data Quality Checks from Live Invoices
     const totalValidCount = validInvoices.length || 1;
     let validDatesCount = 0;
