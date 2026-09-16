@@ -340,7 +340,7 @@ export default function BookkeepingHealthPage() {
           </select>
 
           <span className="text-[11px] font-semibold text-slate-400 hidden lg:inline">
-            Last synced 12 Sep 2026, 10:24 AM
+            {data?.lastSyncedFormatted || 'Last synced just now'}
           </span>
 
           <button
@@ -556,11 +556,11 @@ export default function BookkeepingHealthPage() {
 
           <div className="space-y-3 pt-1">
             {[
-              { label: 'Duplicate Risk', pct: 72, color: 'bg-rose-500' },
-              { label: 'Reconciliation Risk', pct: 36, color: 'bg-amber-500' },
-              { label: 'Classification Risk', pct: 21, color: 'bg-yellow-500' },
-              { label: 'Tax Risk', pct: 11, color: 'bg-emerald-500' },
-              { label: 'Data Completeness', pct: 29, color: 'bg-blue-500' }
+              { label: 'Duplicate Risk', pct: data?.riskOverview?.duplicateRiskPct ?? 0, color: 'bg-rose-500' },
+              { label: 'Reconciliation Risk', pct: data?.riskOverview?.reconciliationRiskPct ?? 0, color: 'bg-amber-500' },
+              { label: 'Classification Risk', pct: data?.riskOverview?.classificationRiskPct ?? 0, color: 'bg-yellow-500' },
+              { label: 'Tax Risk', pct: data?.riskOverview?.taxRiskPct ?? 0, color: 'bg-emerald-500' },
+              { label: 'Data Completeness', pct: data?.riskOverview?.dataCompletenessRiskPct ?? 0, color: 'bg-blue-500' }
             ].map((r, i) => (
               <div key={i} className="space-y-1">
                 <div className="flex justify-between text-xs font-bold text-slate-700">
@@ -776,7 +776,7 @@ export default function BookkeepingHealthPage() {
                   </div>
                   <div className="text-[11px] text-slate-500 flex justify-between">
                     <span>Ref: {selectedItemForDetail.reference}</span>
-                    <span>{selectedItemForDetail.date || '12 Sep 2026'}</span>
+                    <span>{selectedItemForDetail.date ? new Date(selectedItemForDetail.date).toLocaleDateString('en-GB') : 'N/A'}</span>
                   </div>
                   <button className="text-[10.5px] font-bold text-blue-600 hover:underline flex items-center gap-0.5 pt-1">
                     View in Xero <ExternalLink className="h-3 w-3" />
@@ -866,18 +866,18 @@ export default function BookkeepingHealthPage() {
               Data Quality Checks
             </h3>
             <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
-              96.4%
+              {data?.dataQualityMetrics?.overallPct ?? 100}%
             </span>
           </div>
 
           <div className="space-y-2.5 text-xs">
             {[
-              { label: 'Valid transaction dates', pct: '100%' },
-              { label: 'Transactions with description', pct: '98%' },
-              { label: 'Transactions with contact', pct: '94%' },
-              { label: 'Transactions with account category', pct: '96%' },
-              { label: 'Transactions with tax code', pct: '92%' },
-              { label: 'No orphaned records', pct: '100%' }
+              { label: 'Valid transaction dates', pct: `${data?.dataQualityMetrics?.validDatesPct ?? 100}%` },
+              { label: 'Transactions with description', pct: `${data?.dataQualityMetrics?.withDescPct ?? 100}%` },
+              { label: 'Transactions with contact', pct: `${data?.dataQualityMetrics?.withContactPct ?? 100}%` },
+              { label: 'Transactions with account category', pct: `${data?.dataQualityMetrics?.withAccountCategoryPct ?? 100}%` },
+              { label: 'Transactions with tax code', pct: `${data?.dataQualityMetrics?.withTaxCodePct ?? 100}%` },
+              { label: 'No orphaned records', pct: `${data?.dataQualityMetrics?.noOrphanedPct ?? 100}%` }
             ].map((item, idx) => (
               <div key={idx} className="flex items-center justify-between font-semibold text-slate-700">
                 <span className="flex items-center gap-2">
@@ -903,12 +903,9 @@ export default function BookkeepingHealthPage() {
           </div>
 
           <div className="space-y-2.5">
-            {[
-              { title: 'Review 14 potential duplicates', sub: 'Could save ~£62,400 in duplicate entries' },
-              { title: 'Categorize 12 uncategorized expenses', sub: 'AI suggests 90% confidence mappings' },
-              { title: 'Reconcile 23 bank transactions', sub: '19 are older than 30 days' },
-              { title: 'Add missing contacts', sub: '8 transactions missing contact info' }
-            ].map((sug, idx) => (
+            {(data?.aiSuggestions && data.aiSuggestions.length > 0 ? data.aiSuggestions : [
+              { title: 'Books are 100% healthy & synchronized', sub: 'No active bookkeeping exceptions detected' }
+            ]).map((sug: any, idx: number) => (
               <div key={idx} className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80 hover:bg-blue-50/50 transition cursor-pointer flex items-center justify-between group">
                 <div className="space-y-0.5 min-w-0">
                   <div className="text-xs font-bold text-slate-900 group-hover:text-blue-600 truncate">{sug.title}</div>

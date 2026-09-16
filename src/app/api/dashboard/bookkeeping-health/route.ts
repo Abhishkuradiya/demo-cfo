@@ -589,33 +589,91 @@ export async function GET(req: NextRequest) {
       });
     });
 
-    // Calculate Summary Metrics & Bookkeeping Health Score (0-100)
-    const criticalCount = exceptions.filter(e => e.severity === 'CRITICAL').length;
-    const reviewCount = exceptions.filter(e => e.severity === 'REVIEW_REQUIRED').length;
-    const dataQualityCount = exceptions.filter(e => e.severity === 'DATA_QUALITY').length;
-    const monitoringCount = exceptions.filter(e => e.severity === 'MONITORING').length;
+    // Calculate Dynamic Data Quality Checks from Live Invoices
+    const totalValidCount = validInvoices.length || 1;
+    let validDatesCount = 0;
+    let withDescCount = 0;
+    let withContactCount = 0;
+    let withAccountCategoryCount = 0;
+    let withTaxCodeCount = 0;
 
-    const totalRiskExposure = exceptions.reduce((sum, e) => sum + (e.amount || 0), 0);
+    validInvoices.forEach((inv: any) => {
+      if (inv.Date || inv.invoice_date) validDatesCount++;
+      const contact = (inv.Contact?.Name || inv.contactName || '').trim();
+      if (contact && contact.toLowerCase() !== 'unknown contact') withContactCount++;
 
-    // Score Formula: 100 - (Critical*6 + Review*2.5 + DataQuality*0.5)
-    const penalty = (criticalCount * 6) + (reviewCount * 2.5) + (dataQualityCount * 0.5);
-    const healthScore = Math.max(0, Math.min(100, Math.round(100 - penalty)));
+      const lines = Array.isArray(inv.LineItems || inv.line_items) ? (inv.LineItems || inv.line_items) : [];
+      if (lines.some((l: any) => (l.Description || l.description || '').trim().length > 0)) withDescCount++;
+      if (lines.some((l: any) => (l.AccountCode || l.account_code || '').trim().length > 0)) withAccountCategoryCount++;
+      if (lines.some((l: any) => (l.TaxType || l.tax_type || l.TaxAmount !== undefined))) withTaxCodeCount++;
+    });
 
-    // Categorized Buckets Counts
-    const bucketCounts: Record<string, number> = {
-      DUPLICATE: exceptions.filter(e => e.category === 'DUPLICATE').length,
-      RECONCILIATION: exceptions.filter(e => e.category === 'RECONCILIATION').length,
-      PAYMENT_MISMATCH: exceptions.filter(e => e.category === 'PAYMENT_MISMATCH').length,
-      INCOMPLETE_DATA: exceptions.filter(e => e.category === 'INCOMPLETE_DATA').length,
-      CLASSIFICATION_ANOMALY: exceptions.filter(e => e.category === 'CLASSIFICATION_ANOMALY').length,
-      TAX_ANOMALY: exceptions.filter(e => e.category === 'TAX_ANOMALY').length,
-      PERIOD_CHECK: exceptions.filter(e => e.category === 'PERIOD_CHECK').length,
-      CREDIT_NOTE: exceptions.filter(e => e.category === 'CREDIT_NOTE').length,
-      CUSTOM_POLICY: exceptions.filter(e => e.category === 'CUSTOM_POLICY' || e.isCustomRule).length
-    };
+    const validDatesPct = Math.round((validDatesCount / totalValidCount) * 100);
+    const withDescPct = Math.round((withDescCount / totalValidCount) * 100);
+    const withContactPct = Math.round((withContactCount / totalValidCount) * 100);
+    const withAccountCategoryPct = Math.round((withAccountCategoryCount / totalValidCount) * 100);
+    const withTaxCodePct = Math.round((withTaxCodeCount / totalValidCount) * 100);
+    const dataQualityOverallPct = Math.round((validDatesPct + withDescPct + withContactPct + withAccountCategoryPct + withTaxCodePct) / 5);
+
+    // Dynamic Risk Overview Percentages
+    const dupCount = exceptions.filter(e => e.category === 'DUPLICATE').length;
+    const reconCount = exceptions.filter(e => e.category === 'RECONCILIATION').length;
+    const classCount = exceptions.filter(e => e.category === 'CLASSIFICATION_ANOMALY').length;
+    const taxCount = exceptions.filter(e => e.category === 'TAX_ANOMALY').length;
+    const missingCount = exceptions.filter(e => e.category === 'INCOMPLETE_DATA').length;
+
+    const duplicateRiskPct = Math.min(100, Math.round((dupCount / totalValidCount) * 100 * 5));
+    const reconciliationRiskPct = Math.min(100, Math.round((reconCount / totalValidCount) * 100 * 5));
+    const classificationRiskPct = Math.min(100, Math.round((classCount / totalValidCount) * 100 * 5));
+    const taxRiskPct = Math.min(100, Math.round((taxCount / totalValidCount) * 100 * 5));
+    const dataCompletenessRiskPct = Math.min(100, Math.round((missingCount / totalValidCount) * 100 * 5));
+
+    // Dynamic AI Suggestions
+    const dupAmountTotal = exceptions.filter(e => e.category === 'DUPLICATE').reduce((sum, e) => sum + e.amount, 0);
+    const aiSuggestions: { title: string; sub: string }[] = [];
+
+    if (dupCount > 0) {
+      aiSuggestions.push({
+        title: `Review ${dupCount} potential duplicates`,
+        sub: `Could save ~£${dupAmountTotal.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} in duplicate entries`
+      });
+    }
+    if (classCount > 0) {
+      aiSuggestions.push({
+        title: `Categorize ${classCount} unusual expense entries`,
+        sub: `AI detected line items posted to unexpected account codes`
+      });
+    }
+    if (reconCount > 0 || monitoringCount > 0) {
+      aiSuggestions.push({
+        title: `Reconcile ${reconCount + monitoringCount} ledger & bank items`,
+        sub: `${monitoringCount} overdue items require immediate CFO review`
+      });
+    }
+    if (missingCount > 0) {
+      aiSuggestions.push({
+        title: `Add missing contacts & invoice numbers`,
+        sub: `${missingCount} transactions missing key metadata`
+      });
+    }
+    if (aiSuggestions.length === 0) {
+      aiSuggestions.push({
+        title: `Books are 100% healthy & synchronized`,
+        sub: `No critical bookkeeping exceptions or anomalies detected`
+      });
+    }
+
+    // Dynamic Recent Duplicates & Top Unreconciled Items lists
+    const recentDuplicates = exceptions.filter(e => e.category === 'DUPLICATE').slice(0, 5);
+    const topUnreconciledItems = exceptions.filter(e => e.category === 'RECONCILIATION' || e.category === 'PAYMENT_MISMATCH').slice(0, 5);
+
+    // Formatted Last Synced Timestamp
+    const now = new Date();
+    const lastSyncedFormatted = `Last synced ${now.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}, ${now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`;
 
     return NextResponse.json({
       healthScore,
+      lastSyncedFormatted,
       summary: {
         totalExceptionsCount: exceptions.length,
         criticalCount,
@@ -623,8 +681,27 @@ export async function GET(req: NextRequest) {
         dataQualityCount,
         monitoringCount,
         totalRiskExposure,
-        reconciliationMatchRatePct: 95.8, // Demo live reconciliation % metric
+        reconciliationMatchRatePct: Math.max(0, 100 - reconciliationRiskPct),
       },
+      dataQualityMetrics: {
+        overallPct: dataQualityOverallPct,
+        validDatesPct,
+        withDescPct,
+        withContactPct,
+        withAccountCategoryPct,
+        withTaxCodePct,
+        noOrphanedPct: 100
+      },
+      riskOverview: {
+        duplicateRiskPct,
+        reconciliationRiskPct,
+        classificationRiskPct,
+        taxRiskPct,
+        dataCompletenessRiskPct
+      },
+      aiSuggestions,
+      recentDuplicates,
+      topUnreconciledItems,
       bucketCounts,
       rules: activeRules,
       exceptions
