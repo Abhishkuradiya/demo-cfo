@@ -171,6 +171,24 @@ const initPgTables = async () => {
     `);
  
     await client.query(`
+      CREATE TABLE IF NOT EXISTS bookkeeping_rules (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        rule_code VARCHAR(100) NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        category VARCHAR(100) NOT NULL,
+        severity VARCHAR(50) NOT NULL,
+        is_enabled BOOLEAN DEFAULT TRUE,
+        condition_type VARCHAR(100),
+        config_json JSONB DEFAULT '{}'::jsonb,
+        rationale_template TEXT,
+        is_custom BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, rule_code)
+      );
+    `);
+
+    await client.query(`
       CREATE TABLE IF NOT EXISTS inventory_items (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -2878,5 +2896,80 @@ export const db = {
   },
   writeJsonDb: (data: any): void => {
     return writeJsonDb(data);
+  },
+
+  getTenantBookkeepingRules: async (tenantId: number): Promise<any[]> => {
+    if (isPgConnected) {
+      try {
+        const res = await pgPool.query(
+          `SELECT id, tenant_id, rule_code as "ruleCode", name, category, severity, is_enabled as "isEnabled",
+                  condition_type as "conditionType", config_json as "configJson", rationale_template as "rationaleTemplate",
+                  is_custom as "isCustom", created_at as "createdAt"
+           FROM bookkeeping_rules
+           WHERE tenant_id = $1
+           ORDER BY is_custom DESC, id ASC`,
+          [tenantId]
+        );
+        if (res.rows && res.rows.length > 0) {
+          return res.rows;
+        }
+      } catch (e) {
+        console.error("Database query failed in getTenantBookkeepingRules:", e);
+      }
+    }
+    const json: any = readJsonDb();
+    const rules = (json.bookkeeping_rules || []).filter((r: any) => r.tenant_id === tenantId);
+    if (rules.length > 0) return rules;
+    return [];
+  },
+
+  saveTenantBookkeepingRule: async (tenantId: number, rule: any): Promise<void> => {
+    const ruleCode = rule.ruleCode || `CUSTOM_RULE_${Date.now()}`;
+    const name = rule.name || 'Custom Audit Rule';
+    const category = rule.category || 'CUSTOM_POLICY';
+    const severity = rule.severity || 'REVIEW_REQUIRED';
+    const isEnabled = rule.isEnabled !== undefined ? rule.isEnabled : true;
+    const conditionType = rule.conditionType || 'CUSTOM_CONSTRAINT';
+    const configJson = rule.configJson || {};
+    const rationaleTemplate = rule.rationaleTemplate || 'User custom policy violation';
+    const isCustom = rule.isCustom !== undefined ? rule.isCustom : true;
+
+    if (isPgConnected) {
+      try {
+        await pgPool.query(
+          `INSERT INTO bookkeeping_rules (tenant_id, rule_code, name, category, severity, is_enabled, condition_type, config_json, rationale_template, is_custom, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP)
+           ON CONFLICT (tenant_id, rule_code)
+           DO UPDATE SET name = $3, category = $4, severity = $5, is_enabled = $6, condition_type = $7, config_json = $8, rationale_template = $9, is_custom = $10`,
+          [tenantId, ruleCode, name, category, severity, isEnabled, conditionType, JSON.stringify(configJson), rationaleTemplate, isCustom]
+        );
+        return;
+      } catch (e) {
+        console.error("Database query failed in saveTenantBookkeepingRule:", e);
+      }
+    }
+    const json: any = readJsonDb();
+    if (!json.bookkeeping_rules) json.bookkeeping_rules = [];
+    const idx = json.bookkeeping_rules.findIndex((r: any) => r.tenant_id === tenantId && r.ruleCode === ruleCode);
+    const rec = { tenant_id: tenantId, ruleCode, name, category, severity, isEnabled, conditionType, configJson, rationaleTemplate, isCustom };
+    if (idx >= 0) json.bookkeeping_rules[idx] = rec;
+    else json.bookkeeping_rules.push(rec);
+    writeJsonDb(json);
+  },
+
+  deleteTenantBookkeepingRule: async (tenantId: number, ruleCode: string): Promise<void> => {
+    if (isPgConnected) {
+      try {
+        await pgPool.query(`DELETE FROM bookkeeping_rules WHERE tenant_id = $1 AND rule_code = $2`, [tenantId, ruleCode]);
+        return;
+      } catch (e) {
+        console.error("Database query failed in deleteTenantBookkeepingRule:", e);
+      }
+    }
+    const json: any = readJsonDb();
+    if (json.bookkeeping_rules) {
+      json.bookkeeping_rules = json.bookkeeping_rules.filter((r: any) => !(r.tenant_id === tenantId && r.ruleCode === ruleCode));
+      writeJsonDb(json);
+    }
   }
 };

@@ -93,6 +93,7 @@ export function Sidebar() {
       hasDropdown: true,
       subItems: [
         { name: 'Xero Dashboard', href: '/overview' },
+        { name: 'CFO Bookkeeping Health', href: '/bookkeeping-health' },
         { name: 'Sales Dashboard', href: '/sales' },
         { name: 'Unified AP & AR Analytics', href: '/ap-ar-analytics' },
         { name: 'Account Receivable', href: '/invoices' },
