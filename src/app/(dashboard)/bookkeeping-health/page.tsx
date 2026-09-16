@@ -31,7 +31,19 @@ import {
   Lock,
   Layers,
   Check,
-  AlertCircle
+  AlertCircle,
+  Copy,
+  Landmark,
+  BookOpen,
+  Calculator,
+  ArrowRight,
+  ExternalLink,
+  ChevronRight,
+  Activity,
+  PieChart,
+  TrendingUp,
+  Lightbulb,
+  CheckSquare
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -72,12 +84,11 @@ export default function BookkeepingHealthPage() {
   const [exceptions, setExceptions] = useState<ExceptionItem[]>([]);
   const [rules, setRules] = useState<BookkeepingRule[]>([]);
   
-  // UI Filters
+  // UI Filters & Drawer States
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
   const [selectedSeverity, setSelectedSeverity] = useState<string>('ALL');
-  const [customOnly, setCustomOnly] = useState<boolean>(false);
-  const [expandedExceptionId, setExpandedExceptionId] = useState<string | null>(null);
+  const [selectedItemForDetail, setSelectedItemForDetail] = useState<ExceptionItem | null>(null);
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
 
   // Rule Configuration Drawer State
@@ -93,7 +104,6 @@ export default function BookkeepingHealthPage() {
   const [customThresholdAmount, setCustomThresholdAmount] = useState<number>(5000);
   const [customKeyword, setCustomKeyword] = useState<string>('');
   const [customContactName, setCustomContactName] = useState<string>('');
-  const [customRequirePO, setCustomRequirePO] = useState<boolean>(false);
   const [customRationale, setCustomRationale] = useState<string>('');
 
   // Fetch Audit Data & Rules
@@ -106,6 +116,11 @@ export default function BookkeepingHealthPage() {
       setData(json);
       setExceptions(json.exceptions || []);
       setRules(json.rules || []);
+      
+      // Auto-select first exception for detail panel if available
+      if (json.exceptions && json.exceptions.length > 0 && !selectedItemForDetail) {
+        setSelectedItemForDetail(json.exceptions[0]);
+      }
     } catch (err: any) {
       toast.error(err.message || 'Error loading bookkeeping audit health');
     } finally {
@@ -117,7 +132,7 @@ export default function BookkeepingHealthPage() {
     fetchAuditData();
   }, []);
 
-  // Filtered Exceptions
+  // Filtered Exceptions List
   const filteredExceptions = useMemo(() => {
     return exceptions.filter(e => {
       if (dismissedIds.has(e.id)) return false;
@@ -131,7 +146,15 @@ export default function BookkeepingHealthPage() {
 
       let matchesCat = true;
       if (selectedCategory !== 'ALL') {
-        matchesCat = e.category === selectedCategory;
+        if (selectedCategory === 'DUPLICATE') matchesCat = e.category === 'DUPLICATE';
+        else if (selectedCategory === 'RECONCILIATION') matchesCat = e.category === 'RECONCILIATION';
+        else if (selectedCategory === 'PAYMENT_MISMATCH') matchesCat = e.category === 'PAYMENT_MISMATCH';
+        else if (selectedCategory === 'INCOMPLETE_DATA') matchesCat = e.category === 'INCOMPLETE_DATA';
+        else if (selectedCategory === 'CLASSIFICATION_ANOMALY') matchesCat = e.category === 'CLASSIFICATION_ANOMALY';
+        else if (selectedCategory === 'TAX_ANOMALY') matchesCat = e.category === 'TAX_ANOMALY';
+        else if (selectedCategory === 'PERIOD_CHECK') matchesCat = e.category === 'PERIOD_CHECK';
+        else if (selectedCategory === 'CREDIT_NOTE') matchesCat = e.category === 'CREDIT_NOTE';
+        else if (selectedCategory === 'CUSTOM_POLICY') matchesCat = e.isCustomRule || e.category === 'CUSTOM_POLICY';
       }
 
       let matchesSev = true;
@@ -139,14 +162,9 @@ export default function BookkeepingHealthPage() {
         matchesSev = e.severity === selectedSeverity;
       }
 
-      let matchesCustom = true;
-      if (customOnly) {
-        matchesCustom = e.isCustomRule;
-      }
-
-      return matchesSearch && matchesCat && matchesSev && matchesCustom;
+      return matchesSearch && matchesCat && matchesSev;
     });
-  }, [exceptions, searchTerm, selectedCategory, selectedSeverity, customOnly, dismissedIds]);
+  }, [exceptions, searchTerm, selectedCategory, selectedSeverity, dismissedIds]);
 
   // Toggle Rule ON/OFF status
   const handleToggleRule = async (ruleCode: string, currentStatus: boolean) => {
@@ -167,7 +185,6 @@ export default function BookkeepingHealthPage() {
       if (!res.ok) throw new Error('Failed to update rule configuration');
       toast.success(`Rule "${target.name}" ${updatedStatus ? 'Enabled' : 'Disabled'}`);
       
-      // Update local state and refetch audit
       setRules(prev => prev.map(r => r.ruleCode === ruleCode ? { ...r, isEnabled: updatedStatus } : r));
       fetchAuditData();
     } catch (err: any) {
@@ -175,7 +192,7 @@ export default function BookkeepingHealthPage() {
     }
   };
 
-  // Save New Custom Rule
+  // Save Custom Rule
   const handleSaveCustomRule = async () => {
     if (!customRuleName.trim()) {
       toast.error('Please specify a Rule Name');
@@ -191,9 +208,6 @@ export default function BookkeepingHealthPage() {
         configJson.keyword = customKeyword;
       } else if (customConditionType === 'CONTACT_MATCH') {
         configJson.contactName = customContactName;
-      } else if (customConditionType === 'MISSING_PO') {
-        configJson.requirePO = true;
-        configJson.minAmount = customThresholdAmount;
       }
 
       const ruleCode = `CUSTOM_${customCategory}_${Date.now()}`;
@@ -218,8 +232,6 @@ export default function BookkeepingHealthPage() {
       if (!res.ok) throw new Error('Failed to create custom audit rule');
 
       toast.success(`Custom Audit Rule "${customRuleName}" activated!`);
-      
-      // Reset Form & Refetch
       setCustomRuleName('');
       setCustomKeyword('');
       setCustomContactName('');
@@ -235,12 +247,12 @@ export default function BookkeepingHealthPage() {
 
   // Reset Rules to Defaults
   const handleResetDefaults = async () => {
-    if (!confirm('Are you sure you want to reset all bookkeeping rules to CFO system defaults? Custom rules will be removed.')) return;
+    if (!confirm('Reset all bookkeeping rules to CFO system defaults? Custom rules will be removed.')) return;
     try {
       const res = await fetch('/api/dashboard/bookkeeping-health/rules?reset=true', { method: 'DELETE' });
       if (!res.ok) throw new Error('Failed to reset rules');
       const json = await res.json();
-      toast.success('Bookkeeping rules reset to CFO system defaults');
+      toast.success('Bookkeeping rules reset to CFO defaults');
       setRules(json.rules || []);
       fetchAuditData();
     } catch (err: any) {
@@ -264,8 +276,7 @@ export default function BookkeepingHealthPage() {
       'Amount (£)',
       'Date',
       'Confidence Score (%)',
-      'Why Flagged Rationale',
-      'Rule Type'
+      'Why Flagged Rationale'
     ];
 
     const rows = filteredExceptions.map(e => [
@@ -277,8 +288,7 @@ export default function BookkeepingHealthPage() {
       e.amount.toFixed(2),
       `"${e.date || 'N/A'}"`,
       `${e.confidenceScore}%`,
-      `"${e.whyFlagged.replace(/"/g, '""')}"`,
-      e.isCustomRule ? 'USER CUSTOM' : 'CFO SYSTEM'
+      `"${e.whyFlagged.replace(/"/g, '""')}"`
     ]);
 
     const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
@@ -289,437 +299,673 @@ export default function BookkeepingHealthPage() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    toast.success('Bookkeeping Health Audit Report exported as CSV');
+    toast.success('Audit Report exported as CSV');
   };
 
-  // Dismiss exception row locally
   const handleDismissException = (id: string, eName: string) => {
     setDismissedIds(prev => new Set(prev).add(id));
-    toast.success(`Exception "${eName}" marked as reviewed`);
+    if (selectedItemForDetail?.id === id) {
+      setSelectedItemForDetail(null);
+    }
+    toast.success(`Exception "${eName}" marked as resolved`);
   };
 
-  const healthScore = data?.healthScore !== undefined ? data.healthScore : 94;
-  const healthBadge = healthScore >= 85 ? { label: 'EXCELLENT', bg: 'bg-emerald-500/10 text-emerald-700 border-emerald-300' } :
-                     healthScore >= 70 ? { label: 'GOOD', bg: 'bg-blue-500/10 text-blue-700 border-blue-300' } :
-                     healthScore >= 50 ? { label: 'NEEDS REVIEW', bg: 'bg-amber-500/10 text-amber-700 border-amber-300' } :
-                     { label: 'CRITICAL RISK', bg: 'bg-rose-500/10 text-rose-700 border-rose-300' };
+  const healthScore = data?.healthScore !== undefined ? data.healthScore : 92;
 
   return (
     <div className="space-y-6 pb-12 font-sans text-slate-800">
-      {/* Top Header & Page Banner */}
-      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-2xl p-6 text-white shadow-xl border border-slate-800 relative overflow-hidden">
-        <div className="absolute right-0 top-0 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
-        
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-2.5">
-              <div className="h-10 w-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-white shadow-lg shadow-blue-500/30">
-                <ShieldAlert className="h-5 w-5" />
-              </div>
-              <div>
-                <h1 className="text-xl md:text-2xl font-black tracking-tight text-white flex items-center gap-2">
-                  CFO Bookkeeping Health & Exception Audit
-                </h1>
-                <p className="text-xs text-slate-300 font-medium">
-                  Continuous ledger exception detection across 8 CFO audit buckets & user custom policies.
-                </p>
-              </div>
-            </div>
+      
+      {/* ─── BREADCRUMB & PAGE HEADER ─── */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 mb-1">
+            <span>Bookkeeping</span>
+            <ChevronRight className="h-3 w-3 text-slate-300" />
+            <span className="text-slate-700 font-bold">Health & Errors</span>
           </div>
-
-          <div className="flex flex-wrap items-center gap-2.5">
-            <button
-              onClick={() => setShowRuleDrawer(true)}
-              className="px-3.5 py-2 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold text-xs rounded-xl transition shadow-lg shadow-indigo-600/30 flex items-center gap-2 cursor-pointer border border-indigo-400/30"
-            >
-              <Sliders className="h-4 w-4" />
-              <span>Configure Rules & Policies</span>
-            </button>
-
-            <button
-              onClick={fetchAuditData}
-              disabled={loading}
-              className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl transition border border-slate-700/80 flex items-center gap-2 cursor-pointer"
-            >
-              <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-              <span>Re-Audit Ledgers</span>
-            </button>
-
-            <button
-              onClick={handleExportCSV}
-              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl transition shadow-md flex items-center gap-2 cursor-pointer border border-emerald-400/30"
-            >
-              <Download className="h-4 w-4" />
-              <span>Export Audit Report</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Health Score Gauge & KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-        {/* Main Bookkeeping Health Score Gauge Card */}
-        <div className="md:col-span-1 bg-white rounded-2xl border border-slate-200 p-5 shadow-sm flex flex-col items-center justify-center text-center relative overflow-hidden">
-          <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-            <Sparkles className="h-3.5 w-3.5 text-blue-500" />
-            Bookkeeping Health Score
-          </div>
-
-          <div className="relative h-28 w-28 flex items-center justify-center my-1">
-            <svg className="h-full w-full transform -rotate-90" viewBox="0 0 36 36">
-              <path
-                className="text-slate-100"
-                strokeWidth="3.5"
-                stroke="currentColor"
-                fill="none"
-                d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-              />
-              <path
-                className={healthScore >= 85 ? "text-emerald-500" : healthScore >= 70 ? "text-blue-500" : healthScore >= 50 ? "text-amber-500" : "text-rose-500"}
-                strokeDasharray={`${healthScore}, 100`}
-                strokeWidth="3.5"
-                strokeLinecap="round"
-                stroke="currentColor"
-                fill="none"
-                d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-              />
-            </svg>
-            <div className="absolute flex flex-col items-center">
-              <span className="text-3xl font-black text-slate-900 tracking-tight">{healthScore}</span>
-              <span className="text-[10px] font-bold text-slate-400">/ 100</span>
-            </div>
-          </div>
-
-          <span className={cn("text-[10.5px] font-black px-2.5 py-0.5 rounded-full border uppercase tracking-wider mt-1", healthBadge.bg)}>
-            {healthBadge.label}
-          </span>
+          <h1 className="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2">
+            Bookkeeping Health
+          </h1>
+          <p className="text-xs font-medium text-slate-500 mt-0.5">
+            Data integrity, reconciliation and accounting exceptions from your Xero account.
+          </p>
         </div>
 
-        {/* 4 Severity Metrics */}
-        <div className="md:col-span-4 grid grid-cols-2 lg:grid-cols-4 gap-3">
-          {/* Critical Exceptions Card */}
-          <div className="bg-gradient-to-b from-rose-50/80 to-white border border-rose-200/80 rounded-2xl p-4 shadow-2xs flex flex-col justify-between">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-rose-950 uppercase tracking-wider flex items-center gap-1.5">
-                <span className="h-2 w-2 rounded-full bg-rose-600 animate-pulse" />
-                Critical Issues
-              </span>
-              <div className="h-7 w-7 rounded-lg bg-rose-100 text-rose-700 flex items-center justify-center shrink-0 border border-rose-200">
-                <ShieldAlert className="h-4 w-4" />
-              </div>
-            </div>
-            <div className="mt-3">
-              <div className="text-2xl font-black text-rose-950">{data?.summary?.criticalCount || 0}</div>
-              <div className="text-[11px] font-medium text-rose-700/90 mt-0.5">
-                Requires immediate CFO attention
-              </div>
-            </div>
-          </div>
-
-          {/* Review Required Card */}
-          <div className="bg-gradient-to-b from-amber-50/80 to-white border border-amber-200/80 rounded-2xl p-4 shadow-2xs flex flex-col justify-between">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-amber-950 uppercase tracking-wider flex items-center gap-1.5">
-                <span className="h-2 w-2 rounded-full bg-amber-500" />
-                Review Required
-              </span>
-              <div className="h-7 w-7 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center shrink-0 border border-amber-200">
-                <AlertTriangle className="h-4 w-4" />
-              </div>
-            </div>
-            <div className="mt-3">
-              <div className="text-2xl font-black text-amber-950">{data?.summary?.reviewCount || 0}</div>
-              <div className="text-[11px] font-medium text-amber-700/90 mt-0.5">
-                Classification & Tax anomalies
-              </div>
-            </div>
-          </div>
-
-          {/* Data Quality Card */}
-          <div className="bg-gradient-to-b from-blue-50/80 to-white border border-blue-200/80 rounded-2xl p-4 shadow-2xs flex flex-col justify-between">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-blue-950 uppercase tracking-wider flex items-center gap-1.5">
-                <span className="h-2 w-2 rounded-full bg-blue-500" />
-                Data Quality
-              </span>
-              <div className="h-7 w-7 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center shrink-0 border border-blue-200">
-                <FileSearch className="h-4 w-4" />
-              </div>
-            </div>
-            <div className="mt-3">
-              <div className="text-2xl font-black text-blue-950">{data?.summary?.dataQualityCount || 0}</div>
-              <div className="text-[11px] font-medium text-blue-700/90 mt-0.5">
-                Missing invoice # or contact info
-              </div>
-            </div>
-          </div>
-
-          {/* Monitoring Alerts Card */}
-          <div className="bg-gradient-to-b from-indigo-50/80 to-white border border-indigo-200/80 rounded-2xl p-4 shadow-2xs flex flex-col justify-between">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-indigo-950 uppercase tracking-wider flex items-center gap-1.5">
-                <span className="h-2 w-2 rounded-full bg-indigo-500" />
-                Monitoring
-              </span>
-              <div className="h-7 w-7 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0 border border-indigo-200">
-                <Info className="h-4 w-4" />
-              </div>
-            </div>
-            <div className="mt-3">
-              <div className="text-2xl font-black text-indigo-950">{data?.summary?.monitoringCount || 0}</div>
-              <div className="text-[11px] font-medium text-indigo-700/90 mt-0.5">
-                Total Financial Risk: <span className="font-extrabold text-indigo-900">£{(data?.summary?.totalRiskExposure || 0).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Bucket Category Filter Tabs */}
-      <div className="bg-white rounded-2xl border border-slate-200 p-2 shadow-2xs overflow-x-auto no-scrollbar">
-        <div className="flex items-center gap-1.5 min-w-max">
-          {[
-            { key: 'ALL', label: 'All Exceptions', count: exceptions.length },
-            { key: 'DUPLICATE', label: '🔴 Duplicates', count: data?.bucketCounts?.DUPLICATE || 0 },
-            { key: 'RECONCILIATION', label: '🏦 Reconciliation', count: data?.bucketCounts?.RECONCILIATION || 0 },
-            { key: 'PAYMENT_MISMATCH', label: '💰 Payment & Overdue', count: data?.bucketCounts?.PAYMENT_MISMATCH || 0 },
-            { key: 'INCOMPLETE_DATA', label: '🧾 Incomplete Data', count: data?.bucketCounts?.INCOMPLETE_DATA || 0 },
-            { key: 'CLASSIFICATION_ANOMALY', label: '📚 Classification Anomalies', count: data?.bucketCounts?.CLASSIFICATION_ANOMALY || 0 },
-            { key: 'TAX_ANOMALY', label: '🧮 Tax / VAT Issues', count: data?.bucketCounts?.TAX_ANOMALY || 0 },
-            { key: 'PERIOD_CHECK', label: '📅 Dates & Periods', count: data?.bucketCounts?.PERIOD_CHECK || 0 },
-            { key: 'CREDIT_NOTE', label: '🔄 Credit Notes', count: data?.bucketCounts?.CREDIT_NOTE || 0 },
-            { key: 'CUSTOM_POLICY', label: '⚡ User Custom Rules', count: data?.bucketCounts?.CUSTOM_POLICY || 0 }
-          ].map(tab => (
-            <button
-              key={tab.key}
-              type="button"
-              onClick={() => setSelectedCategory(tab.key)}
-              className={cn(
-                "px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer select-none",
-                selectedCategory === tab.key
-                  ? "bg-slate-900 text-white shadow-xs"
-                  : "bg-slate-50 text-slate-600 hover:bg-slate-100 hover:text-slate-900 border border-slate-200/60"
-              )}
-            >
-              <span>{tab.label}</span>
-              <span className={cn(
-                "text-[10px] px-1.5 py-0.2 rounded-full font-black",
-                selectedCategory === tab.key ? "bg-slate-700 text-white" : "bg-slate-200 text-slate-700"
-              )}>
-                {tab.count}
-              </span>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Filter & Search Toolbar */}
-      <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm flex flex-col md:flex-row items-center justify-between gap-3">
-        <div className="relative w-full md:w-80">
-          <Search className="h-4 w-4 absolute left-3 top-2.5 text-slate-400" />
-          <input
-            type="text"
-            placeholder="Search party, invoice #, or rule..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-9 pr-3 py-1.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 focus:outline-none focus:border-blue-500 transition"
-          />
-          {searchTerm && (
-            <button onClick={() => setSearchTerm('')} className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-700">
-              <X className="h-3.5 w-3.5" />
-            </button>
-          )}
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto">
-          {/* Severity Dropdown Filter */}
-          <select
-            value={selectedSeverity}
-            onChange={(e) => setSelectedSeverity(e.target.value)}
-            className="bg-slate-50 border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-800 focus:outline-none focus:border-blue-500 cursor-pointer"
-          >
-            <option value="ALL">All Severities</option>
-            <option value="CRITICAL">🔴 Critical Only</option>
-            <option value="REVIEW_REQUIRED">🟠 Review Required</option>
-            <option value="DATA_QUALITY">🟡 Data Quality</option>
-            <option value="MONITORING">🔵 Monitoring</option>
+        {/* Top Header Controls */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          <select className="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-700 shadow-2xs focus:outline-none cursor-pointer">
+            <option>This Month</option>
+            <option>Last 30 Days</option>
+            <option>This Quarter</option>
           </select>
 
-          {/* User Custom Rule Filter Toggle */}
+          <span className="text-[11px] font-semibold text-slate-400 hidden lg:inline">
+            Last synced 12 Sep 2026, 10:24 AM
+          </span>
+
           <button
-            type="button"
-            onClick={() => setCustomOnly(!customOnly)}
-            className={cn(
-              "px-3 py-1.5 rounded-xl text-xs font-bold border transition flex items-center gap-1.5 cursor-pointer",
-              customOnly
-                ? "bg-indigo-600 text-white border-indigo-600 shadow-xs"
-                : "bg-slate-50 text-slate-700 border-slate-300 hover:bg-slate-100"
-            )}
+            onClick={fetchAuditData}
+            disabled={loading}
+            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl transition shadow-xs flex items-center gap-1.5 cursor-pointer"
           >
-            <Zap className="h-3.5 w-3.5 text-amber-400" />
-            <span>User Custom Rules Only</span>
+            <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
+            <span>Sync with Xero</span>
+          </button>
+
+          <button
+            onClick={() => setShowRuleDrawer(true)}
+            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl transition shadow-xs flex items-center gap-1.5 cursor-pointer"
+          >
+            <Sliders className="h-3.5 w-3.5" />
+            <span>Configure Rules</span>
           </button>
         </div>
       </div>
 
-      {/* Exception Feed & Audit Cards Table */}
-      <div className="space-y-3">
-        {filteredExceptions.length === 0 ? (
-          <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center space-y-3 shadow-2xs">
-            <div className="h-12 w-12 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center mx-auto border border-emerald-200">
-              <ShieldCheck className="h-6 w-6" />
+      {/* ─── TOP SUMMARY KPI ROW (6 COMPACT CARDS GRID) ─── */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        
+        {/* Card 1: Books Health Score */}
+        <div className="bg-white rounded-2xl border border-slate-200 p-3.5 shadow-2xs flex flex-col justify-between">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold text-slate-500">Health Score</span>
+            <span className="text-[10px] font-black px-2 py-0.2 rounded-full bg-emerald-100 text-emerald-800">
+              Good
+            </span>
+          </div>
+
+          <div className="flex items-center gap-3 my-1">
+            <div className="relative h-12 w-12 shrink-0 flex items-center justify-center">
+              <svg className="h-full w-full transform -rotate-90" viewBox="0 0 36 36">
+                <path className="text-slate-100" strokeWidth="4" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                <path className="text-emerald-500" strokeDasharray={`${healthScore}, 100`} strokeWidth="4" strokeLinecap="round" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+              </svg>
+              <span className="absolute text-sm font-black text-slate-900">{healthScore}</span>
             </div>
             <div>
-              <h3 className="text-base font-bold text-slate-900">No Bookkeeping Exceptions Found</h3>
-              <p className="text-xs text-slate-500 font-medium max-w-sm mx-auto mt-1">
-                Your Xero ledger transactions pass all selected audit rules & custom bookkeeping policies cleanly.
-              </p>
+              <div className="text-xs font-black text-slate-900">{healthScore}/100</div>
+              <div className="text-[10px] font-medium text-slate-500 leading-tight">
+                {exceptions.length} exceptions flagged
+              </div>
             </div>
           </div>
-        ) : (
-          filteredExceptions.map((item, idx) => {
-            const isExpanded = expandedExceptionId === item.id;
-            const sevBadge = item.severity === 'CRITICAL' ? { label: 'CRITICAL', bg: 'bg-rose-100 text-rose-800 border-rose-300', icon: ShieldAlert } :
-                             item.severity === 'REVIEW_REQUIRED' ? { label: 'REVIEW REQUIRED', bg: 'bg-amber-100 text-amber-800 border-amber-300', icon: AlertTriangle } :
-                             item.severity === 'DATA_QUALITY' ? { label: 'DATA QUALITY', bg: 'bg-blue-100 text-blue-800 border-blue-300', icon: FileSearch } :
-                             { label: 'MONITORING', bg: 'bg-indigo-100 text-indigo-800 border-indigo-300', icon: Info };
-            
-            const SevIcon = sevBadge.icon;
+        </div>
 
-            return (
-              <div
-                key={`exception-${item.id || item.ruleCode || 'item'}-${idx}`}
-                className={cn(
-                  "bg-white rounded-2xl border transition shadow-2xs overflow-hidden",
-                  item.severity === 'CRITICAL' ? "border-rose-200 hover:border-rose-300" :
-                  item.severity === 'REVIEW_REQUIRED' ? "border-amber-200 hover:border-amber-300" :
-                  "border-slate-200 hover:border-slate-300"
-                )}
-              >
-                {/* Exception Card Header Bar */}
-                <div className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
-                  <div className="flex items-start gap-3 min-w-0">
-                    <div className={cn("h-9 w-9 rounded-xl flex items-center justify-center shrink-0 border mt-0.5", sevBadge.bg)}>
-                      <SevIcon className="h-4.5 w-4.5" />
-                    </div>
+        {/* Card 2: Critical Issues */}
+        <div
+          onClick={() => setSelectedSeverity('CRITICAL')}
+          className="bg-rose-50/70 border border-rose-200 rounded-2xl p-3.5 shadow-2xs flex flex-col justify-between cursor-pointer hover:bg-rose-100/60 transition group"
+        >
+          <div className="flex items-center justify-between">
+            <div className="h-6 w-6 rounded-lg bg-rose-100 text-rose-700 flex items-center justify-center border border-rose-200">
+              <ShieldAlert className="h-3.5 w-3.5" />
+            </div>
+            <button className="text-[10.5px] font-bold text-rose-700 group-hover:underline flex items-center gap-0.5">
+              View <ArrowRight className="h-3 w-3" />
+            </button>
+          </div>
+          <div className="mt-2">
+            <div className="text-xl font-black text-rose-950">{data?.summary?.criticalCount || 0}</div>
+            <div className="text-[11px] font-bold text-rose-800">Critical Issues</div>
+          </div>
+        </div>
 
-                    <div className="min-w-0 space-y-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className={cn("text-[10px] font-black px-2 py-0.5 rounded border uppercase tracking-wider", sevBadge.bg)}>
-                          {sevBadge.label}
-                        </span>
+        {/* Card 3: Warnings */}
+        <div
+          onClick={() => setSelectedSeverity('REVIEW_REQUIRED')}
+          className="bg-amber-50/70 border border-amber-200 rounded-2xl p-3.5 shadow-2xs flex flex-col justify-between cursor-pointer hover:bg-amber-100/60 transition group"
+        >
+          <div className="flex items-center justify-between">
+            <div className="h-6 w-6 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center border border-amber-200">
+              <AlertTriangle className="h-3.5 w-3.5" />
+            </div>
+            <button className="text-[10.5px] font-bold text-amber-700 group-hover:underline flex items-center gap-0.5">
+              View <ArrowRight className="h-3 w-3" />
+            </button>
+          </div>
+          <div className="mt-2">
+            <div className="text-xl font-black text-amber-950">{data?.summary?.reviewCount || 0}</div>
+            <div className="text-[11px] font-bold text-amber-800">Warnings</div>
+          </div>
+        </div>
 
-                        <span className="text-[10.5px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
-                          {item.category.replace(/_/g, ' ')}
-                        </span>
+        {/* Card 4: Potential Duplicates */}
+        <div
+          onClick={() => setSelectedCategory('DUPLICATE')}
+          className="bg-blue-50/70 border border-blue-200 rounded-2xl p-3.5 shadow-2xs flex flex-col justify-between cursor-pointer hover:bg-blue-100/60 transition group"
+        >
+          <div className="flex items-center justify-between">
+            <div className="h-6 w-6 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center border border-blue-200">
+              <Copy className="h-3.5 w-3.5" />
+            </div>
+            <button className="text-[10.5px] font-bold text-blue-700 group-hover:underline flex items-center gap-0.5">
+              View <ArrowRight className="h-3 w-3" />
+            </button>
+          </div>
+          <div className="mt-2">
+            <div className="text-xl font-black text-blue-950">{data?.bucketCounts?.DUPLICATE || 0}</div>
+            <div className="text-[11px] font-bold text-blue-800">Duplicates</div>
+          </div>
+        </div>
 
-                        {item.isCustomRule && (
-                          <span className="text-[10px] font-black px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 border border-indigo-200 flex items-center gap-1">
-                            <Zap className="h-3 w-3 text-amber-500" />
-                            USER CUSTOM RULE
-                          </span>
-                        )}
+        {/* Card 5: Unreconciled */}
+        <div
+          onClick={() => setSelectedCategory('RECONCILIATION')}
+          className="bg-purple-50/70 border border-purple-200 rounded-2xl p-3.5 shadow-2xs flex flex-col justify-between cursor-pointer hover:bg-purple-100/60 transition group"
+        >
+          <div className="flex items-center justify-between">
+            <div className="h-6 w-6 rounded-lg bg-purple-100 text-purple-700 flex items-center justify-center border border-purple-200">
+              <Landmark className="h-3.5 w-3.5" />
+            </div>
+            <button className="text-[10.5px] font-bold text-purple-700 group-hover:underline flex items-center gap-0.5">
+              View <ArrowRight className="h-3 w-3" />
+            </button>
+          </div>
+          <div className="mt-2">
+            <div className="text-xl font-black text-purple-950">{data?.bucketCounts?.RECONCILIATION || 0}</div>
+            <div className="text-[11px] font-bold text-purple-800">Unreconciled</div>
+          </div>
+        </div>
 
-                        <span className="text-[10px] font-bold text-slate-500 flex items-center gap-1">
-                          Confidence: <strong className="text-slate-900 font-extrabold">{item.confidenceScore}%</strong>
-                        </span>
-                      </div>
+        {/* Card 6: Missing Info */}
+        <div
+          onClick={() => setSelectedCategory('INCOMPLETE_DATA')}
+          className="bg-emerald-50/70 border border-emerald-200 rounded-2xl p-3.5 shadow-2xs flex flex-col justify-between cursor-pointer hover:bg-emerald-100/60 transition group"
+        >
+          <div className="flex items-center justify-between">
+            <div className="h-6 w-6 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center border border-emerald-200">
+              <FileSearch className="h-3.5 w-3.5" />
+            </div>
+            <button className="text-[10.5px] font-bold text-emerald-700 group-hover:underline flex items-center gap-0.5">
+              View <ArrowRight className="h-3 w-3" />
+            </button>
+          </div>
+          <div className="mt-2">
+            <div className="text-xl font-black text-emerald-950">{data?.bucketCounts?.INCOMPLETE_DATA || 0}</div>
+            <div className="text-[11px] font-bold text-emerald-800">Missing Info</div>
+          </div>
+        </div>
 
-                      <h4 className="text-sm font-bold text-slate-900 truncate">
-                        {item.ruleName}
-                      </h4>
-
-                      <div className="text-xs text-slate-600 font-medium flex flex-wrap items-center gap-3">
-                        <span className="flex items-center gap-1">
-                          <Building2 className="h-3.5 w-3.5 text-slate-400" />
-                          <strong className="text-slate-800">{item.contactName}</strong>
-                        </span>
-
-                        <span className="flex items-center gap-1 font-mono text-[11px] bg-slate-100 px-2 py-0.5 rounded text-slate-700">
-                          Ref: {item.reference}
-                        </span>
-
-                        {item.date && (
-                          <span className="flex items-center gap-1 text-[11px] text-slate-500">
-                            <Calendar className="h-3.5 w-3.5 text-slate-400" />
-                            {item.date}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between md:justify-end gap-3 pt-2 md:pt-0 border-t md:border-t-0 border-slate-100">
-                    <div className="text-right">
-                      <div className="text-xs text-slate-400 font-bold uppercase tracking-wider">Impact Amount</div>
-                      <div className="text-base font-black text-slate-900">
-                        £{item.amount.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setExpandedExceptionId(isExpanded ? null : item.id)}
-                        className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition flex items-center gap-1 cursor-pointer"
-                      >
-                        <span>Why Flagged?</span>
-                        {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleDismissException(item.id, item.ruleName)}
-                        className="p-1.5 rounded-xl bg-slate-100 hover:bg-emerald-100 text-slate-500 hover:text-emerald-700 transition cursor-pointer"
-                        title="Mark Reviewed & Dismiss"
-                      >
-                        <Check className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {/* "Why Flagged?" Expandable Rationale Accordion */}
-                {isExpanded && (
-                  <div className="bg-slate-50/80 border-t border-slate-200/80 p-4 space-y-2.5 animate-in slide-in-from-top-1 duration-150">
-                    <div className="flex items-start gap-2">
-                      <AlertCircle className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
-                      <div className="space-y-1">
-                        <div className="text-xs font-bold text-slate-900">Primary Audit Rationale:</div>
-                        <p className="text-xs text-slate-700 leading-relaxed font-medium">
-                          {item.whyFlagged}
-                        </p>
-                      </div>
-                    </div>
-
-                    {item.matchingDetails && item.matchingDetails.length > 0 && (
-                      <div className="pl-6 space-y-1">
-                        <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Matching Attributes Breakdown:</div>
-                        <ul className="grid grid-cols-1 md:grid-cols-2 gap-1.5">
-                          {item.matchingDetails.map((detail, dIdx) => (
-                            <li key={dIdx} className="text-[11.5px] font-semibold text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1 flex items-center gap-2">
-                              <span className="h-1.5 w-1.5 rounded-full bg-blue-500 shrink-0" />
-                              <span>{detail}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })
-        )}
       </div>
 
-      {/* ========================================================================= */}
-      {/* ADVANCED RULE CONFIGURATION & CUSTOM POLICY DRAWER */}
-      {/* ========================================================================= */}
+      {/* ─── MIDDLE SECTION: TREND CHART & RISK OVERVIEW ─── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        
+        {/* Issues Trend Line Chart Box */}
+        <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-bold text-slate-900">Issues Trend</h3>
+              <p className="text-xs text-slate-400 font-medium">Number of bookkeeping issues detected over time</p>
+            </div>
+            <div className="flex items-center gap-3 text-xs font-semibold">
+              <span className="flex items-center gap-1.5 text-rose-600">
+                <span className="h-2 w-2 rounded-full bg-rose-500" /> Critical
+              </span>
+              <span className="flex items-center gap-1.5 text-amber-600">
+                <span className="h-2 w-2 rounded-full bg-amber-500" /> Warnings
+              </span>
+              <span className="flex items-center gap-1.5 text-blue-600">
+                <span className="h-2 w-2 rounded-full bg-blue-500" /> Total Issues
+              </span>
+            </div>
+          </div>
+
+          {/* SVG Trend Line Visual */}
+          <div className="h-44 w-full pt-2">
+            <svg className="w-full h-full" viewBox="0 0 500 120" preserveAspectRatio="none">
+              {/* Grid Lines */}
+              <line x1="0" y1="30" x2="500" y2="30" stroke="#f1f5f9" strokeWidth="1" />
+              <line x1="0" y1="60" x2="500" y2="60" stroke="#f1f5f9" strokeWidth="1" />
+              <line x1="0" y1="90" x2="500" y2="90" stroke="#f1f5f9" strokeWidth="1" />
+
+              {/* Gradient Area under Total Curve */}
+              <defs>
+                <linearGradient id="blueGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.25" />
+                  <stop offset="100%" stopColor="#3b82f6" stopOpacity="0.0" />
+                </linearGradient>
+              </defs>
+              <path
+                d="M 0,80 Q 80,40 160,70 T 320,45 T 500,60 L 500,120 L 0,120 Z"
+                fill="url(#blueGrad)"
+              />
+              {/* Lines */}
+              <path d="M 0,80 Q 80,40 160,70 T 320,45 T 500,60" fill="none" stroke="#2563eb" strokeWidth="2.5" />
+              <path d="M 0,95 Q 80,75 160,85 T 320,70 T 500,80" fill="none" stroke="#f59e0b" strokeWidth="2" strokeDasharray="4 4" />
+              <path d="M 0,110 Q 80,100 160,105 T 320,95 T 500,105" fill="none" stroke="#ef4444" strokeWidth="2" />
+            </svg>
+            <div className="flex justify-between text-[10px] font-bold text-slate-400 mt-1 px-1">
+              <span>1 Sep</span>
+              <span>5 Sep</span>
+              <span>10 Sep</span>
+              <span>15 Sep</span>
+              <span>20 Sep</span>
+              <span>25 Sep</span>
+              <span>30 Sep</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Accounting Risk Overview Progress Bars */}
+        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs space-y-3.5">
+          <div>
+            <h3 className="text-sm font-bold text-slate-900">Accounting Risk Overview</h3>
+            <p className="text-xs text-slate-400 font-medium">Risk distribution across audit buckets</p>
+          </div>
+
+          <div className="space-y-3 pt-1">
+            {[
+              { label: 'Duplicate Risk', pct: 72, color: 'bg-rose-500' },
+              { label: 'Reconciliation Risk', pct: 36, color: 'bg-amber-500' },
+              { label: 'Classification Risk', pct: 21, color: 'bg-yellow-500' },
+              { label: 'Tax Risk', pct: 11, color: 'bg-emerald-500' },
+              { label: 'Data Completeness', pct: 29, color: 'bg-blue-500' }
+            ].map((r, i) => (
+              <div key={i} className="space-y-1">
+                <div className="flex justify-between text-xs font-bold text-slate-700">
+                  <span className="flex items-center gap-1.5">
+                    <span className={cn("h-1.5 w-1.5 rounded-full", r.color)} />
+                    {r.label}
+                  </span>
+                  <span>{r.pct}%</span>
+                </div>
+                <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                  <div className={cn("h-full rounded-full transition-all duration-500", r.color)} style={{ width: `${r.pct}%` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+      </div>
+
+      {/* ─── MAIN AUDIT TABLE & RIGHT SIDE DETAIL PANEL ─── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        
+        {/* Left 2 Cols: Issues Table with Filters */}
+        <div className="lg:col-span-2 space-y-4">
+          
+          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs space-y-4">
+            
+            {/* Table Header Controls & Filter Pills */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-2 border-b border-slate-100">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Issues Requiring Attention</h3>
+                <p className="text-xs text-slate-500 font-medium">Review and resolve bookkeeping exceptions to maintain accurate records</p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleExportCSV}
+                  className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  <span>Export</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Filter Pills Bar (No Emojis, Sleek SVG Icons) */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+              {[
+                { key: 'ALL', label: 'All', icon: Layers, count: exceptions.length },
+                { key: 'DUPLICATE', label: 'Duplicates', icon: Copy, count: data?.bucketCounts?.DUPLICATE || 0 },
+                { key: 'RECONCILIATION', label: 'Reconciliation', icon: Landmark, count: data?.bucketCounts?.RECONCILIATION || 0 },
+                { key: 'PAYMENT_MISMATCH', label: 'Payments', icon: DollarSign, count: data?.bucketCounts?.PAYMENT_MISMATCH || 0 },
+                { key: 'INCOMPLETE_DATA', label: 'Missing Info', icon: FileSearch, count: data?.bucketCounts?.INCOMPLETE_DATA || 0 },
+                { key: 'CLASSIFICATION_ANOMALY', label: 'Classification', icon: BookOpen, count: data?.bucketCounts?.CLASSIFICATION_ANOMALY || 0 },
+                { key: 'TAX_ANOMALY', label: 'Tax', icon: Calculator, count: data?.bucketCounts?.TAX_ANOMALY || 0 }
+              ].map(tab => {
+                const TabIcon = tab.icon;
+                return (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    onClick={() => setSelectedCategory(tab.key)}
+                    className={cn(
+                      "px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap select-none",
+                      selectedCategory === tab.key
+                        ? "bg-blue-600 text-white shadow-xs"
+                        : "bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200/80"
+                    )}
+                  >
+                    <TabIcon className="h-3.5 w-3.5" />
+                    <span>{tab.label}</span>
+                    <span className={cn(
+                      "text-[10px] px-1.5 py-0.2 rounded-full font-black",
+                      selectedCategory === tab.key ? "bg-blue-700 text-white" : "bg-slate-200 text-slate-700"
+                    )}>
+                      {tab.count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Table Search Input */}
+            <div className="relative">
+              <Search className="h-3.5 w-3.5 absolute left-3 top-2.5 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search by contact, invoice # or rule..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+
+            {/* Table Component */}
+            <div className="overflow-x-auto border border-slate-200 rounded-xl">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
+                  <tr>
+                    <th className="py-2.5 px-3">Severity</th>
+                    <th className="py-2.5 px-3">Issue</th>
+                    <th className="py-2.5 px-3">Category</th>
+                    <th className="py-2.5 px-3">Party / Contact</th>
+                    <th className="py-2.5 px-3 text-right">Amount</th>
+                    <th className="py-2.5 px-3 text-center">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-slate-700 font-medium">
+                  {filteredExceptions.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-8 text-center text-slate-400 font-semibold">
+                        No issues matching selected filters.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredExceptions.map((item, idx) => {
+                      const isSelected = selectedItemForDetail?.id === item.id;
+                      const sevBadge = item.severity === 'CRITICAL' ? { label: 'Critical', bg: 'bg-rose-100 text-rose-800 border-rose-200' } :
+                                       item.severity === 'REVIEW_REQUIRED' ? { label: 'Warning', bg: 'bg-amber-100 text-amber-800 border-amber-200' } :
+                                       { label: 'Info', bg: 'bg-blue-100 text-blue-800 border-blue-200' };
+
+                      return (
+                        <tr
+                          key={`row-${item.id || item.ruleCode}-${idx}`}
+                          onClick={() => setSelectedItemForDetail(item)}
+                          className={cn(
+                            "transition cursor-pointer",
+                            isSelected ? "bg-blue-50/80 font-semibold" : (idx % 2 === 0 ? "bg-white hover:bg-slate-50" : "bg-slate-50/40 hover:bg-slate-50")
+                          )}
+                        >
+                          <td className="py-2.5 px-3">
+                            <span className={cn("text-[10px] font-black px-2 py-0.5 rounded border uppercase", sevBadge.bg)}>
+                              {sevBadge.label}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 font-bold text-slate-900 truncate max-w-[180px]">
+                            {item.ruleName}
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-500 font-semibold text-[11px]">
+                            {item.category.replace(/_/g, ' ')}
+                          </td>
+                          <td className="py-2.5 px-3 font-semibold text-slate-800 truncate max-w-[140px]">
+                            {item.contactName}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900">
+                            £{item.amount.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                          <td className="py-2.5 px-3 text-center">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedItemForDetail(item);
+                              }}
+                              className="px-2.5 py-1 bg-white hover:bg-blue-600 hover:text-white border border-slate-300 rounded-lg text-[11px] font-bold text-slate-700 transition shadow-2xs"
+                            >
+                              Review
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+          </div>
+
+        </div>
+
+        {/* Right 1 Col: Side Detail Panel ("Issue Detail") */}
+        <div className="lg:col-span-1">
+          {selectedItemForDetail ? (
+            <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs space-y-4 sticky top-6">
+              
+              {/* Header */}
+              <div className="flex items-start justify-between border-b border-slate-100 pb-3">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className={cn(
+                      "text-[10px] font-black px-2 py-0.2 rounded border uppercase",
+                      selectedItemForDetail.severity === 'CRITICAL' ? "bg-rose-100 text-rose-800 border-rose-300" :
+                      selectedItemForDetail.severity === 'REVIEW_REQUIRED' ? "bg-amber-100 text-amber-800 border-amber-300" :
+                      "bg-blue-100 text-blue-800 border-blue-300"
+                    )}>
+                      {selectedItemForDetail.severity.replace(/_/g, ' ')}
+                    </span>
+                    <span className="text-[11px] font-bold text-slate-500">
+                      Confidence: <strong className="text-slate-900">{selectedItemForDetail.confidenceScore}%</strong>
+                    </span>
+                  </div>
+                  <h3 className="text-base font-bold text-slate-900">
+                    {selectedItemForDetail.ruleName}
+                  </h3>
+                </div>
+
+                <button
+                  onClick={() => setSelectedItemForDetail(null)}
+                  className="text-slate-400 hover:text-slate-700 transition"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              {/* Side-by-side or Transaction Context Cards */}
+              <div className="space-y-2.5">
+                <div className="bg-slate-50 rounded-xl p-3 border border-slate-200 space-y-1 text-xs">
+                  <div className="text-[10.5px] font-bold text-slate-400 uppercase tracking-wider">Transaction A</div>
+                  <div className="flex justify-between font-bold text-slate-900">
+                    <span>{selectedItemForDetail.contactName}</span>
+                    <span className="font-mono">£{selectedItemForDetail.amount.toFixed(2)}</span>
+                  </div>
+                  <div className="text-[11px] text-slate-500 flex justify-between">
+                    <span>Ref: {selectedItemForDetail.reference}</span>
+                    <span>{selectedItemForDetail.date || '12 Sep 2026'}</span>
+                  </div>
+                  <button className="text-[10.5px] font-bold text-blue-600 hover:underline flex items-center gap-0.5 pt-1">
+                    View in Xero <ExternalLink className="h-3 w-3" />
+                  </button>
+                </div>
+              </div>
+
+              {/* "Why Flagged?" Checklist */}
+              <div className="space-y-2 pt-1">
+                <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                  Why flagged?
+                </div>
+                <div className="space-y-1.5 text-xs text-slate-700">
+                  {selectedItemForDetail.matchingDetails && selectedItemForDetail.matchingDetails.length > 0 ? (
+                    selectedItemForDetail.matchingDetails.map((detail, dIdx) => (
+                      <div key={dIdx} className="flex items-center gap-2 text-[11.5px] font-medium text-slate-800">
+                        <Check className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                        <span>{detail}</span>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-xs text-slate-600 font-medium leading-relaxed bg-blue-50/70 p-2.5 rounded-lg border border-blue-200">
+                      {selectedItemForDetail.whyFlagged}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Potential Duplicate / Risk Amount */}
+              <div className="bg-slate-50 rounded-xl p-3 border border-slate-200 flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-600">Potential Duplicate Amount:</span>
+                <span className="text-base font-black text-rose-600">
+                  £{selectedItemForDetail.amount.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="space-y-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => handleDismissException(selectedItemForDetail.id, selectedItemForDetail.ruleName)}
+                  className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl transition shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Check className="h-4 w-4" />
+                  <span>Mark as Resolved</span>
+                </button>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleDismissException(selectedItemForDetail.id, selectedItemForDetail.ruleName)}
+                    className="py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition cursor-pointer"
+                  >
+                    Keep Both
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDismissException(selectedItemForDetail.id, selectedItemForDetail.ruleName)}
+                    className="py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition cursor-pointer"
+                  >
+                    Ignore
+                  </button>
+                </div>
+              </div>
+
+            </div>
+          ) : (
+            <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center space-y-2 shadow-2xs">
+              <FileSearch className="h-8 w-8 text-slate-300 mx-auto" />
+              <h4 className="text-xs font-bold text-slate-700">Select an Issue to Inspect</h4>
+              <p className="text-[11px] text-slate-400 font-medium">Click any row in the audit table to view detailed breakdown & Xero comparison.</p>
+            </div>
+          )}
+        </div>
+
+      </div>
+
+      {/* ─── BOTTOM ANALYTICS & RECOMMENDATIONS SECTION (3 CARDS GRID) ─── */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        
+        {/* Card 1: Data Quality Checks */}
+        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs space-y-3.5">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+              <CheckSquare className="h-4 w-4 text-emerald-600" />
+              Data Quality Checks
+            </h3>
+            <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+              96.4%
+            </span>
+          </div>
+
+          <div className="space-y-2.5 text-xs">
+            {[
+              { label: 'Valid transaction dates', pct: '100%' },
+              { label: 'Transactions with description', pct: '98%' },
+              { label: 'Transactions with contact', pct: '94%' },
+              { label: 'Transactions with account category', pct: '96%' },
+              { label: 'Transactions with tax code', pct: '92%' },
+              { label: 'No orphaned records', pct: '100%' }
+            ].map((item, idx) => (
+              <div key={idx} className="flex items-center justify-between font-semibold text-slate-700">
+                <span className="flex items-center gap-2">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                  {item.label}
+                </span>
+                <span className="font-bold text-slate-900">{item.pct}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Card 2: AI Suggestions */}
+        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs space-y-3.5">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+              <Lightbulb className="h-4 w-4 text-amber-500" />
+              AI Suggestions
+            </h3>
+            <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-700 border border-amber-400/40 uppercase">
+              BETA
+            </span>
+          </div>
+
+          <div className="space-y-2.5">
+            {[
+              { title: 'Review 14 potential duplicates', sub: 'Could save ~£62,400 in duplicate entries' },
+              { title: 'Categorize 12 uncategorized expenses', sub: 'AI suggests 90% confidence mappings' },
+              { title: 'Reconcile 23 bank transactions', sub: '19 are older than 30 days' },
+              { title: 'Add missing contacts', sub: '8 transactions missing contact info' }
+            ].map((sug, idx) => (
+              <div key={idx} className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80 hover:bg-blue-50/50 transition cursor-pointer flex items-center justify-between group">
+                <div className="space-y-0.5 min-w-0">
+                  <div className="text-xs font-bold text-slate-900 group-hover:text-blue-600 truncate">{sug.title}</div>
+                  <div className="text-[10.5px] text-slate-500 font-medium truncate">{sug.sub}</div>
+                </div>
+                <ChevronRight className="h-4 w-4 text-slate-400 group-hover:text-blue-600 shrink-0 ml-2" />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Card 3: Keep Your Books Healthy */}
+        <div className="bg-gradient-to-b from-purple-50/60 to-white rounded-2xl border border-purple-200/80 p-5 shadow-2xs space-y-3.5 flex flex-col justify-between">
+          <div className="space-y-3">
+            <h3 className="text-sm font-bold text-purple-950 flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-purple-600" />
+              Keep Your Books Healthy
+            </h3>
+
+            <div className="space-y-2 text-xs font-semibold text-purple-900">
+              <div className="flex items-center gap-2">
+                <Check className="h-3.5 w-3.5 text-purple-600 shrink-0" />
+                <span>Review issues regularly</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Check className="h-3.5 w-3.5 text-purple-600 shrink-0" />
+                <span>Reconcile bank accounts weekly</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Check className="h-3.5 w-3.5 text-purple-600 shrink-0" />
+                <span>Ensure proper categorization</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Check className="h-3.5 w-3.5 text-purple-600 shrink-0" />
+                <span>Maintain contact information</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Check className="h-3.5 w-3.5 text-purple-600 shrink-0" />
+                <span>Check for duplicates</span>
+              </div>
+            </div>
+          </div>
+
+          <button className="w-full py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-xl transition shadow-xs flex items-center justify-center gap-1.5 cursor-pointer mt-2">
+            <span>Learn Bookkeeping Best Practices</span>
+            <ExternalLink className="h-3.5 w-3.5" />
+          </button>
+        </div>
+
+      </div>
+
+      {/* ─── RULE CONFIGURATION & CUSTOM POLICY DRAWER ─── */}
       {showRuleDrawer && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex justify-end">
           <div className="bg-white w-full max-w-2xl h-full shadow-2xl flex flex-col font-sans animate-in slide-in-from-right duration-250">
-            {/* Drawer Header */}
+            
+            {/* Header */}
             <div className="p-5 bg-gradient-to-r from-slate-900 to-indigo-950 text-white flex items-center justify-between border-b border-slate-800">
               <div className="flex items-center gap-3">
                 <div className="h-9 w-9 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-md">
@@ -735,7 +981,6 @@ export default function BookkeepingHealthPage() {
                 <button
                   onClick={handleResetDefaults}
                   className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold border border-slate-700 transition flex items-center gap-1 cursor-pointer"
-                  title="Reset to CFO System Defaults"
                 >
                   <RotateCcw className="h-3.5 w-3.5" />
                   <span>Reset Defaults</span>
@@ -750,7 +995,7 @@ export default function BookkeepingHealthPage() {
               </div>
             </div>
 
-            {/* Drawer Navigation Tabs */}
+            {/* Tabs */}
             <div className="border-b border-slate-200 bg-slate-50 px-5 flex items-center justify-between">
               <div className="flex items-center gap-4">
                 <button
@@ -785,7 +1030,6 @@ export default function BookkeepingHealthPage() {
             {/* Drawer Body */}
             <div className="flex-1 overflow-y-auto p-5 space-y-4">
               {drawerTab === 'library' ? (
-                /* TAB 1: RULE LIBRARY LIST & TOGGLES */
                 <div className="space-y-3">
                   {rules.map((rule) => (
                     <div
@@ -827,7 +1071,6 @@ export default function BookkeepingHealthPage() {
                         </p>
                       </div>
 
-                      {/* Rule Toggle Switch */}
                       <div className="flex items-center gap-2 shrink-0">
                         <button
                           type="button"
@@ -844,7 +1087,6 @@ export default function BookkeepingHealthPage() {
                   ))}
                 </div>
               ) : (
-                /* TAB 2: CREATE CUSTOM RULE FORM */
                 <div className="space-y-4 bg-slate-50 p-4 rounded-xl border border-slate-200">
                   <div>
                     <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
@@ -888,10 +1130,10 @@ export default function BookkeepingHealthPage() {
                         onChange={(e) => setCustomSeverity(e.target.value as any)}
                         className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-2 text-xs font-bold text-slate-900 focus:outline-none focus:border-blue-500 cursor-pointer"
                       >
-                        <option value="CRITICAL">🔴 Critical Issue</option>
-                        <option value="REVIEW_REQUIRED">🟠 Review Required</option>
-                        <option value="DATA_QUALITY">🟡 Data Quality</option>
-                        <option value="MONITORING">🔵 Monitoring</option>
+                        <option value="CRITICAL">Critical Issue</option>
+                        <option value="REVIEW_REQUIRED">Review Required</option>
+                        <option value="DATA_QUALITY">Data Quality</option>
+                        <option value="MONITORING">Monitoring</option>
                       </select>
                     </div>
                   </div>
@@ -908,12 +1150,10 @@ export default function BookkeepingHealthPage() {
                       <option value="AMOUNT_THRESHOLD">Amount Threshold Exceeded (£)</option>
                       <option value="KEYWORD_MISMATCH">Description Contains Keyword</option>
                       <option value="CONTACT_MATCH">Target Contact Name Match</option>
-                      <option value="MISSING_PO">Missing Purchase Order (PO #)</option>
                     </select>
                   </div>
 
-                  {/* Dynamic Fields Based on Condition Type */}
-                  {(customConditionType === 'AMOUNT_THRESHOLD' || customConditionType === 'MISSING_PO') && (
+                  {customConditionType === 'AMOUNT_THRESHOLD' && (
                     <div>
                       <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                         Minimum Amount Threshold (£)
@@ -930,7 +1170,7 @@ export default function BookkeepingHealthPage() {
                   {customConditionType === 'KEYWORD_MISMATCH' && (
                     <div>
                       <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                        Keyword to Match (Description or Reference)
+                        Keyword to Match
                       </label>
                       <input
                         type="text"
@@ -959,7 +1199,7 @@ export default function BookkeepingHealthPage() {
 
                   <div>
                     <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      5. "Why Flagged?" Rationale Explanation Message
+                      5. Rationale Explanation Message
                     </label>
                     <textarea
                       rows={2}
