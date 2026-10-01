@@ -10,7 +10,7 @@ export function hashPassword(password: string): string {
 
 export async function POST(req: Request) {
   try {
-    const { email, password, companyName } = await req.json();
+    const { email, password, companyName, token } = await req.json();
 
     if (!email || !password || !companyName) {
       return NextResponse.json({ success: false, message: 'All fields are required' }, { status: 400 });
@@ -34,14 +34,23 @@ export async function POST(req: Request) {
     const hashedPassword = hashPassword(password);
     const user = await db.createUser(email.toLowerCase().trim(), hashedPassword, tenant.id);
 
-    // 3. Create Session Token
+    // 3. Mark invitation as Accepted if token provided
+    if (token && db.isPgActive()) {
+      try {
+        await db.query("UPDATE user_invitations SET status = 'Accepted' WHERE token = $1", [token]);
+      } catch (e) {
+        console.warn('Could not update invitation status:', e);
+      }
+    }
+
+    // 4. Create Session Token
     const sessionToken = crypto.randomBytes(32).toString('hex');
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 7); // Session expires in 7 days
 
     await db.createSession(user.id, sessionToken, expiresAt);
 
-    // 4. Create Response and set cookie
+    // 5. Create Response and set cookie
     const isHttps = req.headers.get('x-forwarded-proto') === 'https' || req.url.startsWith('https://');
     const response = NextResponse.json({
       success: true,

@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { fetchXeroResource, fetchXeroReport, refreshXeroToken } from '@/lib/xero';
+import { fetchXeroResource, fetchXeroResourcePaginated, fetchXeroReport, refreshXeroToken } from '@/lib/xero';
 import { getTenantIdFromSession } from '@/lib/auth';
 import { XeroFixedAssetsService } from '@/lib/fixedAssetsService';
 import { XeroGeneralLedgerService } from '@/lib/generalLedgerService';
 import { TaxSyncService } from '@/lib/services/TaxSyncService';
+import { CanonicalLedgerIngestionService } from '@/lib/services/CanonicalLedgerIngestionService';
  
 // GET retrieves Xero connection status and dynamic record counts for a tenant
 export async function GET(req: NextRequest) {
@@ -228,12 +229,6 @@ export async function POST(req: NextRequest) {
     } catch(e){}
  
     try {
-      const invoices = await fetchXeroResource(accessToken, xeroTenantId, 'Invoices');
-      await db.saveCachedRecords(tenantId, 'invoices', invoices || []);
-      counts.invoices = invoices?.length || 0;
-    } catch(e){}
- 
-    try {
       const payments = await fetchXeroResource(accessToken, xeroTenantId, 'Payments');
       await db.saveCachedRecords(tenantId, 'payments', payments || []);
       counts.payments = payments?.length || 0;
@@ -388,12 +383,18 @@ export async function POST(req: NextRequest) {
     // BankTransactions: Contains RECEIVE/SPEND money transactions.
     // Used by the Cash In engine to capture non-invoice cash receipts.
     try {
-      const bankTxns = await fetchXeroResource(accessToken, xeroTenantId, 'BankTransactions');
-      // Store as report (JSON blob) — avoids creating a new DB table
+      const bankTxns = await fetchXeroResourcePaginated(accessToken, xeroTenantId, 'BankTransactions');
       await db.saveReport(tenantId, 'BankTransactions', bankTxns || []);
       counts.bankTransactions = bankTxns?.length || 0;
     } catch(e) {
       console.error('Failed to sync BankTransactions:', e);
+    }
+
+    try {
+      const manualJournals = await fetchXeroResourcePaginated(accessToken, xeroTenantId, 'ManualJournals');
+      await db.saveReport(tenantId, 'ManualJournals', manualJournals || []);
+    } catch(e) {
+      console.error('Failed to sync ManualJournals:', e);
     }
 
     // Prepayments: Customer advance payments before invoice issuance.

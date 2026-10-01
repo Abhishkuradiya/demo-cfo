@@ -744,7 +744,6 @@ export function OverviewMoreCardsRow({ connected = false, loading = false }: { c
   };
 
   const loadAll = () => {
-    fetchReconciliation();
     fetchAccounts();
     fetchTracking();
     fetchCurrencies();
@@ -770,8 +769,8 @@ export function OverviewMoreCardsRow({ connected = false, loading = false }: { c
 
   if (loading) {
     return (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-        {Array.from({ length: 4 }).map((_, index) => (
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        {Array.from({ length: 3 }).map((_, index) => (
           <div key={index} className="flex flex-col bg-white p-5 rounded-lg border border-slate-200/80 shadow-2xs h-[290px] relative overflow-hidden select-none">
             <div className="border-b border-slate-100 pb-3 mb-4 flex items-center justify-between shrink-0">
               <div className="h-4 w-32 bg-slate-100 rounded animate-pulse" />
@@ -798,11 +797,7 @@ export function OverviewMoreCardsRow({ connected = false, loading = false }: { c
 
   if (!connected) {
     return (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-        <CardEmptyState 
-          title="Xero Disconnected" 
-          desc="Please connect your Xero organization to view bank reconciliation status." 
-        />
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
         <CardEmptyState 
           title="Xero Disconnected" 
           desc="Please connect your Xero organization to view your account distributions." 
@@ -820,14 +815,7 @@ export function OverviewMoreCardsRow({ connected = false, loading = false }: { c
   }
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-      <ReconciliationSummaryCard 
-        data={reconData} 
-        loading={reconLoading} 
-        error={reconError} 
-        onRetry={fetchReconciliation}
-        onNavigate={() => window.location.href = '/reports'}
-      />
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
       <ChartOfAccountsCard 
         data={accountsData} 
         loading={accountsLoading} 

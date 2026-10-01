@@ -23,13 +23,26 @@ export async function GET() {
     const activeTenant = tenantsList.find(t => t.id === session.tenant_id);
     const companyName = activeTenant ? activeTenant.name : 'My Workspace';
 
+    let isOnboarded = false;
+    if (db.isPgActive()) {
+      try {
+        const u = await db.getUserByEmail(session.email);
+        if (u && u.is_onboarded) isOnboarded = true;
+        else {
+          const prof = await db.query('SELECT id FROM organization_profiles WHERE LOWER(work_email) = LOWER($1) LIMIT 1', [session.email]);
+          if (prof.rows.length > 0) isOnboarded = true;
+        }
+      } catch (e) {}
+    }
+
     return NextResponse.json({
       success: true,
       user: {
         id: session.user_id,
         email: session.email,
         tenantId: session.tenant_id,
-        companyName
+        companyName,
+        isOnboarded
       }
     });
   } catch (err: any) {

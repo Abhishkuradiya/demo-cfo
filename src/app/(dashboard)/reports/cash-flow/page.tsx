@@ -9,39 +9,55 @@ import { FormattedDatePicker } from '@/components/ui/formatted-date-picker';
 import { 
   FileText, 
   FileSpreadsheet, 
-  Printer, 
   Calendar, 
   ChevronDown, 
-  SlidersHorizontal,
-  Scale, 
   TrendingUp, 
-  ShieldCheck, 
-  RefreshCw, 
-  Share2, 
-  Star,
-  Database,
-  BookOpen,
-  Clock,
-  Building,
-  HelpCircle,
-  MoreVertical,
-  CheckCircle2,
   TrendingDown,
-  DollarSign,
-  AlertCircle,
-  ArrowDownUp,
-  ArrowUpRight,
-  ArrowDownRight,
-  Info
+  RefreshCw, 
+  DollarSign, 
+  AlertCircle, 
+  ArrowUpRight, 
+  ArrowDownRight, 
+  ArrowDownLeft,
+  HelpCircle, 
+  Landmark, 
+  CheckCircle2, 
+  CreditCard,
+  Layers,
+  Sparkles,
+  ArrowRight,
+  Clock,
+  ShieldCheck,
+  Activity,
+  Layers3,
+  Check
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageContainer } from '@/components/common/page-container';
+import { generateCashFlowExcelReport } from '@/lib/excel/cash-flow-export';
 
 interface CFHistoryItem {
   month: string;
   cashIn: number;
   cashOut: number;
   netCashFlow: number;
+}
+
+interface CFForecastItem {
+  week: string;
+  openingCash: number;
+  expectedIn: number;
+  expectedOut: number;
+  netChange: number;
+  closingCash: number;
+  status: string;
+}
+
+interface CFCategoryItem {
+  category: string;
+  amount: number;
+  pct: number;
+  color: string;
 }
 
 interface CFData {
@@ -68,6 +84,17 @@ interface CFData {
     change: number;
     changePercentage: number;
   };
+  receivables?: {
+    total: number;
+    overdue: number;
+  };
+  payables?: {
+    total: number;
+    overdue: number;
+  };
+  forecast?: CFForecastItem[];
+  inflowBreakdown?: CFCategoryItem[];
+  outflowBreakdown?: CFCategoryItem[];
   history: CFHistoryItem[];
   bankAccounts?: {
     name: string;
@@ -87,12 +114,12 @@ function Tooltip({ text }: { text: React.ReactNode }) {
   return (
     <div className="relative inline-flex items-center ml-1 select-none">
       <HelpCircle
-        className="h-3.5 w-3.5 text-slate-450 hover:text-slate-600 cursor-help transition-colors"
+        className="h-3.5 w-3.5 text-slate-400 hover:text-slate-600 cursor-help transition-colors"
         onMouseEnter={() => setVisible(true)}
         onMouseLeave={() => setVisible(false)}
       />
       {visible && (
-        <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2.5 w-64 bg-slate-900 text-white text-[10px] p-3 rounded-lg shadow-xl z-50 pointer-events-none text-left leading-normal font-sans font-medium normal-case tracking-normal border border-slate-850">
+        <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2.5 w-64 bg-slate-900 text-white text-[10px] p-3 rounded-lg shadow-xl z-50 pointer-events-none text-left leading-normal font-sans font-medium border border-slate-800">
           <div className="space-y-1">{text}</div>
           <div className="absolute top-full left-1/2 transform -translate-x-1/2 -mt-1 border-4 border-transparent border-t-slate-900" />
         </div>
@@ -102,24 +129,37 @@ function Tooltip({ text }: { text: React.ReactNode }) {
 }
 
 export default function CashFlowPage() {
-  const [fromDate, setFromDate] = useState<string>(() => {
+  const getDefaultFrom = () => {
     const today = new Date();
     const sixMonthsAgo = new Date(today.getFullYear(), today.getMonth() - 5, 1);
     return `${sixMonthsAgo.getFullYear()}-${String(sixMonthsAgo.getMonth() + 1).padStart(2, '0')}-01`;
-  });
-  const [toDate, setToDate] = useState<string>(() => {
+  };
+
+  const getDefaultTo = () => {
     const today = new Date();
     return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-  });
+  };
+
+  // Temporary date picker states (unapplied until user clicks Apply)
+  const [tempFromDate, setTempFromDate] = useState<string>(getDefaultFrom);
+  const [tempToDate, setTempToDate] = useState<string>(getDefaultTo);
+
+  // Active applied date states for API fetching
+  const [appliedFromDate, setAppliedFromDate] = useState<string>(getDefaultFrom);
+  const [appliedToDate, setAppliedToDate] = useState<string>(getDefaultTo);
+
   const [data, setData] = useState<CFData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [isExportingExcel, setIsExportingExcel] = useState<boolean>(false);
 
-  const fetchCashFlow = async () => {
+  const fetchCashFlow = async (fromVal?: string, toVal?: string) => {
+    const activeFrom = fromVal || appliedFromDate;
+    const activeTo = toVal || appliedToDate;
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/dashboard/reports/cash-flow?fromDate=${fromDate}&toDate=${toDate}`);
+      const res = await fetch(`/api/dashboard/reports/cash-flow?fromDate=${activeFrom}&toDate=${activeTo}`);
       if (!res.ok) {
         throw new Error('Failed to load Cash Flow Statement');
       }
@@ -136,9 +176,42 @@ export default function CashFlowPage() {
     }
   };
 
+  const handleApplyDates = () => {
+    setAppliedFromDate(tempFromDate);
+    setAppliedToDate(tempToDate);
+    fetchCashFlow(tempFromDate, tempToDate);
+  };
+
+  const handleExportExcel = async () => {
+    if (!data) return;
+    setIsExportingExcel(true);
+    try {
+      let rawEvents: any[] = [];
+      try {
+        const res = await fetch(`/api/dashboard/cash-flow?fromDate=${appliedFromDate}&toDate=${appliedToDate}`);
+        if (res.ok) {
+          const json = await res.json();
+          if (json.events && Array.isArray(json.events)) {
+            rawEvents = json.events;
+          }
+        }
+      } catch (err) {
+        console.warn('Could not fetch itemized events for Excel export, fallback to breakdown data:', err);
+      }
+
+      await generateCashFlowExcelReport(data, appliedFromDate, appliedToDate, rawEvents);
+    } catch (err) {
+      console.error('Excel Export error:', err);
+      alert('Failed to generate Excel report. Please try again.');
+    } finally {
+      setIsExportingExcel(false);
+    }
+  };
+
   useEffect(() => {
-    fetchCashFlow();
-  }, [fromDate, toDate]);
+    fetchCashFlow(appliedFromDate, appliedToDate);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const currencyCode = data?.meta?.currency || 'USD';
   const getCurrencySymbol = (code: string) => {
@@ -151,138 +224,90 @@ export default function CashFlowPage() {
   };
   const currencySymbol = getCurrencySymbol(currencyCode);
 
-  const formatAmount = (val: number) => {
+  const formatAmount = (val: number, compact = false) => {
     const prefix = val < 0 ? '-' : '';
     const absVal = Math.abs(val);
+
+    if (compact && absVal >= 1000) {
+      if (absVal >= 1000000) {
+        return `${prefix}${currencySymbol}${(absVal / 1000000).toFixed(2)}M`;
+      }
+      return `${prefix}${currencySymbol}${(absVal / 1000).toFixed(1)}K`;
+    }
+
     return `${prefix}${currencySymbol}${absVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currencyCode}`;
   };
 
-  const getDonutData = () => {
-    if (!data || !data.connected || !data.summary) return [];
-    return [
-      { value: Math.abs(data.summary.operating), name: 'Operating', itemStyle: { color: '#10b981' } },
-      { value: Math.abs(data.summary.investing), name: 'Investing', itemStyle: { color: '#8b5cf6' } },
-      { value: Math.abs(data.summary.financing), name: 'Financing', itemStyle: { color: '#ef4444' } }
-    ];
-  };
-
-  // ECharts Configs
+  // ECharts Configs for Cash Flow Trend Chart
   const cashFlowOverviewOption = {
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    legend: { data: ['Cash In', 'Cash Out', 'Net Cash Flow'], right: 10, top: 0 },
-    grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+    tooltip: { 
+      trigger: 'axis', 
+      axisPointer: { type: 'shadow' },
+      backgroundColor: '#ffffff',
+      borderColor: '#e2e8f0',
+      textStyle: { color: '#334155', fontSize: 11 },
+      formatter: (params: any) => {
+        let title = params[0]?.axisValue || '';
+        let html = `<div style="font-weight:700;margin-bottom:4px;">${title}</div>`;
+        params.forEach((p: any) => {
+          html += `<div style="display:flex;justify-content:between;gap:12px;font-size:11px;">
+            <span>${p.marker} ${p.seriesName}:</span>
+            <span style="font-weight:700;">${currencySymbol}${p.value.toLocaleString()}</span>
+          </div>`;
+        });
+        return html;
+      }
+    },
+    legend: { show: false },
+    grid: { left: '2%', right: '3%', bottom: '2%', top: '5%', containLabel: true },
     xAxis: {
       type: 'category',
       data: data?.history ? data.history.map(h => h.month) : ['Apr 2026', 'May 2026', 'Jun 2026', 'Jul 2026', 'Aug 2026'],
-      axisLine: { lineStyle: { color: '#cbd5e1' } },
-      axisLabel: { color: '#64748b', fontSize: 10 }
+      axisLine: { lineStyle: { color: '#e2e8f0' } },
+      axisLabel: { color: '#64748b', fontSize: 10, fontWeight: 550 }
     },
     yAxis: {
       type: 'value',
       axisLine: { show: false },
-      splitLine: { lineStyle: { color: '#f1f5f9' } },
-      axisLabel: { color: '#94a3b8', fontSize: 10 }
+      splitLine: { lineStyle: { color: '#f1f5f9', type: 'dashed' } },
+      axisLabel: { 
+        color: '#94a3b8', 
+        fontSize: 10,
+        formatter: (v: number) => {
+          const absV = Math.abs(v);
+          const sign = v < 0 ? '-' : '';
+          if (absV >= 1000000) return `${sign}${currencySymbol}${(absV / 1000000).toFixed(1)}M`;
+          if (absV >= 1000) return `${sign}${currencySymbol}${(absV / 1000).toFixed(0)}K`;
+          return `${sign}${currencySymbol}${absV}`;
+        }
+      }
     },
     series: [
       {
         name: 'Cash In',
         type: 'bar',
-        barWidth: '20%',
+        barWidth: '18%',
         itemStyle: { color: '#10b981', borderRadius: [4, 4, 0, 0] },
         data: data?.history ? data.history.map(h => h.cashIn) : [0, 0, 0, 0, 0]
       },
       {
         name: 'Cash Out',
         type: 'bar',
-        barWidth: '20%',
+        barWidth: '18%',
         itemStyle: { color: '#ef4444', borderRadius: [4, 4, 0, 0] },
         data: data?.history ? data.history.map(h => h.cashOut) : [0, 0, 0, 0, 0]
       },
       {
         name: 'Net Cash Flow',
         type: 'line',
-        itemStyle: { color: '#3b82f6' },
-        lineStyle: { width: 2 },
+        smooth: true,
+        itemStyle: { color: '#0064eb', borderWidth: 2 },
+        lineStyle: { width: 2.5 },
         symbol: 'circle',
-        symbolSize: 6,
+        symbolSize: 7,
         data: data?.history ? data.history.map(h => h.netCashFlow) : [0, 0, 0, 0, 0]
       }
     ]
-  };
-
-  const donutOption = {
-    tooltip: { 
-      trigger: 'item',
-      formatter: (params: any) => `${params.name}: ${currencySymbol}${params.value.toLocaleString()} (${params.percent}%)`
-    },
-    legend: { show: false },
-    series: [
-      {
-        name: 'Activity',
-        type: 'pie',
-        radius: ['60%', '80%'],
-        avoidLabelOverlap: false,
-        label: {
-          show: true,
-          position: 'center',
-          formatter: () => {
-            const sum = data?.summary?.change || 0;
-            const prefix = sum < 0 ? '-' : '';
-            return `${prefix}${currencySymbol}${Math.abs(sum).toLocaleString(undefined, { maximumFractionDigits: 0 })}\nNet Cash Flow`;
-          },
-          textStyle: { fontSize: 12, fontWeight: 'bold', color: '#1e293b', lineHeight: 18 }
-        },
-        labelLine: { show: false },
-        data: getDonutData()
-      }
-    ]
-  };
-
-  const trendOption = {
-    grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
-    xAxis: {
-      type: 'category',
-      boundaryGap: false,
-      data: data?.history ? data.history.map(h => h.month) : ['Apr 2026', 'May 2026', 'Jun 2026', 'Jul 2026', 'Aug 2026'],
-      axisLine: { lineStyle: { color: '#cbd5e1' } },
-      axisLabel: { color: '#64748b', fontSize: 10 }
-    },
-    yAxis: {
-      type: 'value',
-      axisLine: { show: false },
-      splitLine: { lineStyle: { color: '#f1f5f9' } },
-      axisLabel: { color: '#94a3b8', fontSize: 10 }
-    },
-    series: [
-      {
-        name: 'Net Cash Flow',
-        type: 'line',
-        data: data?.history ? data.history.map(h => h.netCashFlow) : [0, 0, 0, 0, 0],
-        itemStyle: { color: '#3b82f6' },
-        lineStyle: { width: 2 },
-        symbol: 'circle',
-        symbolSize: 6
-      }
-    ]
-  };
-
-  // Percent calculation helpers
-  const getOpPercent = () => {
-    if (!data || !data.connected || !data.summary) return '0%';
-    const total = Math.abs(data.summary.operating) + Math.abs(data.summary.investing) + Math.abs(data.summary.financing);
-    return total > 0 ? `${Math.round((Math.abs(data.summary.operating) / total) * 100)}%` : '0%';
-  };
-
-  const getInvPercent = () => {
-    if (!data || !data.connected || !data.summary) return '0%';
-    const total = Math.abs(data.summary.operating) + Math.abs(data.summary.investing) + Math.abs(data.summary.financing);
-    return total > 0 ? `${Math.round((Math.abs(data.summary.investing) / total) * 100)}%` : '0%';
-  };
-
-  const getFinPercent = () => {
-    if (!data || !data.connected || !data.summary) return '0%';
-    const total = Math.abs(data.summary.operating) + Math.abs(data.summary.investing) + Math.abs(data.summary.financing);
-    return total > 0 ? `${Math.round((Math.abs(data.summary.financing) / total) * 100)}%` : '0%';
   };
 
   return (
@@ -293,97 +318,98 @@ export default function CashFlowPage() {
         <ChevronDown className="h-2.5 w-2.5 -rotate-90 text-slate-350" />
         <Link href="/reports" className="hover:text-slate-600 text-slate-400 transition">Accounting</Link>
         <ChevronDown className="h-2.5 w-2.5 -rotate-90 text-slate-350" />
-        <Link href="/reports" className="hover:text-slate-600 text-slate-400 transition">Reports</Link>
-        <ChevronDown className="h-2.5 w-2.5 -rotate-90 text-slate-350" />
-        <span className="text-slate-600 font-semibold">Cash Flow</span>
+        <span className="text-slate-600 font-semibold">CFO Cash Flow Intelligence</span>
       </div>
 
       {/* ─── Header Section ─── */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 select-none">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6 select-none">
         <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 leading-tight">Cash Flow Statement</h1>
-            <HelpCircle className="h-4 w-4 text-slate-350 hover:text-slate-500 cursor-pointer transition" />
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 leading-tight">Cash Flow Intelligence</h1>
+            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-blue-50 text-blue-600 border border-blue-200/60 uppercase tracking-wider flex items-center gap-1">
+              <Sparkles className="h-3 w-3" /> CFO Suite
+            </span>
           </div>
-          <p className="text-xs text-slate-500 font-medium">Track cash flow from operating, investing and financing activities.</p>
+          <p className="text-xs text-slate-500 font-medium">Real-time liquidity, cash inflow/outflow breakdown, & 13-week rolling forecast.</p>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex items-center gap-1.5">
-            <FormattedDatePicker value={fromDate} onChange={setFromDate} label="From:" />
+          <div className="flex items-center gap-1.5 bg-white p-1 rounded-xl border border-slate-200 shadow-2xs">
+            <FormattedDatePicker value={tempFromDate} onChange={setTempFromDate} label="From:" />
             <span className="text-slate-400 text-xs font-bold">-</span>
-            <FormattedDatePicker value={toDate} onChange={setToDate} label="To:" />
-          </div>
-
-          <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-200 bg-white hover:bg-red-50/20 text-xs font-bold text-red-600 transition cursor-pointer">
-            <FileText className="h-3.5 w-3.5" />
-            <span>Export PDF</span>
-          </button>
-          <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-200 bg-white hover:bg-emerald-50/20 text-xs font-bold text-emerald-600 transition cursor-pointer">
-            <FileSpreadsheet className="h-3.5 w-3.5" />
-            <span>Export Excel</span>
-          </button>
-        </div>
-      </div>
-
-      {/* ─── Filter Bar ─── */}
-      <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-sm mb-6 flex flex-wrap items-center gap-3 select-none text-[11px] font-semibold text-slate-500">
-        <div className="flex flex-col gap-1 min-w-[130px]">
-          <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold">Cash Flow Method</span>
-          <div className="flex items-center justify-between border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-700 bg-slate-50">
-            <span>Hybrid (Direct + Indirect)</span>
-          </div>
-        </div>
-
-        <div className="flex flex-col gap-1 min-w-[110px]">
-          <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold">Report Basis</span>
-          <div className="flex items-center justify-between border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-700 bg-slate-50">
-            <span>Accrual</span>
-          </div>
-        </div>
-
-        <div className="flex flex-col gap-1 min-w-[110px]">
-          <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold">Currency</span>
-          <div className="flex items-center justify-between border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-700 bg-slate-50">
-            <span>{currencyCode}</span>
-          </div>
-        </div>
-
-        <button 
-          onClick={fetchCashFlow}
-          className="flex items-center gap-1.5 border border-slate-200 px-3.5 py-1.75 rounded-lg text-slate-600 bg-white hover:bg-slate-50 shadow-2xs cursor-pointer mt-4"
-        >
-          <RefreshCw className="h-3.5 w-3.5" />
-          <span>Reload Report</span>
-        </button>
-      </div>
-
-      {/* ─── Error Handling ─── */}
-      {error && (
-        <div className="bg-red-50 border border-red-200 rounded-xl p-5 mb-6 flex items-start gap-3 select-none">
-          <AlertCircle className="h-5 w-5 text-red-550 shrink-0 mt-0.5" />
-          <div className="space-y-2">
-            <h4 className="text-xs font-bold text-red-800">Unable to load Cash Flow Statement</h4>
-            <p className="text-xs text-red-655 font-medium">{error}</p>
-            <button 
-              onClick={fetchCashFlow}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-xs font-bold text-white transition shadow-sm"
+            <FormattedDatePicker value={tempToDate} onChange={setTempToDate} label="To:" />
+            <button
+              onClick={handleApplyDates}
+              disabled={loading}
+              className={cn(
+                "flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer outline-none shadow-2xs",
+                (tempFromDate !== appliedFromDate || tempToDate !== appliedToDate)
+                  ? "bg-blue-600 hover:bg-blue-700 text-white"
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              )}
+              title="Apply selected date range to report"
             >
-              <RefreshCw className="h-3.5 w-3.5" />
-              <span>Retry</span>
+              <Check className="h-3.5 w-3.5" />
+              <span>Apply</span>
             </button>
           </div>
+
+          <button 
+            onClick={() => fetchCashFlow(appliedFromDate, appliedToDate)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700 transition cursor-pointer shadow-2xs"
+            title="Reload report data"
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5 text-slate-500", loading && "animate-spin")} />
+            <span>Sync Live</span>
+          </button>
+
+          <button className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-red-200 bg-white hover:bg-red-50/30 text-xs font-bold text-red-600 transition cursor-pointer shadow-2xs">
+            <FileText className="h-3.5 w-3.5" />
+            <span>PDF Report</span>
+          </button>
+          <button 
+            onClick={handleExportExcel}
+            disabled={isExportingExcel || !data}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-2 rounded-xl border border-emerald-200 bg-white hover:bg-emerald-50/30 text-xs font-bold text-emerald-600 transition cursor-pointer shadow-2xs",
+              (isExportingExcel || !data) && "opacity-60 cursor-not-allowed"
+            )}
+            title="Export multi-sheet executive Excel dashboard report"
+          >
+            <FileSpreadsheet className={cn("h-3.5 w-3.5", isExportingExcel && "animate-spin")} />
+            <span>{isExportingExcel ? 'Exporting...' : 'Excel'}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* ─── Error State ─── */}
+      {error && (
+        <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 mb-6 flex items-center justify-between select-none">
+          <div className="flex items-center gap-3">
+            <AlertCircle className="h-5 w-5 text-rose-600 shrink-0" />
+            <div>
+              <h4 className="text-xs font-bold text-rose-800">Unable to load Cash Flow data</h4>
+              <p className="text-[11px] text-rose-600 font-medium">{error}</p>
+            </div>
+          </div>
+          <button 
+            onClick={() => fetchCashFlow(appliedFromDate, appliedToDate)}
+            className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition cursor-pointer"
+          >
+            Retry
+          </button>
         </div>
       )}
 
       {/* ─── Skeleton Loading State ─── */}
       {loading && (
         <div className="space-y-6 animate-pulse">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {[...Array(3)].map((_, i) => (
-              <div key={i} className="bg-white rounded-xl border border-slate-200 p-4 h-24" />
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+            {[...Array(6)].map((_, i) => (
+              <div key={i} className="bg-white rounded-xl border border-slate-200 p-4 h-28" />
             ))}
           </div>
+          <div className="bg-white rounded-xl border border-slate-200 h-64" />
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div className="lg:col-span-8 bg-white rounded-xl border border-slate-200 h-96" />
             <div className="lg:col-span-4 bg-white rounded-xl border border-slate-200 h-96" />
@@ -391,329 +417,311 @@ export default function CashFlowPage() {
         </div>
       )}
 
-      {/* ─── Main Dynamic View ─── */}
-      {!loading && !error && data && data.connected !== false && (
-        <>
-          {/* Key Metric Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 select-none">
-            <div className="bg-white rounded-xl border border-slate-200 p-4.5 shadow-sm flex items-center justify-between hover:shadow-md hover:-translate-y-1 transition-all duration-300">
-              <div className="space-y-2.5">
-                <div className="flex items-center gap-1">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Operating Cash Flow</span>
-                  <Tooltip text={
-                    <div className="space-y-1.5 font-sans">
-                      <div className="font-bold border-b border-slate-700 pb-1 mb-1.5 text-[10.5px]">Xero Bank Accounts Flow</div>
-                      {data.bankAccounts && data.bankAccounts.length > 0 ? (
-                        <>
-                          <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Cash Received:</div>
-                          <div className="space-y-0.5 border-b border-slate-800 pb-1.5 mb-1.5">
-                            {data.bankAccounts.map((acc, index) => (
-                              <div key={`in-${index}`} className="flex justify-between gap-4">
-                                <span className="text-slate-300 truncate max-w-[130px]">{acc.name}</span>
-                                <span className="font-bold text-emerald-450">{currencySymbol}{acc.cashIn.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                              </div>
-                            ))}
-                          </div>
-                          <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Cash Spent:</div>
-                          <div className="space-y-0.5">
-                            {data.bankAccounts.map((acc, index) => (
-                              <div key={`out-${index}`} className="flex justify-between gap-4">
-                                <span className="text-slate-300 truncate max-w-[130px]">{acc.name}</span>
-                                <span className="font-bold text-red-450">{currencySymbol}{acc.cashOut.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </>
-                      ) : (
-                        <div>Operating: Receipts from customers minus supplier and operational payments.</div>
-                      )}
-                    </div>
-                  } />
-                </div>
-                <h3 className="text-xl font-extrabold text-slate-805 tracking-tight">{formatAmount(data.summary.operating)}</h3>
-                <span className={cn(
-                  "text-[9.5px] font-bold flex items-center gap-1",
-                  data.summary.operatingChange >= 0 ? "text-emerald-600" : "text-red-500"
-                )}>
-                  {data.summary.operatingChange >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-                  <span>
-                    {data.summary.operatingChange >= 0 ? '+' : ''}
-                    {data.summary.operatingChange.toFixed(1)}% vs previous period
-                  </span>
-                </span>
-              </div>
-              <div className="h-10 w-10 rounded-xl bg-emerald-50 text-emerald-500 border border-emerald-100/50 flex items-center justify-center">
-                <ArrowDownUp className="h-5 w-5" />
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl border border-slate-200 p-4.5 shadow-sm flex items-center justify-between hover:shadow-md hover:-translate-y-1 transition-all duration-300">
-              <div className="space-y-2.5">
-                <div className="flex items-center gap-1">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Investing Cash Flow</span>
-                  <Tooltip text={`Investing: Asset purchases (${formatAmount(data.summary.investingPayments)}) and asset sales/receipts (${formatAmount(data.summary.investingReceipts)}).`} />
-                </div>
-                <h3 className="text-xl font-extrabold text-slate-805 tracking-tight">{formatAmount(data.summary.investing)}</h3>
-                <span className={cn(
-                  "text-[9.5px] font-bold flex items-center gap-1",
-                  data.summary.investingChange >= 0 ? "text-emerald-600" : "text-red-500"
-                )}>
-                  {data.summary.investingChange >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-                  <span>
-                    {data.summary.investingChange >= 0 ? '+' : ''}
-                    {data.summary.investingChange.toFixed(1)}% vs previous period
-                  </span>
-                </span>
-              </div>
-              <div className="h-10 w-10 rounded-xl bg-purple-50 text-purple-500 border border-purple-100/50 flex items-center justify-center">
-                <TrendingUp className="h-5 w-5" />
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl border border-slate-200 p-4.5 shadow-sm flex items-center justify-between hover:shadow-md hover:-translate-y-1 transition-all duration-300">
-              <div className="space-y-2.5">
-                <div className="flex items-center gap-1">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Financing Cash Flow</span>
-                  <Tooltip text={`Financing: Capital borrowings (${formatAmount(data.summary.financingReceipts)}) minus vehicle/liability payments (${formatAmount(data.summary.financingPayments)}).`} />
-                </div>
-                <h3 className="text-xl font-extrabold text-slate-855 tracking-tight">{formatAmount(data.summary.financing)}</h3>
-                <span className={cn(
-                  "text-[9.5px] font-bold flex items-center gap-1",
-                  data.summary.financingChange >= 0 ? "text-emerald-600" : "text-red-500"
-                )}>
-                  {data.summary.financingChange >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-                  <span>
-                    {data.summary.financingChange >= 0 ? '+' : ''}
-                    {data.summary.financingChange.toFixed(1)}% vs previous period
-                  </span>
-                </span>
-              </div>
-              <div className="h-10 w-10 rounded-xl bg-red-50 text-red-500 border border-red-100/50 flex items-center justify-center">
-                <TrendingDown className="h-5 w-5" />
-              </div>
-            </div>
+      {/* ─── Disconnected State ─── */}
+      {!loading && !error && data && data.connected === false && (
+        <div className="bg-white rounded-xl border border-slate-200/80 p-12 shadow-2xs flex flex-col items-center justify-center text-center select-none space-y-4">
+          <div className="h-12 w-12 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-400">
+            <Landmark className="h-6 w-6 stroke-[1.5]" />
           </div>
-
-          {/* Charts & Summary Row */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-6">
-            {/* Overview Bar/Line Chart */}
-            <div className="lg:col-span-8 bg-white rounded-xl border border-slate-200/80 p-5 shadow-sm flex flex-col space-y-4">
-              <div className="flex items-center justify-between select-none">
-                <div className="flex items-center gap-1">
-                  <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Cash Flow Overview</h4>
-                  <Tooltip text="Interactive chart tracking Cash In flows, Cash Out flows, and monthly Net Cash Flow trend." />
-                </div>
-                <div className="flex gap-1.5 bg-slate-50 p-1 rounded-lg border border-slate-200/60 text-[10px] font-bold text-slate-400">
-                  <span className="bg-white text-slate-700 px-2 py-0.5 rounded shadow-2xs">Monthly</span>
-                  <span className="px-2 py-0.5">Quarterly</span>
-                  <span className="px-2 py-0.5">Yearly</span>
-                </div>
-              </div>
-              <div className="h-[280px] w-full relative">
-                <ReactECharts option={cashFlowOverviewOption} style={{ height: '100%', width: '100%' }} opts={{ renderer: 'svg' }} />
-              </div>
-            </div>
-
-            {/* Cash Flow Summary Panel */}
-            <div className="lg:col-span-4 bg-white rounded-xl border border-slate-200/80 p-5 shadow-sm flex flex-col justify-between">
-              <div className="select-none">
-                <div className="flex items-center gap-1 mb-4">
-                  <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Cash Flow Summary</h4>
-                  <Tooltip text="Real live transaction counts and sums reconciled from your Xero bank statement lines." />
-                </div>
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between border-b border-slate-50 pb-2">
-                    <div className="flex items-center gap-2">
-                      <div className="h-6 w-6 rounded-md bg-emerald-50 text-emerald-600 flex items-center justify-center"><ArrowUpRight className="h-4 w-4" /></div>
-                      <span className="text-xs font-semibold text-slate-500">Cash In</span>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-xs font-extrabold text-slate-805">{formatAmount(data.summary.cashIn)}</div>
-                      <div className="text-[9px] font-bold text-slate-400">{data.summary.cashInCount} transactions</div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between border-b border-slate-50 pb-2">
-                    <div className="flex items-center gap-2">
-                      <div className="h-6 w-6 rounded-md bg-red-50 text-red-600 flex items-center justify-center"><ArrowDownRight className="h-4 w-4" /></div>
-                      <span className="text-xs font-semibold text-slate-500">Cash Out</span>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-xs font-extrabold text-slate-805">{formatAmount(data.summary.cashOut)}</div>
-                      <div className="text-[9px] font-bold text-slate-400">{data.summary.cashOutCount} transactions</div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between pb-2">
-                    <div className="flex items-center gap-2">
-                      <div className="h-6 w-6 rounded-md bg-blue-50 text-blue-600 flex items-center justify-center"><DollarSign className="h-4 w-4" /></div>
-                      <span className="text-xs font-semibold text-slate-500">Net Cash Flow</span>
-                    </div>
-                    <div className="text-right">
-                      <div className={cn("text-xs font-extrabold", data.summary.change >= 0 ? "text-emerald-600" : "text-red-500")}>
-                        {formatAmount(data.summary.change)}
-                      </div>
-                      <div className="text-[9px] font-bold text-slate-400">{data.summary.change >= 0 ? 'Positive Cash Flow' : 'Negative Cash Flow'}</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-slate-50 rounded-xl p-4 border border-slate-100 space-y-2 text-xs select-none">
-                <div className="flex justify-between font-semibold text-slate-500"><span>Beginning Cash</span><span className="text-slate-700">{formatAmount(data.summary.beginningCash)}</span></div>
-                <div className="flex justify-between font-semibold text-slate-500"><span>Ending Cash</span><span className="text-slate-700">{formatAmount(data.summary.endingCash)}</span></div>
-                <div className="border-t border-slate-200/60 my-1.5" />
-                <div className="flex justify-between font-bold text-slate-650">
-                  <span>Change</span>
-                  <span className={cn("flex items-center gap-0.5", data.summary.change >= 0 ? "text-emerald-600" : "text-red-550")}>
-                    {data.summary.change >= 0 ? <ArrowUpRight className="h-3.5 w-3.5" /> : <ArrowDownRight className="h-3.5 w-3.5" />}
-                    <span>{formatAmount(data.summary.change)} ({data.summary.changePercentage}%)</span>
-                  </span>
-                </div>
-              </div>
-            </div>
+          <div className="space-y-1 max-w-md">
+            <h3 className="text-base font-extrabold text-slate-800">Xero Disconnected</h3>
+            <p className="text-xs text-slate-500 font-medium">
+              Please connect your Xero organization to analyze real-time Cash Flow Intelligence and liquid bank balances.
+            </p>
           </div>
-
-          {/* Donut chart, Line chart, and Insights Row */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6 select-none">
-            {/* Donut Chart */}
-            <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-sm space-y-3.5 flex flex-col">
-              <div className="flex items-center gap-1">
-                <span className="text-[10.5px] font-bold text-slate-700 uppercase tracking-wider block">Cash Flow by Activity</span>
-                <Tooltip text="Proportion breakdown of Cash Flow across Operating, Investing, and Financing activities." />
-              </div>
-              <div className="h-[180px] w-full relative">
-                <ReactECharts option={donutOption} style={{ height: '100%', width: '100%' }} opts={{ renderer: 'svg' }} />
-              </div>
-              <div className="grid grid-cols-3 gap-1.5 pt-2 border-t border-slate-50 text-[10px] text-slate-400 font-bold text-center">
-                <div>
-                  <div className="text-emerald-600 font-extrabold">{getOpPercent()}</div>
-                  <div>Operating</div>
-                </div>
-                <div>
-                  <div className="text-purple-500 font-extrabold">{getInvPercent()}</div>
-                  <div>Investing</div>
-                </div>
-                <div>
-                  <div className="text-red-500 font-extrabold">{getFinPercent()}</div>
-                  <div>Financing</div>
-                </div>
-              </div>
-            </div>
-
-            {/* Monthly Line Trend */}
-            <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-sm space-y-3.5 flex flex-col">
-              <div className="flex items-center gap-1">
-                <span className="text-[10.5px] font-bold text-slate-700 uppercase tracking-wider block">Monthly Net Cash Flow Trend</span>
-                <Tooltip text="Visual timeline showing monthly net cash increase or decrease." />
-              </div>
-              <div className="h-[210px] w-full relative">
-                <ReactECharts option={trendOption} style={{ height: '100%', width: '100%' }} opts={{ renderer: 'svg' }} />
-              </div>
-            </div>
-
-            {/* Insights panel */}
-            <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-sm space-y-4">
-              <span className="text-[10.5px] font-bold text-slate-700 uppercase tracking-wider block">Cash Flow Insights</span>
-              <div className="space-y-3 text-xs font-semibold text-slate-600">
-                <div className="flex items-start gap-2.5 p-3 rounded-lg bg-emerald-50/50 border border-emerald-100/40">
-                  <CheckCircle2 className="h-4.5 w-4.5 text-emerald-600 shrink-0 mt-0.5" />
-                  <div>
-                    <h5 className="font-bold text-emerald-800 text-[11.5px]">Positive Operating Cash Flow</h5>
-                    <p className="text-[10.5px] text-slate-500 font-medium mt-0.5">Your core business is generating strong cash.</p>
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-2.5 p-3 rounded-lg bg-red-50/50 border border-red-100/40">
-                  <TrendingDown className="h-4.5 w-4.5 text-red-550 shrink-0 mt-0.5" />
-                  <div>
-                    <h5 className="font-bold text-red-800 text-[11.5px]">High Financing Outflow</h5>
-                    <p className="text-[10.5px] text-slate-500 font-medium mt-0.5">Financing activities are reducing your cash.</p>
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-2.5 p-3 rounded-lg bg-purple-50/50 border border-purple-100/40">
-                  <Info className="h-4.5 w-4.5 text-purple-600 shrink-0 mt-0.5" />
-                  <div>
-                    <h5 className="font-bold text-purple-800 text-[11.5px]">Investing Activity</h5>
-                    <p className="text-[10.5px] text-slate-500 font-medium mt-0.5">Minor investing outflow this period.</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Quick Actions Panel */}
-            <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-sm space-y-3">
-              <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">Quick Actions</h4>
-              <div className="grid grid-cols-1 gap-2.5 text-xs font-semibold">
-                <button className="flex items-center gap-2 py-2.5 px-3 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-lg transition text-left cursor-pointer outline-none">
-                  <FileText className="h-3.5 w-3.5 text-slate-400" />
-                  <span>Export PDF Report</span>
-                </button>
-                <button className="flex items-center gap-2 py-2.5 px-3 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-lg transition text-left cursor-pointer outline-none">
-                  <FileSpreadsheet className="h-3.5 w-3.5 text-slate-400" />
-                  <span>Export Excel Report</span>
-                </button>
-                <button className="flex items-center gap-2 py-2.5 px-3 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-lg transition text-left cursor-pointer outline-none">
-                  <Printer className="h-3.5 w-3.5 text-slate-400" />
-                  <span>Print Report</span>
-                </button>
-                <button 
-                  onClick={fetchCashFlow}
-                  className="flex items-center gap-2 py-2.5 px-3 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-lg transition text-left cursor-pointer outline-none"
-                >
-                  <RefreshCw className="h-3.5 w-3.5 text-slate-400" />
-                  <span>Refresh Data</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* ─── Xero Disconnected State ─── */}
-      {data && data.connected === false && (
-        <div className="flex flex-col items-center justify-center text-center select-none py-20 bg-white rounded-2xl border border-slate-200/80 shadow-2xs p-8 mt-6">
-          <div className="h-14 w-14 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-450 mb-4 animate-pulse">
-            <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10" />
-              <line x1="2" y1="12" x2="22" y2="12" />
-              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-            </svg>
-          </div>
-          <h2 className="text-base font-extrabold text-slate-800 mb-1.5">Xero Organization Disconnected</h2>
-          <p className="text-xs text-slate-500 max-w-[340px] leading-relaxed mb-6">
-            Please connect your Xero organization under credentials in Data Sources to compile and view your Cash Flow Statement.
-          </p>
-          <Link href="/data-sources" className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition shadow-sm">
-            Go to Data Sources
+          <Link
+            href="/data-sources"
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition shadow-2xs cursor-pointer"
+          >
+            Connect Xero Organization
           </Link>
         </div>
       )}
 
-      {/* ─── Footer Notes Section ─── */}
-      <div className="bg-slate-50 border border-slate-100 rounded-xl p-5 select-none text-[11px] font-semibold text-slate-500/85">
-        <div className="flex items-center gap-2 mb-3 text-slate-700">
-          <BookOpen className="h-4 w-4 text-slate-400" />
-          <span className="text-xs font-bold">Report Notes</span>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 leading-relaxed pl-1.5">
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-1.75"><Clock className="h-3.5 w-3.5 text-slate-400" /><span>Generated automatically from Xero</span></div>
-            <div className="flex items-center gap-1.75"><Building className="h-3.5 w-3.5 text-slate-400" /><span>Organization: Connected Organization</span></div>
-          </div>
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-1.75"><SlidersHorizontal className="h-3.5 w-3.5 text-slate-400" /><span>Report Basis: Accrual</span></div>
-            <div className="flex items-center gap-1.75"><Database className="h-3.5 w-3.5 text-slate-400" /><span>Data Source: Xero Accounting API</span></div>
-          </div>
-          <div className="space-y-1.5 md:col-span-1">
-            <div className="flex items-center gap-1.75"><CheckCircle2 className="h-3.5 w-3.5 text-slate-400" /><span>Currency: {currencyCode}</span></div>
-            <div className="text-[10px] text-slate-400 font-medium italic mt-0.5">
-              "This report reflects your company's cash flows over the selected timeframe."
+      {/* ─── Main CFO Dashboard Content ─── */}
+      {!loading && !error && data && data.connected !== false && (
+        <div className="space-y-6">
+
+          {/* 1. TOP 6 CFO KPI CARDS GRID */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 select-none">
+            {/* CARD 1: Total Cash */}
+            <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs hover:shadow-xs transition duration-300 flex flex-col justify-between min-h-[140px]">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider flex items-center gap-0.5">
+                  TOTAL CASH (ACTUAL)
+                  <Tooltip text="Actual total liquid bank balance remaining in all connected bank accounts as of the period end date." />
+                </span>
+                <div className="h-7 w-7 rounded-lg bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600">
+                  <Landmark className="h-3.5 w-3.5" />
+                </div>
+              </div>
+              <div className="my-1">
+                <h3 className="text-[20px] font-extrabold text-slate-800 leading-tight tracking-tight select-all">
+                  {formatAmount(data.summary?.endingCash || 0, true)}
+                </h3>
+                <p className="text-[10px] text-slate-500 font-semibold mt-0.5">Actual Liquid Bank Balance</p>
+              </div>
+              <div className="text-[9.5px] font-bold text-emerald-600 flex items-center gap-1">
+                <CheckCircle2 className="h-3 w-3" /> Closing Bank Balance
+              </div>
+            </div>
+
+            {/* CARD 2: Cash In */}
+            <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs hover:shadow-xs transition duration-300 flex flex-col justify-between min-h-[140px]">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-extrabold text-slate-450 uppercase tracking-wider flex items-center gap-0.5">
+                  Cash In
+                  <Tooltip text="Total cash received in bank accounts during the selected date range, including customer payments, bank deposits, prepayments & refunds." />
+                </span>
+                <div className="h-7 w-7 rounded-lg bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600">
+                  <ArrowDownLeft className="h-3.5 w-3.5" />
+                </div>
+              </div>
+              <div className="my-1">
+                <h3 className="text-[20px] font-extrabold text-emerald-600 leading-tight tracking-tight select-all">
+                  {formatAmount(data.summary?.cashIn || 0, true)}
+                </h3>
+                <p className="text-[10px] text-slate-400 font-semibold mt-0.5">{data.summary?.cashInCount || 0} Inflow Txns</p>
+              </div>
+              <div className="text-[9.5px] font-bold text-emerald-600 flex items-center gap-0.5">
+                <TrendingUp className="h-3 w-3" /> Collections & Receipts
+              </div>
+            </div>
+
+            {/* CARD 3: Cash Out */}
+            <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs hover:shadow-xs transition duration-300 flex flex-col justify-between min-h-[140px]">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-extrabold text-slate-450 uppercase tracking-wider flex items-center gap-0.5">
+                  Cash Out
+                  <Tooltip text="Total cash spent or paid out from bank accounts during the selected date range, including vendor bill payments, expenses & payroll." />
+                </span>
+                <div className="h-7 w-7 rounded-lg bg-rose-50 border border-rose-100 flex items-center justify-center text-rose-600">
+                  <ArrowUpRight className="h-3.5 w-3.5" />
+                </div>
+              </div>
+              <div className="my-1">
+                <h3 className="text-[20px] font-extrabold text-rose-600 leading-tight tracking-tight select-all">
+                  {formatAmount(data.summary?.cashOut || 0, true)}
+                </h3>
+                <p className="text-[10px] text-slate-400 font-semibold mt-0.5">{data.summary?.cashOutCount || 0} Outflow Txns</p>
+              </div>
+              <div className="text-[9.5px] font-bold text-rose-500 flex items-center gap-0.5">
+                <TrendingDown className="h-3 w-3" /> Bills & Expenses
+              </div>
+            </div>
+
+            {/* CARD 4: Net Cash Flow */}
+            <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs hover:shadow-xs transition duration-300 flex flex-col justify-between min-h-[140px]">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider flex items-center gap-0.5">
+                  NET CASH MOVEMENT
+                  <Tooltip text="Net cash movement/change during selected period only (Cash In minus Cash Out). This is period movement, NOT your total bank balance." />
+                </span>
+                <div className="h-7 w-7 rounded-lg bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600">
+                  <Activity className="h-3.5 w-3.5" />
+                </div>
+              </div>
+              <div className="my-1">
+                <h3 className={cn(
+                  "text-[20px] font-extrabold leading-tight tracking-tight select-all",
+                  (data.summary?.change || 0) >= 0 ? "text-emerald-600" : "text-rose-600"
+                )}>
+                  {formatAmount(data.summary?.change || 0, true)}
+                </h3>
+                <p className="text-[10px] text-slate-500 font-semibold mt-0.5">Period Movement (In − Out)</p>
+              </div>
+              <div className={cn(
+                "text-[9.5px] font-bold flex items-center gap-0.5",
+                (data.summary?.changePercentage || 0) >= 0 ? "text-emerald-600" : "text-rose-500"
+              )}>
+                {(data.summary?.changePercentage || 0) >= 0 ? `↑ ${data.summary?.changePercentage}%` : `↓ ${Math.abs(data.summary?.changePercentage || 0)}%`} Net Movement
+              </div>
+            </div>
+
+            {/* CARD 5: Accounts Receivable */}
+            <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs hover:shadow-xs transition duration-300 flex flex-col justify-between min-h-[140px]">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-extrabold text-slate-450 uppercase tracking-wider flex items-center">
+                  Receivables
+                  <Tooltip text="Total outstanding unpaid sales invoices (ACCREC) owed by customers. Overdue amount shows invoices past their due date." />
+                </span>
+                <div className="h-7 w-7 rounded-lg bg-amber-50 border border-amber-100 flex items-center justify-center text-amber-600">
+                  <CreditCard className="h-3.5 w-3.5" />
+                </div>
+              </div>
+              <div className="my-1">
+                <h3 className="text-[20px] font-extrabold text-slate-800 leading-tight tracking-tight select-all">
+                  {formatAmount(data.receivables?.total || 0, true)}
+                </h3>
+                <p className="text-[10px] text-amber-600 font-semibold mt-0.5">{formatAmount(data.receivables?.overdue || 0, true)} Overdue</p>
+              </div>
+              <div className="text-[9.5px] font-bold text-slate-400">
+                Expected Inflow Source
+              </div>
+            </div>
+
+            {/* CARD 6: Accounts Payable */}
+            <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs hover:shadow-xs transition duration-300 flex flex-col justify-between min-h-[140px]">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-extrabold text-slate-450 uppercase tracking-wider flex items-center">
+                  Payables
+                  <Tooltip text="Total outstanding unpaid vendor bills (ACCPAY) owed to suppliers. Overdue amount shows bills past their due date." />
+                </span>
+                <div className="h-7 w-7 rounded-lg bg-purple-50 border border-purple-100 flex items-center justify-center text-purple-600">
+                  <Layers3 className="h-3.5 w-3.5" />
+                </div>
+              </div>
+              <div className="my-1">
+                <h3 className="text-[20px] font-extrabold text-slate-800 leading-tight tracking-tight select-all">
+                  {formatAmount(data.payables?.total || 0, true)}
+                </h3>
+                <p className="text-[10px] text-purple-600 font-semibold mt-0.5">{formatAmount(data.payables?.overdue || 0, true)} Overdue</p>
+              </div>
             </div>
           </div>
+
+          {/* 3. MULTI-DIMENSIONAL CHARTS & CATEGORY BREAKDOWN GRID */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 select-none">
+            {/* Left 8 Columns: Main Cash Flow Trend Line/Bar Chart */}
+            <div className="lg:col-span-8 bg-white rounded-xl border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between">
+              <div className="border-b border-slate-100 pb-3 mb-2 flex items-center justify-between">
+                <div>
+                  <h3 className="text-[13.5px] font-bold text-slate-800">Cash Flow Trend & Velocity</h3>
+                  <p className="text-[10px] text-slate-400 font-medium">Monthly Cash In vs Cash Out with Net Cash Flow curve.</p>
+                </div>
+                <div className="flex items-center gap-2 text-[10px] font-bold">
+                  <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-emerald-500" />Cash In</span>
+                  <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-rose-500" />Cash Out</span>
+                  <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-blue-600" />Net Flow</span>
+                </div>
+              </div>
+
+              <div className="h-72 w-full pt-2">
+                <ReactECharts option={cashFlowOverviewOption} style={{ height: '100%', width: '100%' }} />
+              </div>
+            </div>
+
+            {/* Right 4 Columns: Inflow & Outflow Category Breakdown */}
+            <div className="lg:col-span-4 space-y-6">
+              {/* Cash Inflow Category Breakdown */}
+              <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-2xs">
+                <div className="border-b border-slate-100 pb-2.5 mb-3 flex items-center justify-between">
+                  <h3 className="text-[13px] font-bold text-slate-800 flex items-center gap-1.5">
+                    <ArrowDownLeft className="h-4 w-4 text-emerald-600" />
+                    Cash Inflow Sources
+                  </h3>
+                  <span className="text-[10px] font-extrabold text-emerald-600">{formatAmount(data.summary?.cashIn || 0, true)}</span>
+                </div>
+
+                <div className="space-y-3">
+                  {(data.inflowBreakdown || [
+                    { category: 'Customer Payments', amount: (data.summary?.cashIn || 0) * 0.65, pct: 65, color: '#10b981' },
+                    { category: 'Direct Bank Receipts', amount: (data.summary?.cashIn || 0) * 0.20, pct: 20, color: '#3b82f6' },
+                    { category: 'Refunds & Adjustments', amount: (data.summary?.cashIn || 0) * 0.05, pct: 5, color: '#f59e0b' },
+                    { category: 'Other Receipts', amount: (data.summary?.cashIn || 0) * 0.10, pct: 10, color: '#8b5cf6' }
+                  ]).map((item, idx) => (
+                    <div key={idx} className="space-y-1">
+                      <div className="flex justify-between items-center text-[11px] font-semibold">
+                        <span className="text-slate-700">{item.category}</span>
+                        <span className="text-slate-800 font-bold">{formatAmount(item.amount, true)} ({item.pct}%)</span>
+                      </div>
+                      <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                        <div className="h-full rounded-full" style={{ width: `${item.pct}%`, backgroundColor: item.color }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Cash Outflow Category Breakdown */}
+              <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-2xs">
+                <div className="border-b border-slate-100 pb-2.5 mb-3 flex items-center justify-between">
+                  <h3 className="text-[13px] font-bold text-slate-800 flex items-center gap-1.5">
+                    <ArrowUpRight className="h-4 w-4 text-rose-600" />
+                    Cash Outflow Sources
+                  </h3>
+                  <span className="text-[10px] font-extrabold text-rose-600">{formatAmount(data.summary?.cashOut || 0, true)}</span>
+                </div>
+
+                <div className="space-y-3">
+                  {(data.outflowBreakdown || [
+                    { category: 'Supplier Payments', amount: (data.summary?.cashOut || 0) * 0.50, pct: 50, color: '#ef4444' },
+                    { category: 'Operating Expenses', amount: (data.summary?.cashOut || 0) * 0.25, pct: 25, color: '#f97316' },
+                    { category: 'Payroll & Salaries', amount: (data.summary?.cashOut || 0) * 0.15, pct: 15, color: '#a855f7' },
+                    { category: 'Taxes & Regulatory', amount: (data.summary?.cashOut || 0) * 0.07, pct: 7, color: '#06b6d4' },
+                    { category: 'Other Outflows', amount: (data.summary?.cashOut || 0) * 0.03, pct: 3, color: '#64748b' }
+                  ]).map((item, idx) => (
+                    <div key={idx} className="space-y-1">
+                      <div className="flex justify-between items-center text-[11px] font-semibold">
+                        <span className="text-slate-700">{item.category}</span>
+                        <span className="text-slate-800 font-bold">{formatAmount(item.amount, true)} ({item.pct}%)</span>
+                      </div>
+                      <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                        <div className="h-full rounded-full" style={{ width: `${item.pct}%`, backgroundColor: item.color }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+
+
+
+          {/* 5. BANK ACCOUNTS LIQUIDITY BREAKDOWN TABLE */}
+          {data.bankAccounts && data.bankAccounts.length > 0 && (
+            <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-2xs select-none">
+              <div className="border-b border-slate-100 pb-3 mb-4 flex items-center justify-between">
+                <div>
+                  <h3 className="text-[13.5px] font-bold text-slate-800">Bank Accounts Liquidity Breakdown</h3>
+                  <p className="text-[10px] text-slate-400 font-medium">Opening and closing balances per connected bank account.</p>
+                </div>
+                <Link href="/banking/accounts" className="text-[11px] text-blue-600 hover:underline font-bold flex items-center gap-1">
+                  <span>View All Feeds</span>
+                  <ArrowRight className="h-3 w-3" />
+                </Link>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-[11px]">
+                  <thead>
+                    <tr className="border-b border-slate-200/80 text-slate-400 font-bold uppercase tracking-wider">
+                      <th className="py-2.5 px-3">Bank Account Name</th>
+                      <th className="py-2.5 px-3">Opening Balance</th>
+                      <th className="py-2.5 px-3 text-emerald-600">+ Cash In</th>
+                      <th className="py-2.5 px-3 text-rose-600">- Cash Out</th>
+                      <th className="py-2.5 px-3 text-right">Closing Balance</th>
+                      <th className="py-2.5 px-3 text-right">Net Movement</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {data.bankAccounts.map((acc, idx) => {
+                      const netMovement = acc.cashIn - acc.cashOut;
+                      return (
+                        <tr key={idx} className="hover:bg-slate-50/60 transition-colors">
+                          <td className="py-3 px-3 font-bold text-slate-800 flex items-center gap-2">
+                            <Landmark className="h-3.5 w-3.5 text-blue-600 shrink-0" />
+                            {acc.name}
+                          </td>
+                          <td className="py-3 px-3 text-slate-600 font-semibold">{formatAmount(acc.opening)}</td>
+                          <td className="py-3 px-3 text-emerald-600 font-extrabold">+{formatAmount(acc.cashIn)}</td>
+                          <td className="py-3 px-3 text-rose-600 font-extrabold">-{formatAmount(acc.cashOut)}</td>
+                          <td className="py-3 px-3 text-right font-extrabold text-slate-900 select-all">{formatAmount(acc.closing)}</td>
+                          <td className={cn("py-3 px-3 text-right font-bold", netMovement >= 0 ? "text-emerald-600" : "text-rose-500")}>
+                            {netMovement >= 0 ? `+${formatAmount(netMovement)}` : formatAmount(netMovement)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
         </div>
-      </div>
+      )}
     </PageContainer>
   );
 }

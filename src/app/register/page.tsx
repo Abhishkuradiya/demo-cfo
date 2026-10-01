@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { 
   Mail, 
   Lock, 
@@ -10,17 +10,22 @@ import {
   ArrowRight, 
   Eye, 
   EyeOff, 
-  Info, 
   Check, 
   TrendingUp, 
   ShieldCheck, 
-  PieChart 
+  PieChart,
+  UserCheck,
+  AlertTriangle
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/providers/auth-provider';
+import { BrandLogo } from '@/components/brand-logo';
 
-export default function RegisterPage() {
+function RegisterFormContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const token = searchParams.get('token');
+
   const { login } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -28,7 +33,51 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
-  // Real-time password validation flags
+  const [invitationInfo, setInvitationInfo] = useState<any>(null);
+  const [invitationError, setInvitationError] = useState('');
+  const [validatingToken, setValidatingToken] = useState(false);
+  const [isAlreadyAccepted, setIsAlreadyAccepted] = useState(false);
+
+  // Validate token if present
+  useEffect(() => {
+    if (!token) return;
+    const checkToken = async () => {
+      setValidatingToken(true);
+      try {
+        const res = await fetch(`/api/auth/invitation-info?token=${encodeURIComponent(token)}`);
+        const data = await res.json();
+        if (res.ok && data.success) {
+          setInvitationInfo(data.invitation);
+          setEmail(data.invitation.email || '');
+          setCompanyName(data.invitation.organizationName || '');
+          if (data.isAlreadyAccepted) {
+            setIsAlreadyAccepted(true);
+            try {
+              const meRes = await fetch('/api/auth/me');
+              const meData = await meRes.json();
+              if (meRes.ok && meData.success) {
+                if (meData.user.isOnboarded) {
+                  window.location.href = '/overview';
+                } else {
+                  window.location.href = '/onboarding';
+                }
+                return;
+              }
+            } catch (e) {}
+          }
+        } else {
+          setInvitationError(data.message || 'Invalid or expired invitation link');
+        }
+      } catch (err) {
+        setInvitationError('Failed to verify invitation details.');
+      } finally {
+        setValidatingToken(false);
+      }
+    };
+    checkToken();
+  }, [token]);
+
+  // Password validation
   const hasMinLength = password.length >= 6;
   const hasNumber = /\d/.test(password);
   const hasUppercase = /[A-Z]/.test(password);
@@ -51,7 +100,7 @@ export default function RegisterPage() {
       const res = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, companyName }),
+        body: JSON.stringify({ email, password, companyName, token: token || undefined }),
       });
 
       const data = await res.json();
@@ -60,14 +109,22 @@ export default function RegisterPage() {
         
         login('session_token', {
           id: String(data.user.id),
-          name: data.user.email.split('@')[0],
+          name: invitationInfo?.firstName || data.user.email.split('@')[0],
           email: data.user.email,
-          role: 'owner',
+          role: invitationInfo?.role || 'owner',
           permissions: ['*']
         });
+
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('cfo_user_details', JSON.stringify({
+            email: data.user.email,
+            companyName: data.user.companyName,
+            firstName: invitationInfo?.firstName || '',
+            role: invitationInfo?.role || ''
+          }));
+        }
         
-        // Redirect to dashboard
-        window.location.href = '/overview';
+        window.location.href = '/onboarding';
       } else {
         toast.error(data.message || 'Registration failed. Email might already be taken.');
       }
@@ -78,27 +135,240 @@ export default function RegisterPage() {
     }
   };
 
-  return (
-    <div className="min-h-screen w-full flex bg-[#f8fafc] font-sans overflow-x-hidden selection:bg-blue-500 selection:text-white">
-      
-      {/* Left Pane: Value Proposition & Trust Pane (lg only) */}
-      <div className="hidden lg:flex lg:w-1/2 relative flex-col justify-between p-12 bg-gradient-to-br from-[#091529] via-[#0E1E38] to-[#040A15] text-white overflow-hidden">
-        {/* Glow effect background */}
-        <div className="absolute top-1/4 left-1/4 w-[400px] h-[400px] rounded-full bg-blue-500/10 blur-[120px] pointer-events-none animate-pulse" style={{ animationDuration: '6s' }} />
-        <div className="absolute bottom-1/4 right-1/4 w-[350px] h-[350px] rounded-full bg-indigo-500/10 blur-[100px] pointer-events-none animate-pulse" style={{ animationDuration: '8s' }} />
-        
-        {/* Top Header Branding */}
-        <div className="relative z-10 flex items-center gap-3">
-          <div className="h-10 w-10 rounded-xl bg-blue-600 flex items-center justify-center text-white font-black shadow-lg shadow-blue-500/20 text-sm tracking-tighter">
-            vCFO
+  if (isAlreadyAccepted) {
+    return (
+      <div className="w-full max-w-md bg-white border border-slate-200 rounded-3xl p-8 sm:p-10 shadow-xl shadow-slate-200/60 flex flex-col justify-between min-h-[580px]">
+        <div>
+          <div className="text-center flex flex-col items-center mb-6">
+            <h1 className="text-2xl font-black text-slate-900 tracking-tight">
+              Invitation Already Accepted
+            </h1>
+            <p className="text-xs text-slate-500 font-medium mt-1">
+              Account for <strong>{invitationInfo?.organizationName || 'your organization'}</strong> is already registered.
+            </p>
           </div>
-          <div>
-            <h2 className="font-extrabold text-base tracking-tight leading-none text-slate-100">Virtual CFO</h2>
-            <p className="text-[10px] text-slate-400 font-semibold tracking-wider uppercase mt-0.5">Intelligence Platform</p>
+
+          <div className="space-y-6 text-center py-6">
+            <div className="h-14 w-14 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mx-auto border border-blue-200 shadow-sm">
+              <UserCheck className="h-7 w-7" />
+            </div>
+            <div className="space-y-1.5">
+              <p className="text-xs text-slate-600 leading-relaxed max-w-xs mx-auto">
+                Sign in with your email address to continue your Virtual CFO Onboarding.
+              </p>
+            </div>
+            <button
+              onClick={() => window.location.href = `/login?email=${encodeURIComponent(invitationInfo?.email || email)}&next=/onboarding`}
+              className="w-full py-3.5 bg-[#1d4ed8] hover:bg-[#1e40af] text-white font-bold text-xs uppercase tracking-wider rounded-xl shadow-md transition flex items-center justify-center gap-2 cursor-pointer mt-4"
+            >
+              Sign In to Continue Onboarding <ArrowRight className="h-4 w-4" />
+            </button>
           </div>
         </div>
 
-        {/* Center Marketing List */}
+        <div className="text-center border-t border-slate-100 pt-5 mt-6">
+          <p className="text-xs text-slate-500 font-medium">
+            Need help? <Link href="/login" className="text-blue-600 font-bold hover:underline">Go to Sign In</Link>
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full max-w-md bg-white border border-slate-200 rounded-3xl p-8 sm:p-10 shadow-xl shadow-slate-200/60 flex flex-col justify-between min-h-[580px]">
+      <div>
+        <div className="text-center flex flex-col items-center mb-6">
+          <h1 className="text-2xl font-black text-slate-900 tracking-tight">
+            {token ? 'Accept Invitation' : 'Create Your Account'}
+          </h1>
+          <p className="text-xs text-slate-500 font-medium mt-1">
+            {token 
+              ? (invitationInfo ? `You have been invited by ${invitationInfo.invitedBy}` : 'Complete your registration using your invitation token')
+              : 'Get your own secure tenant financial cockpit'}
+          </p>
+        </div>
+
+        {validatingToken && (
+          <div className="mb-4 p-3 bg-blue-50 text-blue-700 text-xs font-semibold rounded-xl flex items-center gap-2">
+            <span className="w-3.5 h-3.5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></span>
+            Verifying invitation details...
+          </div>
+        )}
+
+        {invitationInfo && (
+          <div className="mb-6 p-3.5 bg-blue-50/90 border border-blue-200/80 rounded-xl flex items-center justify-between text-xs">
+            <div className="flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-blue-600 animate-pulse"></span>
+              <span className="text-slate-700">Joining <strong className="text-slate-900 font-bold">{invitationInfo.organizationName}</strong></span>
+            </div>
+            <span className="px-2.5 py-0.5 bg-blue-600 text-white rounded-md text-[10px] font-bold uppercase tracking-wider">
+              {invitationInfo.role}
+            </span>
+          </div>
+        )}
+
+        {invitationError && (
+          <div className="mb-5 p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2.5 text-xs text-rose-800">
+            <AlertTriangle className="h-4 w-4 text-rose-600 flex-shrink-0 mt-0.5" />
+            <span>{invitationError}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">Company / Workspace Name</label>
+            <div className="relative flex items-center">
+              <span className="absolute left-3.5 text-slate-400"><Briefcase className="h-4 w-4" /></span>
+              <input
+                type="text"
+                placeholder="e.g. Acme Corp"
+                value={companyName}
+                onChange={(e) => setCompanyName(e.target.value)}
+                disabled={loading || !!invitationInfo?.organizationName}
+                className="w-full pl-10 pr-4 py-3 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 bg-slate-50/50 hover:bg-slate-50 transition font-medium disabled:bg-slate-100/90 disabled:text-slate-800 disabled:cursor-not-allowed"
+                required
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">Email Address</label>
+            <div className="relative flex items-center">
+              <span className="absolute left-3.5 text-slate-400"><Mail className="h-4 w-4" /></span>
+              <input
+                type="email"
+                placeholder="you@company.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                disabled={loading || !!invitationInfo?.email}
+                className="w-full pl-10 pr-4 py-3 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 bg-slate-50/50 hover:bg-slate-50 transition font-medium disabled:bg-slate-100/90 disabled:text-slate-800 disabled:cursor-not-allowed"
+                required
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">Set Password</label>
+            <div className="relative flex items-center">
+              <span className="absolute left-3.5 text-slate-400"><Lock className="h-4 w-4" /></span>
+              <input
+                type={showPassword ? "text" : "password"}
+                placeholder="Minimum 6 characters"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                disabled={loading}
+                className="w-full pl-10 pr-10 py-3 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 bg-slate-50/50 hover:bg-slate-50 transition font-medium"
+                required
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3.5 text-slate-400 hover:text-slate-600 transition cursor-pointer"
+              >
+                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+
+            <div className="flex items-center gap-4 text-[11px] text-slate-500 font-medium pt-1">
+              <span className={`flex items-center gap-1 transition ${hasMinLength ? 'text-emerald-600 font-bold' : ''}`}>
+                <Check className={`h-3.5 w-3.5 ${hasMinLength ? 'text-emerald-600 stroke-[3]' : 'text-slate-300'}`} /> 6+ chars
+              </span>
+              <span className={`flex items-center gap-1 transition ${hasNumber ? 'text-emerald-600 font-bold' : ''}`}>
+                <Check className={`h-3.5 w-3.5 ${hasNumber ? 'text-emerald-600 stroke-[3]' : 'text-slate-300'}`} /> One number
+              </span>
+              <span className={`flex items-center gap-1 transition ${hasUppercase ? 'text-emerald-600 font-bold' : ''}`}>
+                <Check className={`h-3.5 w-3.5 ${hasUppercase ? 'text-emerald-600 stroke-[3]' : 'text-slate-300'}`} /> One uppercase
+              </span>
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading || !isPasswordValid}
+            className="w-full py-3.5 bg-[#1d4ed8] hover:bg-[#1e40af] active:bg-blue-800 text-white rounded-xl font-bold text-xs uppercase tracking-wider shadow-md transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed mt-3"
+          >
+            {loading ? (
+              <span className="flex items-center gap-2">
+                <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                Processing...
+              </span>
+            ) : (
+              <>
+                {token ? 'Accept Invitation & Continue' : 'Get Started'}
+                <ArrowRight className="h-4 w-4" />
+              </>
+            )}
+          </button>
+        </form>
+      </div>
+
+      <div className="text-center mt-6 border-t border-slate-100 pt-5">
+        <p className="text-xs text-slate-500 font-medium">
+          Already have an account?{' '}
+          <Link href="/login" className="text-blue-600 font-bold hover:underline">
+            Sign In
+          </Link>
+        </p>
+
+        <p className="text-[10px] text-slate-400 mt-4 leading-relaxed">
+          © 2026 Virtual CFO. All rights reserved.<br />
+          Designed by{' '}
+          <a 
+            href="https://exuberantglobal.co.uk" 
+            target="_blank" 
+            rel="noopener noreferrer" 
+            className="text-blue-500 hover:text-blue-600 font-semibold transition hover:underline"
+          >
+            exuberantglobal.co.uk
+          </a>{' '}
+          | Developed by{' '}
+          <span className="relative group inline-block">
+            <span className="text-blue-600 hover:text-blue-700 font-bold cursor-pointer border-b border-dashed border-blue-400 hover:border-blue-700 transition pb-0.5">
+              Rajan Goswami
+            </span>
+            <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3.5 w-72 p-4 bg-slate-900/98 text-white rounded-2xl shadow-2xl border border-slate-800 backdrop-blur-xl opacity-0 scale-95 pointer-events-none group-hover:opacity-100 group-hover:scale-100 transition-all duration-350 ease-out z-50 flex flex-col text-left font-normal normal-case tracking-normal">
+              <span className="flex items-center gap-3 border-b border-slate-800 pb-3 mb-2.5">
+                <span className="h-10 w-10 rounded-full bg-gradient-to-tr from-blue-500 to-indigo-600 flex items-center justify-center text-white font-black text-sm shadow-lg shadow-blue-500/20">
+                  RG
+                </span>
+                <span className="flex flex-col">
+                  <span className="font-bold text-sm text-slate-100">Rajan Goswami</span>
+                  <span className="text-[9px] text-blue-400 font-bold tracking-wider uppercase">Senior Full Stack Developer</span>
+                </span>
+              </span>
+              <span className="text-xs text-slate-300 leading-relaxed font-light">
+                Specializing in high-performance enterprise dashboards, finance integrations, and state-of-the-art responsive UI/UX designs.
+              </span>
+              <span className="mt-3.5 pt-2.5 border-t border-slate-800/80 flex items-center justify-between text-[9px] text-slate-400">
+                <span className="flex items-center gap-1 font-medium">📍 Noida, India</span>
+                <span className="text-blue-400 font-bold">exuberantglobal.co.uk</span>
+              </span>
+              <span className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-slate-900 border-r border-b border-slate-800 rotate-45"></span>
+            </span>
+          </span>
+        </p>
+      </div>
+    </div>
+  );
+}
+
+export default function RegisterPage() {
+  return (
+    <div className="min-h-screen w-full flex bg-[#f8fafc] font-sans overflow-x-hidden selection:bg-blue-500 selection:text-white">
+      
+      {/* Left Pane: Value Proposition */}
+      <div className="hidden lg:flex lg:w-1/2 relative flex-col justify-between p-12 bg-gradient-to-br from-[#091529] via-[#0E1E38] to-[#040A15] text-white overflow-hidden">
+        <div className="absolute top-1/4 left-1/4 w-[400px] h-[400px] rounded-full bg-blue-500/10 blur-[120px] pointer-events-none animate-pulse" style={{ animationDuration: '6s' }} />
+        <div className="absolute bottom-1/4 right-1/4 w-[350px] h-[350px] rounded-full bg-indigo-500/10 blur-[100px] pointer-events-none animate-pulse" style={{ animationDuration: '8s' }} />
+        
+        <div className="relative z-10">
+          <BrandLogo variant="dark" size="md" />
+        </div>
+
         <div className="relative z-10 my-auto py-8">
           <div className="max-w-xl space-y-10">
             <div className="space-y-4">
@@ -109,13 +379,11 @@ export default function RegisterPage() {
                 </span>
               </h1>
               <p className="text-slate-400 text-sm xl:text-base leading-relaxed font-light">
-                Create your account and unlock the full power of advanced corporate financial analytics, multi-entity sync, and real-time cash flow forecasting.
+                Complete your registration to set up your Virtual CFO Profile, sync financial systems, and access customized corporate financial insights.
               </p>
             </div>
 
-            {/* Vertical list of features */}
             <div className="space-y-6">
-              {/* Feature 1 */}
               <div className="flex gap-4 items-start group">
                 <span className="h-10 w-10 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400 flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform duration-300">
                   <TrendingUp className="h-5 w-5" />
@@ -128,7 +396,6 @@ export default function RegisterPage() {
                 </div>
               </div>
 
-              {/* Feature 2 */}
               <div className="flex gap-4 items-start group">
                 <span className="h-10 w-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform duration-300">
                   <ShieldCheck className="h-5 w-5" />
@@ -141,7 +408,6 @@ export default function RegisterPage() {
                 </div>
               </div>
 
-              {/* Feature 3 */}
               <div className="flex gap-4 items-start group">
                 <span className="h-10 w-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform duration-300">
                   <PieChart className="h-5 w-5" />
@@ -154,258 +420,16 @@ export default function RegisterPage() {
                 </div>
               </div>
             </div>
-
-            {/* Testimonial / Social Proof Card */}
-            <div className="bg-slate-900/40 border border-slate-800/80 backdrop-blur-md rounded-2xl p-5 shadow-xl flex gap-5 items-center hover:border-slate-800 transition duration-300">
-              
-              {/* Mini Mockup Dashboard (SVG) */}
-              <div className="w-28 h-20 bg-slate-950/80 rounded-lg border border-slate-800/60 p-2 flex flex-col gap-1.5 flex-shrink-0 select-none overflow-hidden">
-                {/* Top bar */}
-                <div className="flex justify-between items-center pb-1 border-b border-slate-800/50">
-                  <div className="flex gap-1">
-                    <div className="h-1.5 w-1.5 rounded-full bg-rose-500/80" />
-                    <div className="h-1.5 w-1.5 rounded-full bg-amber-500/80" />
-                    <div className="h-1.5 w-1.5 rounded-full bg-emerald-500/80" />
-                  </div>
-                  <div className="h-2 w-8 bg-slate-800 rounded-full" />
-                </div>
-                {/* Content */}
-                <div className="flex gap-2 h-full">
-                  {/* Side menu */}
-                  <div className="w-4 bg-slate-900/50 rounded flex flex-col gap-1 p-0.5">
-                    <div className="h-1 bg-blue-500/80 rounded" />
-                    <div className="h-1 bg-slate-800 rounded" />
-                    <div className="h-1 bg-slate-800 rounded" />
-                  </div>
-                  {/* Grid */}
-                  <div className="flex-grow flex flex-col gap-1">
-                    <div className="grid grid-cols-2 gap-1">
-                      <div className="h-3 bg-slate-800/80 rounded flex items-center px-0.5">
-                        <div className="h-1 w-2 bg-emerald-400 rounded-full" />
-                      </div>
-                      <div className="h-3 bg-slate-800/80 rounded flex items-center px-0.5">
-                        <div className="h-1 w-2 bg-blue-400 rounded-full" />
-                      </div>
-                    </div>
-                    {/* Chart mock */}
-                    <div className="flex-grow bg-slate-900/80 rounded p-1 flex items-end justify-around gap-0.5">
-                      <div className="w-1 bg-blue-500 rounded-t" style={{ height: '40%' }} />
-                      <div className="w-1 bg-blue-500 rounded-t" style={{ height: '65%' }} />
-                      <div className="w-1 bg-indigo-500 rounded-t" style={{ height: '50%' }} />
-                      <div className="w-1 bg-emerald-400 rounded-t" style={{ height: '80%' }} />
-                      <div className="w-1 bg-blue-400 rounded-t" style={{ height: '30%' }} />
-                    </div>
-                  </div>
-                </div>
-              </div>
-              
-              {/* Testimonial text & avatars */}
-              <div className="space-y-2">
-                <p className="text-slate-300 text-xs italic font-medium leading-relaxed">
-                  "Join thousands of finance professionals using vCFO to drive growth."
-                </p>
-                <div className="flex items-center gap-3">
-                  {/* Overlapping Avatars */}
-                  <div className="flex -space-x-2">
-                    <span className="h-6 w-6 rounded-full border border-slate-900 bg-gradient-to-tr from-rose-400 to-orange-400 flex items-center justify-center text-[8px] font-bold text-white select-none">JD</span>
-                    <span className="h-6 w-6 rounded-full border border-slate-900 bg-gradient-to-tr from-blue-400 to-indigo-500 flex items-center justify-center text-[8px] font-bold text-white select-none">AM</span>
-                    <span className="h-6 w-6 rounded-full border border-slate-900 bg-gradient-to-tr from-emerald-400 to-teal-500 flex items-center justify-center text-[8px] font-bold text-white select-none">SR</span>
-                    <span className="h-6 w-6 rounded-full border border-slate-900 bg-slate-800 flex items-center justify-center text-[8px] font-bold text-slate-300 select-none">+2k</span>
-                  </div>
-                  <span className="text-[10px] text-slate-400 font-semibold tracking-tight">Trusted by 2,000+ users</span>
-                </div>
-              </div>
-            </div>
           </div>
         </div>
 
       </div>
 
-      {/* Right Pane: Register Form */}
+      {/* Right Pane: Register Form wrapped in Suspense */}
       <div className="w-full lg:w-1/2 flex items-center justify-center p-6 md:p-12 bg-radial from-[#f1f5f9] via-[#f8fafc] to-[#e2e8f0]">
-        
-        <div className="w-full max-w-md bg-white/80 border border-slate-200/80 backdrop-blur-md rounded-3xl p-8 md:p-10 shadow-2xl shadow-slate-200/40 flex flex-col justify-between min-h-[620px]">
-          
-          <div>
-            {/* Logo / Title Block */}
-            <div className="text-center flex flex-col items-center mb-6">
-              <div className="h-11 w-11 rounded-2xl bg-blue-600 flex items-center justify-center text-white font-black shadow-lg shadow-blue-500/25 text-sm mb-3">
-                vCFO
-              </div>
-              <h1 className="text-2xl font-black text-slate-900 tracking-tight">Create Your Account</h1>
-              <p className="text-xs text-slate-400 font-medium mt-1">Get your own secure tenant financial cockpit</p>
-            </div>
-
-            {/* Registration Form */}
-            <form onSubmit={handleSubmit} className="space-y-4">
-              
-              {/* Company Name Input */}
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Company / Workspace Name</label>
-                <div className="relative flex items-center">
-                  <span className="absolute left-3 text-slate-400"><Briefcase className="h-4 w-4" /></span>
-                  <input
-                    type="text"
-                    placeholder="e.g. Acme Corp"
-                    value={companyName}
-                    onChange={(e) => setCompanyName(e.target.value)}
-                    disabled={loading}
-                    className="w-full pl-10 pr-4 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 bg-slate-50/50 hover:bg-slate-50 transition"
-                    required
-                  />
-                </div>
-              </div>
-
-              {/* Email Input */}
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Email Address</label>
-                <div className="relative flex items-center">
-                  <span className="absolute left-3 text-slate-400"><Mail className="h-4 w-4" /></span>
-                  <input
-                    type="email"
-                    placeholder="you@company.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    disabled={loading}
-                    className="w-full pl-10 pr-4 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 bg-slate-50/50 hover:bg-slate-50 transition"
-                    required
-                  />
-                </div>
-              </div>
-
-              {/* Password Input */}
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Password</label>
-                <div className="relative flex items-center">
-                  <span className="absolute left-3 text-slate-400"><Lock className="h-4 w-4" /></span>
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    placeholder="Minimum 6 characters"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    disabled={loading}
-                    className="w-full pl-10 pr-10 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 bg-slate-50/50 hover:bg-slate-50 transition"
-                    required
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 text-slate-400 hover:text-slate-600 transition cursor-pointer"
-                  >
-                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-              </div>
-
-              {/* Real-time Password Checklist alert box */}
-              <div className="bg-blue-50/40 border border-blue-100/70 rounded-xl p-3 flex gap-2.5 items-start text-[10px] text-slate-600 transition duration-300">
-                <span className="text-blue-500 flex-shrink-0 mt-0.5">
-                  <Info className="h-3.5 w-3.5" />
-                </span>
-                <div className="space-y-1">
-                  <span className="font-bold text-slate-700">Password must contain:</span>
-                  <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1 text-slate-500 font-medium">
-                    <span className={`flex items-center gap-1 transition ${hasMinLength ? 'text-emerald-600 font-bold' : ''}`}>
-                      <Check className={`h-3 w-3 ${hasMinLength ? 'text-emerald-500 stroke-[3]' : 'text-slate-300'}`} />
-                      At least 6 chars
-                    </span>
-                    <span className={`flex items-center gap-1 transition ${hasNumber ? 'text-emerald-600 font-bold' : ''}`}>
-                      <Check className={`h-3 w-3 ${hasNumber ? 'text-emerald-500 stroke-[3]' : 'text-slate-300'}`} />
-                      One number
-                    </span>
-                    <span className={`flex items-center gap-1 transition ${hasUppercase ? 'text-emerald-600 font-bold' : ''}`}>
-                      <Check className={`h-3 w-3 ${hasUppercase ? 'text-emerald-500 stroke-[3]' : 'text-slate-300'}`} />
-                      One uppercase
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Get Started Submit */}
-              <button
-                type="submit"
-                disabled={loading || !isPasswordValid}
-                className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl font-bold text-xs uppercase tracking-wider shadow-lg shadow-blue-500/10 transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed mt-2"
-              >
-                {loading ? (
-                  <span className="flex items-center gap-2">
-                    <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                    </svg>
-                    Creating Account...
-                  </span>
-                ) : (
-                  <>
-                    Get Started
-                    <ArrowRight className="h-4 w-4" />
-                  </>
-                )}
-              </button>
-            </form>
-          </div>
-
-          {/* Footer Details */}
-          <div className="text-center mt-6 border-t border-slate-100 pt-6">
-            <p className="text-xs text-slate-500 font-medium">
-              Already have an account?{' '}
-              <Link href="/login" className="text-blue-600 font-bold hover:underline">
-                Sign In
-              </Link>
-            </p>
-
-            {/* Copyright, exuberantglobal designed by, Developer Rajan Goswami Tooltip */}
-            <p className="text-[10px] text-slate-400 mt-5 leading-relaxed">
-              © 2026 Virtual CFO. All rights reserved.<br />
-              Designed by{' '}
-              <a 
-                href="https://exuberantglobal.co.uk" 
-                target="_blank" 
-                rel="noopener noreferrer" 
-                className="text-blue-500 hover:text-blue-600 font-semibold transition hover:underline"
-              >
-                exuberantglobal.co.uk
-              </a>{' '}
-              | Developed by{' '}
-              <span className="relative group inline-block">
-                <span className="text-blue-600 hover:text-blue-700 font-bold cursor-pointer border-b border-dashed border-blue-400 hover:border-blue-700 transition pb-0.5">
-                  Rajan Goswami
-                </span>
-                
-                {/* Premium Developer Tooltip Box */}
-                <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3.5 w-72 p-4 bg-slate-900/98 text-white rounded-2xl shadow-2xl border border-slate-800 backdrop-blur-xl opacity-0 scale-95 pointer-events-none group-hover:opacity-100 group-hover:scale-100 transition-all duration-350 ease-out z-50 flex flex-col text-left font-normal normal-case tracking-normal">
-                  
-                  {/* Header info */}
-                  <span className="flex items-center gap-3 border-b border-slate-800 pb-3 mb-2.5">
-                    <span className="h-10 w-10 rounded-full bg-gradient-to-tr from-blue-500 to-indigo-600 flex items-center justify-center text-white font-black text-sm shadow-lg shadow-blue-500/20">
-                      RG
-                    </span>
-                    <span className="flex flex-col">
-                      <span className="font-bold text-sm text-slate-100">Rajan Goswami</span>
-                      <span className="text-[9px] text-blue-400 font-bold tracking-wider uppercase">Senior Full Stack Developer</span>
-                    </span>
-                  </span>
-
-                  {/* Body text */}
-                  <span className="text-xs text-slate-300 leading-relaxed font-light">
-                    Specializing in high-performance enterprise dashboards, finance integrations, and state-of-the-art responsive UI/UX designs.
-                  </span>
-
-                  {/* Bottom tags */}
-                  <span className="mt-3.5 pt-2.5 border-t border-slate-800/80 flex items-center justify-between text-[9px] text-slate-400">
-                    <span className="flex items-center gap-1 font-medium">📍 Noida, India</span>
-                    <span className="text-blue-400 font-bold">exuberantglobal.co.uk</span>
-                  </span>
-
-                  {/* Tooltip Down Arrow */}
-                  <span className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-slate-900 border-r border-b border-slate-800 rotate-45"></span>
-                </span>
-              </span>
-            </p>
-          </div>
-
-        </div>
-
+        <Suspense fallback={<div className="p-8 bg-white rounded-3xl text-center text-xs font-bold text-slate-500">Loading registration form...</div>}>
+          <RegisterFormContent />
+        </Suspense>
       </div>
 
     </div>

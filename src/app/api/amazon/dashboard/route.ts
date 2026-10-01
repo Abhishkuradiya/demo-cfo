@@ -50,15 +50,11 @@ export async function GET(request: Request) {
       return amount / rate;
     }
 
-    // 1. Check Amazon connection status
-    let creds = await db.getCredentials(tenantId, 'amazon');
-    if (!creds) {
-      // Check fallback tenant 3
-      creds = await db.getCredentials(3, 'amazon');
-    }
+    // 1. Check Amazon connection status for THIS tenant strictly
+    const creds = await db.getCredentials(tenantId, 'amazon');
     const isConnected = !!creds;
 
-    let lastSyncTimeStr = 'Today, 10:42 AM';
+    let lastSyncTimeStr = 'Never synced';
     if (creds?.last_synced_at || creds?.updated_at) {
       const d = new Date(creds.last_synced_at || creds.updated_at);
       if (!isNaN(d.getTime())) {
@@ -66,6 +62,37 @@ export async function GET(request: Request) {
         const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         lastSyncTimeStr = isToday ? `Today, ${timeStr}` : `${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}, ${timeStr}`;
       }
+    }
+
+    if (!isConnected) {
+      return NextResponse.json({
+        connected: false,
+        lastSyncTime: lastSyncTimeStr,
+        baseCurrency,
+        currencySymbol: '£',
+        currencyCode: baseCurrency,
+        exchangeRates: {},
+        kpis: {
+          totalSales: 0,
+          orders: 0,
+          unitsSold: 0,
+          amazonFees: 0,
+          refunds: 0,
+          netRevenue: 0,
+          totalSalesGrowth: 0,
+          ordersGrowth: 0,
+          unitsGrowth: 0,
+          feesGrowth: 0,
+          refundsGrowth: 0,
+          netRevenueGrowth: 0
+        },
+        salesBreakdown: { totalSales: 0, items: [] },
+        salesTrend: [],
+        topSellingProducts: [],
+        orderStatusBreakdown: [],
+        marketplaceSales: [],
+        recentOrders: []
+      });
     }
 
     let whereClause = `WHERE tenant_id = $1`;
@@ -84,39 +111,14 @@ export async function GET(request: Request) {
       queryParams.push(country, `%${marketplace}%`);
     }
 
-    // Query Amazon Orders from PostgreSQL
-    let ordersRes = await db.query(
+    // Query Amazon Orders from PostgreSQL for current tenant only
+    const ordersRes = await db.query(
       `SELECT amazon_order_id, purchase_date, buyer_name, order_total_amount, currency, order_status, sales_channel, amazon_fees, refund_amount, number_of_items_shipped, ship_country
        FROM amazon_orders
        ${whereClause}
        ORDER BY id DESC`,
       queryParams
     );
-
-    // If active tenant has 0 orders, fallback to fetch any available synced orders in PostgreSQL
-    if (!ordersRes.rows || ordersRes.rows.length === 0) {
-      let fallbackWhere = `WHERE 1=1`;
-      let fallbackParams: any[] = [];
-      if (marketplace !== 'all') {
-        const codeMap: Record<string, string> = {
-          'IN': 'IN',
-          'US': 'US',
-          'UK': 'GB',
-          'GB': 'GB',
-          'DE': 'DE'
-        };
-        const country = codeMap[marketplace.toUpperCase()] || marketplace;
-        fallbackWhere += ` AND (ship_country ILIKE $1 OR sales_channel ILIKE $2)`;
-        fallbackParams.push(country, `%${marketplace}%`);
-      }
-      ordersRes = await db.query(
-        `SELECT amazon_order_id, purchase_date, buyer_name, order_total_amount, currency, order_status, sales_channel, amazon_fees, refund_amount, number_of_items_shipped, ship_country
-         FROM amazon_orders
-         ${fallbackWhere}
-         ORDER BY id DESC`,
-        fallbackParams
-      );
-    }
 
     const orders = ordersRes.rows || [];
 

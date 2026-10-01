@@ -113,47 +113,40 @@ export class BalanceSheetParser {
     const accounts: BalanceSheetAccountDTO[] = [];
     if (!rows || !Array.isArray(rows)) return accounts;
 
-    const recurse = (itemList: any[], isInLiabilities = false) => {
+    const recurse = (itemList: any[], inBankSection = false) => {
       for (const item of itemList) {
         if (!item) continue;
 
-        let currentInLiabilities = isInLiabilities;
+        let currentBankSection = inBankSection;
         if (item.RowType === 'Section' && item.Title) {
           const title = item.Title.toLowerCase().trim();
           if (
+            title.includes('bank') || 
+            title.includes('cash and bank') || 
+            title.includes('cash at bank') ||
+            title.includes('cash & bank')
+          ) {
+            currentBankSection = true;
+          } else if (
             title.includes('liabilities') || 
             title.includes('creditors') || 
-            title.includes('amounts falling due within one year')
+            title.includes('sales') || 
+            title.includes('equity')
           ) {
-            currentInLiabilities = true;
-          } else if (
-            title.includes('assets') || 
-            title.includes('bank') || 
-            title.includes('cash')
-          ) {
-            currentInLiabilities = false;
+            currentBankSection = false;
           }
         }
 
         if (item.RowType === 'Row' && item.Cells && item.Cells.length >= 2) {
           const name = (item.Cells[0].Value || "").trim();
           let balance = this.extractCellValue(item);
-          if (name && balance !== null && !name.toLowerCase().includes('total')) {
-            const label = name.toLowerCase();
-            const bankKeywords = [
-              'bank', 'cash', 'paypal', 'tap', 'express', 'amex', 'charge', 
-              'platinum', 'stripe', 'sum up', 'starling', 'groupon', 'petty', 
-              'savings', 'card', 'gold'
-            ];
-            const isBank = bankKeywords.some(keyword => label.includes(keyword));
-            if (isBank) {
-              accounts.push({ name, balance: Math.abs(balance) });
-            }
+          if (name && balance !== null && !name.toLowerCase().includes('total') && currentBankSection) {
+            accounts.push({ name, balance: Math.abs(balance) });
           }
         }
 
         if (item.Rows) {
-          recurse(item.Rows, currentInLiabilities);
+          recurse(item.Rows, currentBankSection);
         }
       }
     };
@@ -166,19 +159,12 @@ export class BalanceSheetParser {
    * Finds the Total Cash sum from Balance Sheet report.
    */
   static findTotalCash(rows: any[]): number | null {
-    const accounts = this.findBankAccounts(rows);
-    if (accounts.length > 0) {
-      // Sum only the positive bank account balances to match Xero's "Total Cash at bank and in hand"
-      // which excludes overdrawn bank accounts (which Xero displays under Liabilities)
-      return accounts.reduce((sum, acc) => sum + (acc.balance > 0 ? acc.balance : 0), 0);
-    }
-
-    // Try standard summaries
+    // Try official Xero summaries first to match official Balance Sheet report
     const targets = [
+      'total cash at bank and in hand',
       'total cash and bank',
       'total cash',
       'total bank accounts',
-      'total cash at bank and in hand',
       'total bank balances',
       'cash and bank'
     ];
@@ -188,6 +174,11 @@ export class BalanceSheetParser {
       if (val !== null) return val;
     }
 
+    const accounts = this.findBankAccounts(rows);
+    if (accounts.length > 0) {
+      return accounts.reduce((sum, acc) => sum + (acc.balance > 0 ? acc.balance : 0), 0);
+    }
+
     return null;
   }
 
@@ -195,43 +186,101 @@ export class BalanceSheetParser {
    * Finds Total Current Assets from Balance Sheet report.
    */
   static findCurrentAssets(rows: any[]): number | null {
-    return this.findSummary(rows, 'total current assets') || this.findSummary(rows, 'current assets');
+    for (const label of ['total current assets', 'current assets']) {
+      const val = this.findSummary(rows, label);
+      if (val !== null) return val;
+    }
+    return null;
   }
 
   /**
    * Finds Total Assets from Balance Sheet report.
    */
   static findTotalAssets(rows: any[]): number | null {
-    return this.findSummary(rows, 'total assets') || this.findSummary(rows, 'assets');
+    for (const label of ['total assets', 'assets']) {
+      const val = this.findSummary(rows, label);
+      if (val !== null) return val;
+    }
+    return null;
   }
 
   /**
    * Finds Total Liabilities from Balance Sheet report.
    */
   static findTotalLiabilities(rows: any[]): number | null {
-    return this.findSummary(rows, 'total liabilities') 
-      || this.findSummary(rows, 'liabilities')
-      || this.findSummary(rows, 'total creditors: amounts falling due within one year')
-      || this.findSummary(rows, 'creditors');
+    for (const label of [
+      'total liabilities',
+      'liabilities',
+      'total creditors: amounts falling due within one year',
+      'creditors'
+    ]) {
+      const val = this.findSummary(rows, label);
+      if (val !== null) return val;
+    }
+    return null;
   }
 
   /**
    * Finds Total Equity from Balance Sheet report.
    */
   static findTotalEquity(rows: any[]): number | null {
-    return this.findSummary(rows, 'total equity') 
-      || this.findSummary(rows, 'equity') 
-      || this.findSummary(rows, 'total capital and reserves')
-      || this.findSummary(rows, 'capital and reserves');
+    for (const label of [
+      'total equity',
+      'equity',
+      'total capital and reserves',
+      'capital and reserves'
+    ]) {
+      const val = this.findSummary(rows, label);
+      if (val !== null) return val;
+    }
+    return null;
+  }
+
+  /**
+   * Finds Total Accounts Receivable (AR / Debtors) from Balance Sheet report.
+   */
+  static findTotalAR(rows: any[]): number | null {
+    for (const label of [
+      'total accounts receivable',
+      'accounts receivable',
+      'trade debtors',
+      'debtors'
+    ]) {
+      const val = this.findSummary(rows, label);
+      if (val !== null) return val;
+    }
+    return null;
+  }
+
+  /**
+   * Finds Total Accounts Payable (AP / Creditors) from Balance Sheet report.
+   */
+  static findTotalAP(rows: any[]): number | null {
+    for (const label of [
+      'total accounts payable',
+      'accounts payable',
+      'trade creditors',
+      'creditors'
+    ]) {
+      const val = this.findSummary(rows, label);
+      if (val !== null) return val;
+    }
+    return null;
   }
 
   /**
    * Finds Total Current Liabilities from Balance Sheet report.
    */
   static findCurrentLiabilities(rows: any[]): number | null {
-    return this.findSummary(rows, 'total current liabilities') 
-      || this.findSummary(rows, 'current liabilities')
-      || this.findSummary(rows, 'creditors: amounts falling due within one year');
+    for (const label of [
+      'total current liabilities',
+      'current liabilities',
+      'creditors: amounts falling due within one year'
+    ]) {
+      const val = this.findSummary(rows, label);
+      if (val !== null) return val;
+    }
+    return null;
   }
 
   /**

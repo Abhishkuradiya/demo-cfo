@@ -46,10 +46,19 @@ export async function POST(req: Request) {
 
     // 5. Create Response and set cookie
     const isHttps = req.headers.get('x-forwarded-proto') === 'https' || req.url.startsWith('https://');
+    // Check onboarding status
+    let isOnboarded = !!user.is_onboarded;
+    if (!isOnboarded && db.isPgActive()) {
+      try {
+        const prof = await db.query('SELECT id FROM organization_profiles WHERE LOWER(work_email) = LOWER($1) LIMIT 1', [user.email]);
+        if (prof.rows.length > 0) isOnboarded = true;
+      } catch (e) {}
+    }
+
     const response = NextResponse.json({
       success: true,
       message: 'Login successful',
-      user: { id: user.id, email: user.email, tenantId: user.tenant_id, companyName }
+      user: { id: user.id, email: user.email, tenantId: user.tenant_id, companyName, isOnboarded }
     });
 
     response.cookies.set({

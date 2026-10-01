@@ -43,8 +43,7 @@ import { toast } from 'sonner';
 
 const ReactECharts = dynamic(() => import('echarts-for-react'), { ssr: false });
 
-// Mock Financial Expenses Data Structure
-interface ExpenseRecord {
+export interface ExpenseRecord {
   id: string;
   date: string;
   dueDate: string;
@@ -58,18 +57,35 @@ interface ExpenseRecord {
   recurring: boolean;
 }
 
-const MOCK_EXPENSES: ExpenseRecord[] = [
-  { id: 'EXP-001', date: '2026-09-12', dueDate: '2026-09-26', vendorName: 'Alliance Healthcare Ltd', billNumber: 'BILL-AH-9912', reference: 'PO-77821', category: 'Direct COGS', department: 'Procurement', amount: 48250.00, status: 'Paid', recurring: false },
-  { id: 'EXP-002', date: '2026-09-10', dueDate: '2026-09-24', vendorName: 'Amazon Web Services (AWS)', billNumber: 'INV-AWS-8821', reference: 'SUB-CLOUD-01', category: 'SaaS & Software', department: 'IT & Engineering', amount: 14820.50, status: 'Paid', recurring: true },
-  { id: 'EXP-003', date: '2026-09-08', dueDate: '2026-09-22', vendorName: 'Phoenix Medical Supplies', billNumber: 'BILL-PMS-4410', reference: 'PO-77825', category: 'Direct COGS', department: 'Procurement', amount: 32400.00, status: 'Pending Approval', recurring: false },
-  { id: 'EXP-004', date: '2026-09-05', dueDate: '2026-09-19', vendorName: 'Canary Wharf Real Estate', billNumber: 'RENT-Q3-2026', reference: 'LEASE-HQ-01', category: 'Rent & Facilities', department: 'Executive & HR', amount: 28500.00, status: 'Paid', recurring: true },
-  { id: 'EXP-005', date: '2026-09-04', dueDate: '2026-09-18', vendorName: 'Google Ads & Marketing', billNumber: 'INV-GADS-991', reference: 'CAMPAIGN-AUTUMN', category: 'Marketing & Ads', department: 'Marketing', amount: 18400.00, status: 'Scheduled', recurring: false },
-  { id: 'EXP-006', date: '2026-09-02', dueDate: '2026-09-09', vendorName: 'DHL Express Freight UK', billNumber: 'BILL-DHL-3301', reference: 'SHIP-9912', category: 'Logistics & Freight', department: 'Operations', amount: 9650.00, status: 'Overdue', recurring: false },
-  { id: 'EXP-007', date: '2026-09-01', dueDate: '2026-09-15', vendorName: 'Microsoft 365 Enterprise', billNumber: 'INV-MS-44120', reference: 'SUB-MS-LIC', category: 'SaaS & Software', department: 'IT & Engineering', amount: 4850.00, status: 'Paid', recurring: true },
-  { id: 'EXP-008', date: '2026-08-28', dueDate: '2026-09-11', vendorName: 'KPMG Audit & Tax Advisory', billNumber: 'INV-KPMG-01', reference: 'AUDIT-2026', category: 'Professional Fees', department: 'Executive & HR', amount: 16500.00, status: 'Pending Approval', recurring: false },
-  { id: 'EXP-009', date: '2026-08-25', dueDate: '2026-09-08', vendorName: 'Salesforce EMEA UK', billNumber: 'INV-SFDC-8812', reference: 'SUB-CRM-2026', category: 'SaaS & Software', department: 'Sales', amount: 12400.00, status: 'Paid', recurring: true },
-  { id: 'EXP-010', date: '2026-08-22', dueDate: '2026-09-05', vendorName: 'British Gas Commercial', billNumber: 'BILL-BG-7712', reference: 'UTIL-HQ-AUG', category: 'Utilities & Admin', department: 'Operations', amount: 3820.00, status: 'Overdue', recurring: true },
-];
+// Dynamic Date Helper Utilities
+const getTodayFormatted = (): string => {
+  const d = new Date();
+  return d.toISOString().split('T')[0];
+};
+
+const getSixMonthsAgoFormatted = (): string => {
+  const d = new Date();
+  d.setMonth(d.getMonth() - 6);
+  return d.toISOString().split('T')[0];
+};
+
+const getStartOfMonthFormatted = (): string => {
+  const d = new Date();
+  d.setDate(1);
+  return d.toISOString().split('T')[0];
+};
+
+const getThreeMonthsAgoFormatted = (): string => {
+  const d = new Date();
+  d.setMonth(d.getMonth() - 3);
+  return d.toISOString().split('T')[0];
+};
+
+const getStartOfYearFormatted = (): string => {
+  const d = new Date();
+  d.setMonth(0, 1);
+  return d.toISOString().split('T')[0];
+};
 
 const formatToDDMMYYYY = (dateStr: string | null | undefined): string => {
   if (!dateStr) return '—';
@@ -177,9 +193,12 @@ const EmptyStateView = ({ isConnected, onReset }: { isConnected: boolean; onRese
 );
 
 export default function PurchasesExpensesDashboard() {
+  const initialFrom = useMemo(() => getSixMonthsAgoFormatted(), []);
+  const initialTo = useMemo(() => getTodayFormatted(), []);
+
   // Draft Filter States (Form Controls - do not affect data until Search is clicked)
-  const [draftFromDate, setDraftFromDate] = useState<string>('2026-04-01');
-  const [draftToDate, setDraftToDate] = useState<string>('2026-09-30');
+  const [draftFromDate, setDraftFromDate] = useState<string>(initialFrom);
+  const [draftToDate, setDraftToDate] = useState<string>(initialTo);
   const [draftDept, setDraftDept] = useState<string>('ALL');
   const [draftCategory, setDraftCategory] = useState<string>('ALL');
   const [draftVendor, setDraftVendor] = useState<string>('ALL');
@@ -187,8 +206,8 @@ export default function PurchasesExpensesDashboard() {
   const [draftSearchTerm, setDraftSearchTerm] = useState<string>('');
 
   // Applied Filter States (Used for API calls, KPIs & Table Filtering)
-  const [appliedFromDate, setAppliedFromDate] = useState<string>('2026-04-01');
-  const [appliedToDate, setAppliedToDate] = useState<string>('2026-09-30');
+  const [appliedFromDate, setAppliedFromDate] = useState<string>(initialFrom);
+  const [appliedToDate, setAppliedToDate] = useState<string>(initialTo);
   const [appliedDept, setAppliedDept] = useState<string>('ALL');
   const [appliedCategory, setAppliedCategory] = useState<string>('ALL');
   const [appliedVendor, setAppliedVendor] = useState<string>('ALL');
@@ -198,6 +217,7 @@ export default function PurchasesExpensesDashboard() {
   const [activeTab, setActiveTab] = useState<'all' | 'cogs' | 'opex' | 'recurring' | 'overdue'>('all');
   const [selectedBill, setSelectedBill] = useState<ExpenseRecord | null>(null);
   const [compareMode, setCompareMode] = useState<boolean>(true);
+  const [orgName, setOrgName] = useState<string>('');
 
   // DataTables Pagination & Sorting State
   const [pageSize, setPageSize] = useState<number>(100);
@@ -237,6 +257,7 @@ export default function PurchasesExpensesDashboard() {
           setExpensesData([]);
         }
         if (json.connected !== undefined) setIsXeroConnected(json.connected);
+        if (json.orgName) setOrgName(json.orgName);
         if (json.summary) setApiSummary(json.summary);
         if (json.prevSummary) setApiPrevSummary(json.prevSummary);
         if (json.variance) setApiVariance(json.variance);
@@ -271,8 +292,8 @@ export default function PurchasesExpensesDashboard() {
 
   // Explicit Handler to Reset All Filters
   const handleResetFilters = () => {
-    const defaultFrom = '2026-04-01';
-    const defaultTo = '2026-09-30';
+    const defaultFrom = getSixMonthsAgoFormatted();
+    const defaultTo = getTodayFormatted();
 
     setDraftFromDate(defaultFrom);
     setDraftToDate(defaultTo);
@@ -364,12 +385,12 @@ export default function PurchasesExpensesDashboard() {
   const recurringSpend = useMemo(() => expensesData.filter(i => i.recurring).reduce((acc, curr) => acc + curr.amount, 0), [expensesData]);
   const pendingAmount = useMemo(() => expensesData.filter(i => i.status === 'Pending Approval' || i.status === 'Overdue').reduce((acc, curr) => acc + curr.amount, 0), [expensesData]);
 
-  // Previous Period Computations for Comparison (Live from API or calculated)
-  const prevTotalExpenses = apiPrevSummary?.totalExpenses ?? (totalExpenses * 0.95);
-  const prevDirectCogs = apiPrevSummary?.directCogs ?? (directCogs * 0.94);
-  const prevIndirectOpex = apiPrevSummary?.indirectOpex ?? (indirectOpex * 0.96);
-  const prevRecurringSpend = apiPrevSummary?.recurringSpend ?? (recurringSpend * 0.92);
-  const prevPendingAmount = apiPrevSummary?.pendingAmount ?? (pendingAmount * 0.90);
+  // Previous Period Computations for Comparison (Live from API)
+  const prevTotalExpenses = apiPrevSummary?.totalExpenses ?? 0;
+  const prevDirectCogs = apiPrevSummary?.directCogs ?? 0;
+  const prevIndirectOpex = apiPrevSummary?.indirectOpex ?? 0;
+  const prevRecurringSpend = apiPrevSummary?.recurringSpend ?? 0;
+  const prevPendingAmount = apiPrevSummary?.pendingAmount ?? 0;
 
   const totalVariancePct = apiVariance?.totalExpensesPct ?? (prevTotalExpenses > 0 ? parseFloat((((totalExpenses - prevTotalExpenses) / prevTotalExpenses) * 100).toFixed(1)) : 0);
   const directCogsPct = apiVariance?.directCogsPct ?? (prevDirectCogs > 0 ? parseFloat((((directCogs - prevDirectCogs) / prevDirectCogs) * 100).toFixed(1)) : 0);
@@ -377,12 +398,103 @@ export default function PurchasesExpensesDashboard() {
   const recurringSpendPct = apiVariance?.recurringSpendPct ?? (prevRecurringSpend > 0 ? parseFloat((((recurringSpend - prevRecurringSpend) / prevRecurringSpend) * 100).toFixed(1)) : 0);
   const pendingAmountPct = apiVariance?.pendingAmountPct ?? (prevPendingAmount > 0 ? parseFloat((((pendingAmount - prevPendingAmount) / prevPendingAmount) * 100).toFixed(1)) : 0);
 
+  // Dynamic Metrics for Cards
+  const cogsCount = useMemo(() => expensesData.filter(i => i.category === 'Direct COGS').length, [expensesData]);
+  const cogsPct = useMemo(() => totalExpenses > 0 ? ((directCogs / totalExpenses) * 100).toFixed(1) : '0', [directCogs, totalExpenses]);
+  const opexPct = useMemo(() => totalExpenses > 0 ? ((indirectOpex / totalExpenses) * 100).toFixed(1) : '0', [indirectOpex, totalExpenses]);
+  const recurringCount = useMemo(() => expensesData.filter(i => i.recurring).length, [expensesData]);
+  const pendingCount = useMemo(() => expensesData.filter(i => i.status === 'Pending Approval' || i.status === 'Overdue').length, [expensesData]);
+
+  // Dynamic AI Cost Optimization Insights
+  const aiInsights = useMemo(() => {
+    if (expensesData.length === 0) {
+      return [
+        {
+          title: 'No Active Expense Data',
+          tag: 'Status Clean',
+          description: 'No purchase bills match the selected timeframe. Connect Xero or adjust filter parameters to generate live cost optimization insights.',
+          bgClass: 'bg-slate-50 border-slate-200',
+          titleClass: 'text-slate-800',
+          tagClass: 'bg-slate-200 text-slate-700',
+          icon: <ShieldAlert className="h-4 w-4 text-slate-500 shrink-0" />
+        }
+      ];
+    }
+
+    const insights = [];
+
+    // 1. Overdue Bills Insight
+    const overdueBills = expensesData.filter(i => i.status === 'Overdue');
+    if (overdueBills.length > 0) {
+      const topOverdue = overdueBills.reduce((max, b) => b.amount > max.amount ? b : max, overdueBills[0]);
+      insights.push({
+        title: `${overdueBills.length} Overdue Supplier Payment${overdueBills.length > 1 ? 's' : ''}`,
+        tag: 'Action Required',
+        description: `Highest overdue bill: ${topOverdue.vendorName} (${topOverdue.billNumber}) for £${topOverdue.amount.toLocaleString('en-GB', { minimumFractionDigits: 2 })} (Due: ${formatToDDMMYYYY(topOverdue.dueDate)}). Authorization required.`,
+        bgClass: 'bg-rose-50/70 border-rose-200/80',
+        titleClass: 'text-rose-950',
+        tagClass: 'bg-rose-200/80 text-rose-800',
+        icon: <Clock className="h-4 w-4 text-rose-600 shrink-0" />
+      });
+    } else {
+      insights.push({
+        title: 'Supplier Payment Timelines Healthy',
+        tag: 'Up to Date',
+        description: 'All supplier bills are paid or scheduled within due dates. Zero late payment penalties incurred across all active vendor accounts.',
+        bgClass: 'bg-emerald-50/70 border-emerald-200/80',
+        titleClass: 'text-emerald-950',
+        tagClass: 'bg-emerald-200/80 text-emerald-800',
+        icon: <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+      });
+    }
+
+    // 2. Vendor Concentration Insight
+    const vendorSums: Record<string, number> = {};
+    expensesData.forEach(i => {
+      vendorSums[i.vendorName] = (vendorSums[i.vendorName] || 0) + i.amount;
+    });
+    const topVendorEntry = Object.entries(vendorSums).sort((a, b) => b[1] - a[1])[0];
+    if (topVendorEntry && totalExpenses > 0) {
+      const vendorName = topVendorEntry[0];
+      const vendorAmount = topVendorEntry[1];
+      const pct = ((vendorAmount / totalExpenses) * 100).toFixed(1);
+      insights.push({
+        title: `Top Supplier Spend: ${vendorName}`,
+        tag: `${pct}% Total Spend`,
+        description: `${vendorName} represents £${vendorAmount.toLocaleString('en-GB', { minimumFractionDigits: 2 })} (${pct}% of total period purchases). Review vendor contract terms for volume discounts.`,
+        bgClass: 'bg-amber-50/70 border-amber-200/80',
+        titleClass: 'text-amber-950',
+        tagClass: 'bg-amber-200/80 text-amber-800',
+        icon: <ShieldAlert className="h-4 w-4 text-amber-600 shrink-0" />
+      });
+    }
+
+    // 3. SaaS & Recurring Run-rate Insight
+    const saasItems = expensesData.filter(i => i.recurring || i.category === 'SaaS & Software');
+    const totalSaas = saasItems.reduce((acc, curr) => acc + curr.amount, 0);
+    if (totalSaas > 0) {
+      const saasPct = ((totalSaas / (totalExpenses || 1)) * 100).toFixed(1);
+      insights.push({
+        title: `Software & SaaS Subscription Run-Rate`,
+        tag: `${saasItems.length} Subscriptions`,
+        description: `Active recurring SaaS commitments total £${totalSaas.toLocaleString('en-GB', { minimumFractionDigits: 2 })} (${saasPct}% of total period spend). Audit active seats to eliminate duplicate software licenses.`,
+        bgClass: 'bg-blue-50/70 border-blue-200/80',
+        titleClass: 'text-blue-950',
+        tagClass: 'bg-blue-200/80 text-blue-800',
+        icon: <Layers className="h-4 w-4 text-blue-600 shrink-0" />
+      });
+    }
+
+    return insights;
+  }, [expensesData, totalExpenses]);
+
   // Dynamic ECharts 1: Gradient Area Spend Trajectory vs Budget & Comparative View
   const trajectoryChartOption = useMemo(() => {
     const monthGroupMap: Record<string, { cogs: number; opex: number }> = {};
+    const currentMonthLabel = new Date().toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
     expensesData.forEach(item => {
       const d = new Date(item.date);
-      const monthKey = !isNaN(d.getTime()) ? d.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }) : 'Sep 2026';
+      const monthKey = !isNaN(d.getTime()) ? d.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }) : currentMonthLabel;
       if (!monthGroupMap[monthKey]) monthGroupMap[monthKey] = { cogs: 0, opex: 0 };
       if (item.category === 'Direct COGS') {
         monthGroupMap[monthKey].cogs += item.amount;
@@ -393,15 +505,15 @@ export default function PurchasesExpensesDashboard() {
 
     let months = Object.keys(monthGroupMap);
     if (months.length === 0) {
-      months = ['Sep 2026'];
-      monthGroupMap['Sep 2026'] = { cogs: 0, opex: 0 };
+      months = [currentMonthLabel];
+      monthGroupMap[currentMonthLabel] = { cogs: 0, opex: 0 };
     }
 
     const cogsData = months.map(m => parseFloat(monthGroupMap[m].cogs.toFixed(2)));
     const opexData = months.map(m => parseFloat(monthGroupMap[m].opex.toFixed(2)));
     const totalData = months.map(m => parseFloat((monthGroupMap[m].cogs + monthGroupMap[m].opex).toFixed(2)));
-    const budgetLimitData = totalData.map(val => parseFloat((val * 1.15).toFixed(2)));
-    const priorPeriodData = totalData.map(val => parseFloat((val * 0.95).toFixed(2)));
+    const budgetLimitData = totalData.map(val => parseFloat((val * 1.1).toFixed(2)));
+    const priorPeriodData = months.map(() => apiPrevSummary?.totalExpenses ? parseFloat((apiPrevSummary.totalExpenses / Math.max(1, months.length)).toFixed(2)) : 0);
 
     return {
       grid: { left: '3%', right: '4%', top: '15%', bottom: '8%', containLabel: true },
@@ -632,7 +744,7 @@ export default function PurchasesExpensesDashboard() {
                     <Zap className="h-2.5 w-2.5 text-blue-600" />
                     Live Xero Sync
                   </span>
-                  <span className="text-[11px] text-slate-400 font-semibold">• MI Health Ltd</span>
+                  <span className="text-[11px] text-slate-400 font-semibold">• {orgName || 'Connected Organisation'}</span>
                 </div>
                 <p className="text-xs text-slate-500 font-medium mt-0.5">
                   Unified procurement intelligence, vendor cost commitments & software license tracking
@@ -697,31 +809,31 @@ export default function PurchasesExpensesDashboard() {
               <div className="flex items-center gap-1 bg-white p-0.5 rounded-lg border border-slate-200 shadow-2xs">
                 <button
                   type="button"
-                  onClick={() => handleApplyFilters('2026-09-01', '2026-09-30')}
+                  onClick={() => handleApplyFilters(getStartOfMonthFormatted(), getTodayFormatted())}
                   className="px-2 py-1 hover:bg-blue-50 hover:text-blue-600 rounded text-[11px] font-bold text-slate-700 transition cursor-pointer"
                 >
                   This Month
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleApplyFilters('2026-07-01', '2026-09-30')}
+                  onClick={() => handleApplyFilters(getThreeMonthsAgoFormatted(), getTodayFormatted())}
                   className="px-2 py-1 hover:bg-blue-50 hover:text-blue-600 rounded text-[11px] font-bold text-slate-700 transition cursor-pointer"
                 >
                   Last 3 Months
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleApplyFilters('2026-04-01', '2026-09-30')}
+                  onClick={() => handleApplyFilters(getSixMonthsAgoFormatted(), getTodayFormatted())}
                   className="px-2 py-1 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded text-[11px] font-bold transition cursor-pointer"
                 >
                   Last 6 Months
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleApplyFilters('2026-01-01', '2026-09-30')}
+                  onClick={() => handleApplyFilters(getStartOfYearFormatted(), getTodayFormatted())}
                   className="px-2 py-1 hover:bg-blue-50 hover:text-blue-600 rounded text-[11px] font-bold text-slate-700 transition cursor-pointer"
                 >
-                  YTD 2026
+                  YTD {new Date().getFullYear()}
                 </button>
               </div>
             </div>
@@ -888,7 +1000,7 @@ export default function PurchasesExpensesDashboard() {
             ) : (
               <div className="flex items-center gap-1.5 text-[11px] text-emerald-600 font-bold mt-2">
                 <TrendingUp className="h-3.5 w-3.5" />
-                <span>+4.2% MoM spend trajectory</span>
+                <span>{expensesData.length} Bills Total</span>
               </div>
             )}
           </div>
@@ -915,8 +1027,8 @@ export default function PurchasesExpensesDashboard() {
               </div>
             ) : (
               <div className="text-[11px] text-slate-500 font-bold mt-2 flex items-center justify-between">
-                <span>64.5% of Total Purchases</span>
-                <span className="text-indigo-600 font-extrabold">13 Accounts</span>
+                <span>{cogsPct}% of Total Purchases</span>
+                <span className="text-indigo-600 font-extrabold">{cogsCount} Bills</span>
               </div>
             )}
           </div>
@@ -944,7 +1056,7 @@ export default function PurchasesExpensesDashboard() {
             ) : (
               <div className="text-[11px] text-amber-600 font-bold mt-2 flex items-center gap-1">
                 <Activity className="h-3.5 w-3.5" />
-                <span>82% Monthly Budget Burn Rate</span>
+                <span>{opexPct}% of Total Purchases</span>
               </div>
             )}
           </div>
@@ -971,7 +1083,7 @@ export default function PurchasesExpensesDashboard() {
               </div>
             ) : (
               <div className="text-[11px] text-sky-700 font-bold mt-2 flex items-center justify-between">
-                <span>24 Software Subscriptions</span>
+                <span>{recurringCount} Software Subscriptions</span>
                 <span className="px-1.5 py-0.5 rounded bg-sky-100 text-sky-800 text-[10px]">Active</span>
               </div>
             )}
@@ -1000,7 +1112,7 @@ export default function PurchasesExpensesDashboard() {
             ) : (
               <div className="flex items-center gap-1 text-[11px] text-rose-600 font-bold mt-2">
                 <span className="h-2 w-2 rounded-full bg-rose-500 animate-pulse" />
-                <span>4 Priority Authorization Required</span>
+                <span>{pendingCount} Priority Authorization Required</span>
               </div>
             )}
           </div>
@@ -1072,58 +1184,27 @@ export default function PurchasesExpensesDashboard() {
                 <h3 className="text-base font-extrabold text-slate-900 tracking-tight">AI Cost Optimization Insights</h3>
               </div>
               <span className="px-2.5 py-0.5 bg-amber-100 text-amber-900 rounded-full text-[10.5px] font-black uppercase tracking-wider">
-                3 Actionable Alerts
+                {aiInsights.length} Actionable Alert{aiInsights.length !== 1 ? 's' : ''}
               </span>
             </div>
 
             <div className="space-y-3">
-              {/* Alert 1 */}
-              <div className="p-3.5 bg-amber-50/70 border border-amber-200/80 rounded-2xl space-y-1.5 hover:shadow-2xs transition">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-black text-amber-950 flex items-center gap-2">
-                    <ShieldAlert className="h-4 w-4 text-amber-600 shrink-0" />
-                    AWS Cloud Infrastructure Spend Jump
-                  </span>
-                  <span className="text-[10px] font-black text-amber-800 bg-amber-200/80 px-2 py-0.5 rounded-md">
-                    +18% YoY
-                  </span>
+              {aiInsights.map((insight, idx) => (
+                <div key={idx} className={cn("p-3.5 border rounded-2xl space-y-1.5 hover:shadow-2xs transition", insight.bgClass)}>
+                  <div className="flex items-center justify-between">
+                    <span className={cn("text-xs font-black flex items-center gap-2", insight.titleClass)}>
+                      {insight.icon}
+                      {insight.title}
+                    </span>
+                    <span className={cn("text-[10px] font-black px-2 py-0.5 rounded-md", insight.tagClass)}>
+                      {insight.tag}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-600 leading-relaxed font-medium">
+                    {insight.description}
+                  </p>
                 </div>
-                <p className="text-xs text-slate-600 leading-relaxed font-medium">
-                  AWS spend reached £14,820.50 this month. Transitioning core EC2 nodes to 1-Year Reserved Instances will save <strong>£3,200/yr</strong>.
-                </p>
-              </div>
-
-              {/* Alert 2 */}
-              <div className="p-3.5 bg-blue-50/70 border border-blue-200/80 rounded-2xl space-y-1.5 hover:shadow-2xs transition">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-black text-blue-950 flex items-center gap-2">
-                    <Layers className="h-4 w-4 text-blue-600 shrink-0" />
-                    Duplicate Software License Overlap
-                  </span>
-                  <span className="text-[10px] font-black text-blue-800 bg-blue-200/80 px-2 py-0.5 rounded-md">
-                    Optimization
-                  </span>
-                </div>
-                <p className="text-xs text-slate-600 leading-relaxed font-medium">
-                  Active subscriptions detected for both Salesforce and HubSpot across Sales & Marketing. Consolidating seats saves <strong>£1,850/mo</strong>.
-                </p>
-              </div>
-
-              {/* Alert 3 */}
-              <div className="p-3.5 bg-rose-50/70 border border-rose-200/80 rounded-2xl space-y-1.5 hover:shadow-2xs transition">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-black text-rose-950 flex items-center gap-2">
-                    <Clock className="h-4 w-4 text-rose-600 shrink-0" />
-                    High-Value Supplier Payment Due Soon
-                  </span>
-                  <span className="text-[10px] font-black text-rose-800 bg-rose-200/80 px-2 py-0.5 rounded-md">
-                    Due in 3 Days
-                  </span>
-                </div>
-                <p className="text-xs text-slate-600 leading-relaxed font-medium">
-                  Phoenix Medical Supplies bill of <strong>£32,400.00</strong> requires CFO authorization before Friday to avoid late payment penalty.
-                </p>
-              </div>
+              ))}
             </div>
           </div>
         </div>

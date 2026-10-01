@@ -146,74 +146,75 @@ export default function CustomerConcentrationPanel({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="absolute inset-0 bg-slate-900/40 backdrop-blur-xs cursor-pointer"
+            className="absolute inset-0 bg-slate-950/60 backdrop-blur-md cursor-pointer"
             onClick={onClose}
             aria-hidden="true"
           />
 
-          {/* Ultra Smooth Right Slide-Over Drawer Panel */}
+          {/* Sleek Right Slide-Over Drawer Panel */}
           <motion.div
             initial={{ x: "100%" }}
             animate={{ x: 0 }}
             exit={{ x: "100%" }}
             transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-            className="relative z-10 w-full max-w-4xl bg-white dark:bg-slate-900 shadow-2xl h-full flex flex-col border-l border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-100 font-sans"
+            className="relative z-10 w-full max-w-4xl bg-slate-50 dark:bg-slate-950 shadow-2xl h-full flex flex-col border-l border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-100 font-sans"
           >
 
             {/* MODAL HEADER */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/80 shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-2xl bg-amber-50 dark:bg-amber-950/80 border border-amber-200/80 dark:border-amber-800/80 flex items-center justify-center text-amber-600 dark:text-amber-400 shadow-2xs">
-                  <Users className="h-5 w-5" />
+            <div className="flex items-center justify-between px-8 py-5 border-b border-slate-200/80 dark:border-slate-800 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md shrink-0 shadow-xs">
+              <div className="flex items-center gap-4">
+                <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-amber-500/10 to-orange-500/20 dark:from-amber-500/20 dark:to-orange-500/30 border border-amber-300/80 dark:border-amber-700/60 flex items-center justify-center text-amber-600 dark:text-amber-400 shadow-sm">
+                  <Users className="h-6 w-6" />
                 </div>
                 <div>
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-xl font-black tracking-tight text-slate-900 dark:text-white">
+                  <div className="flex items-center gap-3">
+                    <h2 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">
                       Customer Concentration & Risk Analysis
                     </h2>
-                    <span className={`text-[10.5px] font-black px-2.5 py-0.5 rounded-full border ${
+                    <span className={`text-xs font-black px-3 py-1 rounded-full border shadow-2xs ${
                       riskLevel === 'High Risk'
-                        ? 'bg-amber-100 text-amber-900 border-amber-300'
-                        : 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                        ? 'bg-amber-50 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-700/80'
+                        : 'bg-emerald-50 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700/80'
                     }`}>
                       {riskLevel} ({top5Pct.toFixed(1)}% Top 5)
                     </span>
                   </div>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-medium">
-                    Pareto 80/20 distribution, single-customer exposure & revenue vulnerability audit.
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 font-medium">
+                    Pareto 80/20 distribution, single-customer exposure & revenue vulnerability audit across registered accounts.
                   </p>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-3">
                 <button
                   onClick={handleCopy}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 transition cursor-pointer text-xs font-semibold"
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 transition cursor-pointer text-xs font-bold text-slate-700 dark:text-slate-200 shadow-2xs"
                 >
-                  {copied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5 text-slate-400" />}
-                  <span>{copied ? 'Copied' : 'Copy'}</span>
+                  {copied ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4 text-slate-400" />}
+                  <span>{copied ? 'Copied' : 'Copy Breakdown'}</span>
                 </button>
 
                 <button
                   onClick={handleExportCSV}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 transition cursor-pointer text-xs font-semibold"
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 transition cursor-pointer text-xs font-bold text-slate-700 dark:text-slate-200 shadow-2xs"
                 >
-                  <Download className="h-3.5 w-3.5 text-slate-400" />
+                  <Download className="h-4 w-4 text-slate-400" />
                   <span>CSV Export</span>
                 </button>
 
                 <button
                   onClick={onClose}
-                  className="p-2 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-800 transition cursor-pointer outline-none ml-1"
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-rose-50 dark:hover:bg-rose-950/50 hover:text-rose-600 text-slate-500 dark:text-slate-400 transition cursor-pointer font-bold text-xs ml-2"
                   aria-label="Close modal"
                 >
-                  <X className="h-5 w-5" />
+                  <span className="text-[10px] uppercase tracking-wider font-extrabold text-slate-400">ESC</span>
+                  <X className="h-4 w-4" />
                 </button>
               </div>
             </div>
 
-            {/* TOP 4 KPI METRICS GRID */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 px-6 pt-5 pb-3 border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0">
+            {/* TOP 4 KPI METRICS GRID - FULL WIDTH 4 COLS */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 px-8 py-5 border-b border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900/60 shrink-0">
               
               {/* CARD 1: TOP 5 CONCENTRATION */}
               <div className="bg-amber-50/60 dark:bg-slate-950/60 border border-amber-200/80 dark:border-slate-800 rounded-2xl p-4 shadow-2xs">

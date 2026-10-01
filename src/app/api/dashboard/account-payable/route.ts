@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db, parseXeroDate } from '@/lib/db';
 import { getTenantIdFromSession } from '@/lib/auth';
 import { getXeroAccessToken, fetchXeroResource } from '@/lib/xero';
+import { resolveBrandingTheme } from '@/lib/constants/brandingThemes';
 
 export async function GET(req: NextRequest) {
   const tenantId = await getTenantIdFromSession();
@@ -166,21 +167,34 @@ export async function GET(req: NextRequest) {
         date: invDate ? invDate.toISOString() : null,
         dueDate: invDueDate ? invDueDate.toISOString() : null,
         total: isCreditNote ? -Math.abs(total) : total,
+        subTotal: inv.SubTotal !== undefined ? parseFloat(inv.SubTotal) : (inv.sub_total !== undefined ? parseFloat(inv.sub_total) : (inv.subTotal !== undefined ? parseFloat(inv.subTotal) : undefined)),
+        totalTax: inv.TotalTax !== undefined ? parseFloat(inv.TotalTax) : (inv.total_tax !== undefined ? parseFloat(inv.total_tax) : (inv.totalTax !== undefined ? parseFloat(inv.totalTax) : undefined)),
         amountDue,
         amountPaid,
         daysOverdue,
         ageingBucket,
         reference: inv.Reference || inv.reference || '—',
         currency: inv.CurrencyCode || inv.currency || currency,
-        lineItems: Array.isArray(inv.LineItems || inv.line_items)
-          ? (inv.LineItems || inv.line_items).map((item: any) => ({
-              description: item.Description || item.description || 'Line Item',
+        brandingTheme: resolveBrandingTheme(inv),
+        lineItems: Array.isArray(inv.LineItems || inv.line_items || inv.lineItems)
+          ? (inv.LineItems || inv.line_items || inv.lineItems).map((item: any) => ({
+              Description: item.Description || item.description || item.desc || item.ItemCode || 'Line Item',
+              description: item.Description || item.description || item.desc || item.ItemCode || 'Line Item',
+              Quantity: parseFloat(item.Quantity || item.quantity || 1),
               quantity: parseFloat(item.Quantity || item.quantity || 1),
-              unitAmount: parseFloat(item.UnitAmount || item.unit_amount || 0),
-              lineAmount: parseFloat(item.LineAmount || item.line_amount || 0),
-              accountCode: item.AccountCode || item.account_code || ''
+              UnitAmount: parseFloat(item.UnitAmount || item.unit_amount || item.unitAmount || 0),
+              unitAmount: parseFloat(item.UnitAmount || item.unit_amount || item.unitAmount || 0),
+              LineAmount: parseFloat(item.LineAmount || item.line_amount || item.lineAmount || 0),
+              lineAmount: parseFloat(item.LineAmount || item.line_amount || item.lineAmount || 0),
+              AccountCode: item.AccountCode || item.accountCode || item.account_code || '',
+              accountCode: item.AccountCode || item.accountCode || item.account_code || '',
+              TaxType: item.TaxType || item.taxType || item.tax_type || '',
+              taxType: item.TaxType || item.taxType || item.tax_type || '',
+              TaxAmount: parseFloat(item.TaxAmount || item.taxAmount || item.tax_amount || 0),
+              taxAmount: parseFloat(item.TaxAmount || item.taxAmount || item.tax_amount || 0)
             }))
-          : []
+          : [],
+        attachments: inv.Attachments || inv.attachments || []
       };
     });
 

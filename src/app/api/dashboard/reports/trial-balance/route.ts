@@ -196,32 +196,16 @@ export async function GET(req: NextRequest) {
     }
     const orgCurrency = org?.BaseCurrency || 'USD';
 
-    // Default mock list matches mockup exactly if Xero does not return records
     if (!report) {
-      const mockAccounts: TrialBalanceAccount[] = [
-        { code: '111', name: 'Cash at Bank', type: 'Bank', debit: 4500.00, credit: 0, netBalance: 4500.00 },
-        { code: '112', name: 'Accounts Receivable', type: 'Accounts Receivable', debit: 3250.00, credit: 0, netBalance: 3250.00 },
-        { code: '113', name: 'Inventory', type: 'Other Current Asset', debit: 1200.00, credit: 0, netBalance: 1200.00 },
-        { code: '114', name: 'Prepayments', type: 'Other Current Asset', debit: 350.00, credit: 0, netBalance: 350.00 },
-        { code: '121', name: 'Equipment', type: 'Fixed Asset', debit: 5800.00, credit: 0, netBalance: 5800.00 },
-        { code: '122', name: 'Furniture & Fixtures', type: 'Fixed Asset', debit: 553.33, credit: 0, netBalance: 553.33 },
-        { code: '211', name: 'Accounts Payable', type: 'Accounts Payable', debit: 0, credit: 3600.00, netBalance: -3600.00 },
-        { code: '212', name: 'GST Payable', type: 'Other Current Liability', debit: 0, credit: 1420.00, netBalance: -1420.00 },
-        { code: '213', name: 'Payroll Liabilities', type: 'Other Current Liability', debit: 0, credit: 980.00, netBalance: -980.00 },
-        { code: '221', name: 'Business Loan', type: 'Long Term Liability', debit: 0, credit: 6623.65, netBalance: -6623.65 },
-        { code: '310', name: 'Owner Contribution', type: 'Equity', debit: 0, credit: 1500.00, netBalance: -1500.00 },
-        { code: '320', name: 'Retained Earnings', type: 'Equity', debit: 0, credit: 1529.68, netBalance: -1529.68 }
-      ];
-
       return NextResponse.json({
-        connected: true,
+        connected: !!tokenInfo,
         summary: {
-          totalDebit: 15653.33,
-          totalCredit: 15653.33,
+          totalDebit: 0,
+          totalCredit: 0,
           difference: 0,
           balanced: true
         },
-        accounts: mockAccounts,
+        accounts: [],
         meta: { currency: orgCurrency, calculatedAt: new Date().toISOString() }
       });
     }

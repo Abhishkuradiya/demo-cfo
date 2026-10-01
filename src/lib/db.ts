@@ -18,13 +18,17 @@ export function parseXeroDate(dateStr: any): Date | null {
   return isNaN(parsed.getTime()) ? null : parsed;
 }
 
-const pgPool = new Pool({
-  host: process.env.DB_HOST || 'localhost',
+export const pgPool = new Pool({
+  host: process.env.DB_HOST || '127.0.0.1',
   port: parseInt(process.env.DB_PORT || '5432'),
   user: process.env.DB_USER || 'postgres',
   password: process.env.DB_PASSWORD || 'postgres',
   database: process.env.DB_NAME || 'virtual_cfo',
   connectionTimeoutMillis: 5000 // Stable timeout to connect, falls back to JSON if pg is truly down
+});
+
+pgPool.on('error', (err) => {
+  console.error('Unexpected error on idle PostgreSQL client:', err.message);
 });
  
 let isPgConnected = true;
@@ -70,6 +74,57 @@ const initPgTables = async () => {
         user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
         session_token VARCHAR(255) UNIQUE NOT NULL,
         expires_at TIMESTAMP NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Create User Invitations Table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS user_invitations (
+        id SERIAL PRIMARY KEY,
+        token VARCHAR(255) UNIQUE NOT NULL,
+        email VARCHAR(255) NOT NULL,
+        first_name VARCHAR(255),
+        organization_name VARCHAR(255) NOT NULL,
+        role VARCHAR(100) DEFAULT 'Finance Manager',
+        invited_by VARCHAR(255) DEFAULT 'Super Administrator',
+        status VARCHAR(50) DEFAULT 'Pending',
+        expires_at TIMESTAMP NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Create Organization Onboarding Profiles Table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS organization_profiles (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        full_name VARCHAR(255),
+        work_email VARCHAR(255),
+        job_title VARCHAR(100),
+        financial_decision_role VARCHAR(100),
+        business_name VARCHAR(255),
+        business_type VARCHAR(100),
+        industry VARCHAR(100),
+        business_description TEXT,
+        employees_range VARCHAR(50),
+        customers_range VARCHAR(50),
+        annual_revenue_range VARCHAR(50),
+        currency VARCHAR(10) DEFAULT 'INR',
+        legal_entities_count VARCHAR(20),
+        monetization_models JSONB,
+        sales_channels JSONB,
+        revenue_model VARCHAR(50),
+        payment_terms VARCHAR(50),
+        fiscal_year VARCHAR(50),
+        accounting_basis VARCHAR(50),
+        primary_accounting_platform VARCHAR(100),
+        bank_reconciliation_frequency VARCHAR(50),
+        cfo_help_priorities JSONB,
+        biggest_financial_challenge VARCHAR(255),
+        improvement_goals_12m VARCHAR(255),
+        custom_cfo_notes TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
@@ -202,6 +257,18 @@ const initPgTables = async () => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(tenant_id, item_id)
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS system_menu_permissions (
+        id SERIAL PRIMARY KEY,
+        role VARCHAR(50) DEFAULT 'ALL',
+        menu_key VARCHAR(255) NOT NULL,
+        is_enabled BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(role, menu_key)
       );
     `);
 
@@ -358,6 +425,32 @@ const initPgTables = async () => {
       );
     `);
 
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS xero_account_transaction_rows (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        account_code VARCHAR(50),
+        account_name VARCHAR(255),
+        date TIMESTAMP,
+        source VARCHAR(100),
+        source_id VARCHAR(255),
+        description TEXT,
+        reference VARCHAR(255),
+        currency VARCHAR(10) DEFAULT 'GBP',
+        debit DECIMAL DEFAULT 0,
+        credit DECIMAL DEFAULT 0,
+        gross_amount DECIMAL DEFAULT 0,
+        tax_amount DECIMAL DEFAULT 0,
+        running_balance DECIMAL DEFAULT 0,
+        source_account_id VARCHAR(255),
+        source_line_id VARCHAR(255),
+        transaction_type VARCHAR(50),
+        source_id_type VARCHAR(50),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, source_account_id, date, transaction_type, reference, description, debit, credit)
+      );
+    `);
+
     // Alter table to add currency, invoice_date, contact_name, due_date, and last_synced_at if they don't exist
     await client.query(`
       ALTER TABLE invoices ADD COLUMN IF NOT EXISTS currency VARCHAR(50);
@@ -375,6 +468,19 @@ const initPgTables = async () => {
       ALTER TABLE tenant_credentials ADD COLUMN IF NOT EXISTS region VARCHAR(50);
       ALTER TABLE tenant_credentials ADD COLUMN IF NOT EXISTS marketplace_id VARCHAR(100);
       ALTER TABLE tenant_credentials ADD COLUMN IF NOT EXISTS environment VARCHAR(20) DEFAULT 'production';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS is_onboarded BOOLEAN DEFAULT FALSE;
+      ALTER TABLE organization_profiles ADD COLUMN IF NOT EXISTS current_step INTEGER DEFAULT 1;
+      ALTER TABLE accounts ADD COLUMN IF NOT EXISTS account_id VARCHAR(255);
+      ALTER TABLE accounts ADD COLUMN IF NOT EXISTS status VARCHAR(50);
+      ALTER TABLE reports ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+      ALTER TABLE account_transactions ADD COLUMN IF NOT EXISTS source_account_id VARCHAR(255);
+      ALTER TABLE account_transactions ADD COLUMN IF NOT EXISTS source_line_id VARCHAR(255);
+      ALTER TABLE account_transactions ADD COLUMN IF NOT EXISTS transaction_type VARCHAR(50);
+      ALTER TABLE account_transactions ADD COLUMN IF NOT EXISTS tax_type VARCHAR(100);
+      ALTER TABLE account_transactions ADD COLUMN IF NOT EXISTS net_amount DECIMAL DEFAULT 0;
+      ALTER TABLE account_transactions ADD COLUMN IF NOT EXISTS tax_amount DECIMAL DEFAULT 0;
+      ALTER TABLE account_transactions ADD COLUMN IF NOT EXISTS gross_amount DECIMAL DEFAULT 0;
+      ALTER TABLE account_transactions ADD COLUMN IF NOT EXISTS direction VARCHAR(10) DEFAULT 'DEBIT';
     `);
 
     // Create Amazon Orders Table
@@ -1315,9 +1421,43 @@ const initPgTables = async () => {
         price DECIMAL(15, 2) DEFAULT 0,
         sales_count INTEGER DEFAULT 0,
         revenue DECIMAL(15, 2) DEFAULT 0,
-        currency VARCHAR(10) DEFAULT 'INR',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(tenant_id, product_id)
+      );
+    `);
+
+    // Create Tenant Account Mappings Table (Phase 1 Foundation)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS tenant_account_mappings (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        source VARCHAR(50) NOT NULL DEFAULT 'xero',
+        source_account_id VARCHAR(255) NOT NULL,
+        account_code VARCHAR(50),
+        account_name VARCHAR(255),
+        source_account_type VARCHAR(100),
+        source_account_class VARCHAR(100),
+        financial_statement_category VARCHAR(100) NOT NULL,
+        subcategory VARCHAR(100),
+        cfo_analytical_tag VARCHAR(100),
+        status VARCHAR(50) NOT NULL DEFAULT 'SUGGESTED',
+        confidence_score DECIMAL(5,2) DEFAULT 0.00,
+        user_confirmed BOOLEAN DEFAULT FALSE,
+        active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, source, source_account_id)
+      );
+    `);
+
+    // Create Tenant Engine Settings Table (Phase 4 Feature Control)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS tenant_engine_settings (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        engine_mode VARCHAR(50) DEFAULT 'LEGACY',
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id)
       );
     `);
 
@@ -1356,6 +1496,8 @@ interface JsonSchema {
   gl_cache?: any[];
   tax_transactions?: any[];
   contact_credit_limits?: any[];
+  tenant_account_mappings?: any[];
+  tenant_engine_settings?: any[];
 }
 
 const memoryDb: JsonSchema = {
@@ -1371,6 +1513,8 @@ const memoryDb: JsonSchema = {
   bank_transactions: [],
   prepayments: [],
   overpayments: [],
+  tenant_account_mappings: [],
+  tenant_engine_settings: [],
   inventory_items: [],
   inventory_thresholds: [],
   inventory_sales_history: [],
@@ -1388,8 +1532,279 @@ const writeJsonDb = (data: JsonSchema) => {};
 
 // DATABASE EXPORTS
 export const db = {
+  saveReport: async (tenantId: string | number, reportType: string, rawData: any): Promise<void> => {
+    const tid = typeof tenantId === 'string' ? parseInt(tenantId) || 1 : tenantId;
+    if (isPgConnected) {
+      try {
+        await pgPool.query(`
+          CREATE TABLE IF NOT EXISTS reports (
+            id SERIAL PRIMARY KEY,
+            tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+            report_type VARCHAR(100) NOT NULL,
+            raw_data JSONB NOT NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(tenant_id, report_type)
+          );
+          ALTER TABLE reports ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+        `);
+        await pgPool.query(`
+          INSERT INTO reports (tenant_id, report_type, raw_data)
+          VALUES ($1, $2, $3)
+          ON CONFLICT (tenant_id, report_type) DO UPDATE SET raw_data = EXCLUDED.raw_data, updated_at = CURRENT_TIMESTAMP;
+        `, [tid, reportType, JSON.stringify(rawData)]);
+        return;
+      } catch (e) {
+        console.error("Failed to save report in PG:", e);
+      }
+    }
+    const json = readJsonDb();
+    if (!json.reports) json.reports = [];
+    const idx = json.reports.findIndex((r: any) => r.tenant_id === tid && r.report_type === reportType);
+    if (idx >= 0) json.reports[idx].raw_data = rawData;
+    else json.reports.push({ tenant_id: tid, report_type: reportType, raw_data: rawData });
+    writeJsonDb(json);
+  },
+
+  getAccounts: async (tenantId: string | number): Promise<any[]> => {
+    const tid = typeof tenantId === 'string' ? parseInt(tenantId) || 1 : tenantId;
+    if (isPgConnected) {
+      try {
+        const { rows } = await pgPool.query('SELECT * FROM accounts WHERE tenant_id = $1', [tid]);
+        if (rows.length > 0) {
+          return rows.map(r => ({
+            ...r,
+            account_id: r.external_id || r.account_id || String(r.id),
+            AccountID: r.external_id || r.account_id || String(r.id),
+            code: r.code || r.Code || '',
+            Code: r.code || r.Code || '',
+            name: r.name || r.Name || '',
+            Name: r.name || r.Name || '',
+            type: r.type || r.Type || '',
+            Type: r.type || r.Type || '',
+            status: r.status || r.Status || 'ACTIVE',
+            Status: r.status || r.Status || 'ACTIVE'
+          }));
+        }
+      } catch (e) {
+        // Fallback below
+      }
+    }
+    const report = await db.getReport(tid, 'Accounts');
+    if (report && Array.isArray(report) && report.length > 0) {
+      return report.map(a => ({
+        ...a,
+        account_id: a.account_id || a.AccountID || a.id || a.code,
+        AccountID: a.account_id || a.AccountID || a.id || a.code,
+        code: a.code || a.Code || '',
+        Code: a.code || a.Code || '',
+        name: a.name || a.Name || '',
+        Name: a.name || a.Name || '',
+        type: a.type || a.Type || '',
+        Type: a.type || a.Type || '',
+        status: a.status || a.Status || 'ACTIVE',
+        Status: a.status || a.Status || 'ACTIVE'
+      }));
+    }
+    const mappings = await db.getAccountMappings(tid);
+    if (mappings && mappings.length > 0) {
+      return mappings.map(m => ({
+        account_id: m.source_account_id,
+        AccountID: m.source_account_id,
+        code: m.account_code,
+        Code: m.account_code,
+        name: m.account_name,
+        Name: m.account_name,
+        type: m.financial_statement_category,
+        Type: m.financial_statement_category,
+        status: m.status || 'ACTIVE',
+        Status: m.status || 'ACTIVE'
+      }));
+    }
+    const json = readJsonDb();
+    return (json.accounts || []).filter((x: any) => x.tenant_id === tid).map((acc: any) => ({
+      ...acc,
+      account_id: acc.account_id || acc.external_id || acc.AccountID || String(acc.id),
+      AccountID: acc.account_id || acc.external_id || acc.AccountID || String(acc.id),
+      code: acc.code || acc.Code || '',
+      Code: acc.code || acc.Code || '',
+      name: acc.name || acc.Name || '',
+      Name: acc.name || acc.Name || '',
+      type: acc.type || acc.Type || '',
+      Type: acc.type || acc.Type || '',
+      status: acc.status || acc.Status || 'ACTIVE',
+      Status: acc.status || acc.Status || 'ACTIVE'
+    }));
+  },
+
+  getXeroReport: async (tenantId: string | number, reportType: string, startDate?: string, endDate?: string): Promise<any | null> => {
+    const tid = typeof tenantId === 'string' ? parseInt(tenantId) || 1 : tenantId;
+    if (isPgConnected) {
+      try {
+        if (startDate && endDate) {
+          const key1 = `${reportType}_${startDate}_${endDate}`;
+          const res1 = await pgPool.query('SELECT raw_data FROM reports WHERE tenant_id = $1 AND report_type = $2', [tid, key1]);
+          if (res1.rows[0]?.raw_data) return res1.rows[0].raw_data;
+        }
+        if (endDate) {
+          const key2 = `${reportType}_${endDate}`;
+          const res2 = await pgPool.query('SELECT raw_data FROM reports WHERE tenant_id = $1 AND report_type = $2', [tid, key2]);
+          if (res2.rows[0]?.raw_data) return res2.rows[0].raw_data;
+        }
+        const res3 = await pgPool.query(
+          'SELECT raw_data FROM reports WHERE tenant_id = $1 AND (report_type = $2 OR report_type LIKE $3) ORDER BY updated_at DESC LIMIT 1',
+          [tid, reportType, `${reportType}%`]
+        );
+        if (res3.rows[0]?.raw_data) return res3.rows[0].raw_data;
+      } catch (e) {
+        console.error("Database query failed in getXeroReport:", e);
+      }
+    }
+    return await db.getReport(tid, reportType);
+  },
+
+  getTenantAccountMappings: async (tenantId: string | number): Promise<any[]> => {
+    const tid = typeof tenantId === 'string' ? parseInt(tenantId) || 1 : tenantId;
+    return await db.getAccountMappings(tid);
+  },
+
+  getCanonicalAccountBalance: async (tenantId: string | number, accountId: string, startDate?: string, endDate?: string): Promise<number> => {
+    const tid = typeof tenantId === 'string' ? parseInt(tenantId) || 1 : tenantId;
+    const invoices = await db.getInvoices(tid);
+    let total = 0;
+    for (const inv of invoices) {
+      if (startDate && inv.date && new Date(inv.date) < new Date(startDate)) continue;
+      if (endDate && inv.date && new Date(inv.date) > new Date(endDate)) continue;
+      const lineItems = inv.line_items || inv.lineItems || [];
+      for (const line of lineItems) {
+        if (line.account_id === accountId || line.accountId === accountId || line.account_code === accountId || line.accountCode === accountId) {
+          const amt = Number(line.line_amount || line.lineAmount || line.amount || 0);
+          total += inv.type === 'ACCPAY' ? -amt : amt;
+        }
+      }
+    }
+    return total;
+  },
+
+  getTenantCFOThresholds: async (tenantId: string | number): Promise<any> => {
+    const tid = typeof tenantId === 'string' ? parseInt(tenantId) || 1 : tenantId;
+    if (isPgConnected) {
+      try {
+        const { rows } = await pgPool.query('SELECT * FROM tenant_cfo_thresholds WHERE tenant_id = $1', [tid]);
+        if (rows[0]) {
+          return {
+            marginCompressionThreshold: Number(rows[0].margin_compression_threshold),
+            revenueDeclineThreshold: Number(rows[0].revenue_decline_threshold),
+            opexIncreaseThreshold: Number(rows[0].opex_increase_threshold),
+            arIncreaseThreshold: Number(rows[0].ar_increase_threshold),
+            cashDeclineThreshold: Number(rows[0].cash_decline_threshold),
+            isDefault: false
+          };
+        }
+      } catch (e) {
+        // Table fallback
+      }
+    }
+    const json = readJsonDb();
+    const item = (json as any).tenant_cfo_thresholds?.find((t: any) => t.tenant_id === tid);
+    if (item) {
+      return { ...item, isDefault: false };
+    }
+    return {
+      marginCompressionThreshold: 5,
+      revenueDeclineThreshold: 5,
+      opexIncreaseThreshold: 10,
+      arIncreaseThreshold: 15,
+      cashDeclineThreshold: 10,
+      isDefault: true
+    };
+  },
+
+  saveTenantCFOThresholds: async (tenantId: string | number, thresholds: any): Promise<void> => {
+    const tid = typeof tenantId === 'string' ? parseInt(tenantId) || 1 : tenantId;
+    if (isPgConnected) {
+      try {
+        await pgPool.query(`
+          CREATE TABLE IF NOT EXISTS tenant_cfo_thresholds (
+            id SERIAL PRIMARY KEY,
+            tenant_id INTEGER UNIQUE REFERENCES tenants(id) ON DELETE CASCADE,
+            margin_compression_threshold NUMERIC DEFAULT 5,
+            revenue_decline_threshold NUMERIC DEFAULT 5,
+            opex_increase_threshold NUMERIC DEFAULT 10,
+            ar_increase_threshold NUMERIC DEFAULT 15,
+            cash_decline_threshold NUMERIC DEFAULT 10,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          );
+        `);
+        await pgPool.query(`
+          INSERT INTO tenant_cfo_thresholds (tenant_id, margin_compression_threshold, revenue_decline_threshold, opex_increase_threshold, ar_increase_threshold, cash_decline_threshold)
+          VALUES ($1, $2, $3, $4, $5, $6)
+          ON CONFLICT (tenant_id) DO UPDATE SET
+            margin_compression_threshold = EXCLUDED.margin_compression_threshold,
+            revenue_decline_threshold = EXCLUDED.revenue_decline_threshold,
+            opex_increase_threshold = EXCLUDED.opex_increase_threshold,
+            ar_increase_threshold = EXCLUDED.ar_increase_threshold,
+            cash_decline_threshold = EXCLUDED.cash_decline_threshold,
+            updated_at = CURRENT_TIMESTAMP;
+        `, [
+          tid,
+          thresholds.marginCompressionThreshold ?? 5,
+          thresholds.revenueDeclineThreshold ?? 5,
+          thresholds.opexIncreaseThreshold ?? 10,
+          thresholds.arIncreaseThreshold ?? 15,
+          thresholds.cashDeclineThreshold ?? 10
+        ]);
+        return;
+      } catch (e) {
+        console.error("Failed to save tenant CFO thresholds in PG:", e);
+      }
+    }
+    const json = readJsonDb();
+    if (!(json as any).tenant_cfo_thresholds) (json as any).tenant_cfo_thresholds = [];
+    const idx = (json as any).tenant_cfo_thresholds.findIndex((t: any) => t.tenant_id === tid);
+    const rec = { tenant_id: tid, ...thresholds, isDefault: false };
+    if (idx >= 0) (json as any).tenant_cfo_thresholds[idx] = rec;
+    else (json as any).tenant_cfo_thresholds.push(rec);
+    writeJsonDb(json);
+  },
+
   // Check Connection Type
   isPostgres: () => isPgConnected,
+
+  checkPgConnection: async (): Promise<boolean> => {
+    try {
+      await pgPool.query('SELECT 1');
+      isPgConnected = true;
+      return true;
+    } catch (e) {
+      console.warn("PostgreSQL live ping check failed:", e);
+      isPgConnected = false;
+      return false;
+    }
+  },
+
+  checkPgConnectionDetails: async (): Promise<{ success: boolean; error?: string; code?: string; config?: any }> => {
+    try {
+      await pgPool.query('SELECT 1');
+      isPgConnected = true;
+      return { success: true };
+    } catch (e: any) {
+      console.error("PostgreSQL live ping check failed:", e);
+      isPgConnected = false;
+      return {
+        success: false,
+        error: e?.message || String(e),
+        code: e?.code || 'UNKNOWN_ERROR',
+        config: {
+          host: process.env.DB_HOST || '127.0.0.1',
+          port: process.env.DB_PORT || '5432',
+          user: process.env.DB_USER || 'postgres',
+          database: process.env.DB_NAME || 'virtual_cfo',
+          hasPassword: !!process.env.DB_PASSWORD,
+          passwordLength: process.env.DB_PASSWORD ? process.env.DB_PASSWORD.length : 0
+        }
+      };
+    }
+  },
 
   // 1. TENANT OPERATIONS
   getTenants: async (): Promise<any[]> => {
@@ -1405,6 +1820,7 @@ export const db = {
   createTenant: async (name: string): Promise<any> => {
     if (isPgConnected) {
       try {
+        await pgPool.query("SELECT setval('tenants_id_seq', (SELECT GREATEST(COALESCE(MAX(id), 0), 1) FROM tenants));").catch(() => {});
         const { rows } = await pgPool.query(
           'INSERT INTO tenants (name) VALUES ($1) RETURNING *',
           [name]
@@ -1437,6 +1853,252 @@ export const db = {
       t.name = name;
       writeJsonDb(json);
     }
+  },
+
+  // TENANT ACCOUNT MAPPINGS OPERATIONS (Phase 1 Foundation)
+  getAccountMappings: async (tenantId: number): Promise<any[]> => {
+    if (isPgConnected) {
+      try {
+        const { rows } = await pgPool.query(
+          'SELECT * FROM tenant_account_mappings WHERE tenant_id = $1 AND active = TRUE ORDER BY account_code ASC',
+          [tenantId]
+        );
+        return rows;
+      } catch (e) {
+        console.error("PostgreSQL getAccountMappings query failed:", e);
+        return [];
+      }
+    }
+    const json = readJsonDb();
+    const mappings = json.tenant_account_mappings || [];
+    return mappings.filter((m: any) => m.tenant_id === tenantId && m.active !== false);
+  },
+
+  getAccountMapping: async (tenantId: number, sourceAccountId: string, source: string = 'xero'): Promise<any | null> => {
+    if (isPgConnected) {
+      try {
+        const { rows } = await pgPool.query(
+          'SELECT * FROM tenant_account_mappings WHERE tenant_id = $1 AND source = $2 AND source_account_id = $3',
+          [tenantId, source, sourceAccountId]
+        );
+        return rows[0] || null;
+      } catch (e) {
+        console.error("PostgreSQL getAccountMapping query failed:", e);
+        return null;
+      }
+    }
+    const json = readJsonDb();
+    const mappings = json.tenant_account_mappings || [];
+    return mappings.find((m: any) => m.tenant_id === tenantId && m.source === source && m.source_account_id === sourceAccountId) || null;
+  },
+
+  saveAccountMapping: async (mapping: any): Promise<any> => {
+    const {
+      tenant_id,
+      source = 'xero',
+      source_account_id,
+      account_code,
+      account_name,
+      source_account_type,
+      source_account_class,
+      financial_statement_category,
+      subcategory,
+      cfo_analytical_tag,
+      status = 'SUGGESTED',
+      confidence_score = 0.00,
+      user_confirmed = mapping.user_confirmed !== undefined ? mapping.user_confirmed : (mapping.status === 'CONFIRMED' || mapping.status === 'CUSTOM_OVERRIDE'),
+      active = true
+    } = mapping;
+
+    if (isPgConnected) {
+      try {
+        const { rows } = await pgPool.query(
+          `INSERT INTO tenant_account_mappings 
+            (tenant_id, source, source_account_id, account_code, account_name, source_account_type, source_account_class, financial_statement_category, subcategory, cfo_analytical_tag, status, confidence_score, user_confirmed, active, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, CURRENT_TIMESTAMP)
+           ON CONFLICT (tenant_id, source, source_account_id) DO UPDATE SET
+            account_code = EXCLUDED.account_code,
+            account_name = EXCLUDED.account_name,
+            source_account_type = EXCLUDED.source_account_type,
+            source_account_class = EXCLUDED.source_account_class,
+            financial_statement_category = CASE WHEN tenant_account_mappings.user_confirmed = TRUE THEN tenant_account_mappings.financial_statement_category ELSE EXCLUDED.financial_statement_category END,
+            subcategory = CASE WHEN tenant_account_mappings.user_confirmed = TRUE THEN tenant_account_mappings.subcategory ELSE EXCLUDED.subcategory END,
+            cfo_analytical_tag = CASE WHEN tenant_account_mappings.user_confirmed = TRUE THEN tenant_account_mappings.cfo_analytical_tag ELSE EXCLUDED.cfo_analytical_tag END,
+            status = CASE WHEN tenant_account_mappings.user_confirmed = TRUE THEN tenant_account_mappings.status ELSE EXCLUDED.status END,
+            confidence_score = EXCLUDED.confidence_score,
+            active = EXCLUDED.active,
+            updated_at = CURRENT_TIMESTAMP
+           RETURNING *`,
+          [tenant_id, source, source_account_id, account_code, account_name, source_account_type, source_account_class, financial_statement_category, subcategory, cfo_analytical_tag, status, confidence_score, user_confirmed, active]
+        );
+        return rows[0];
+      } catch (e) {
+        console.error("PostgreSQL saveAccountMapping query failed:", e);
+      }
+    }
+
+    const json = readJsonDb();
+    if (!json.tenant_account_mappings) json.tenant_account_mappings = [];
+    let existingIdx = json.tenant_account_mappings.findIndex((m: any) => m.tenant_id === tenant_id && m.source === source && m.source_account_id === source_account_id);
+    let record: any;
+    if (existingIdx >= 0) {
+      record = { ...json.tenant_account_mappings[existingIdx] };
+      if (!record.user_confirmed) {
+        record = {
+          ...record,
+          account_code,
+          account_name,
+          source_account_type,
+          source_account_class,
+          financial_statement_category,
+          subcategory,
+          cfo_analytical_tag,
+          status,
+          confidence_score,
+          active,
+          updated_at: new Date().toISOString()
+        };
+      }
+      json.tenant_account_mappings[existingIdx] = record;
+    } else {
+      record = {
+        id: json.tenant_account_mappings.length + 1,
+        tenant_id,
+        source,
+        source_account_id,
+        account_code,
+        account_name,
+        source_account_type,
+        source_account_class,
+        financial_statement_category,
+        subcategory,
+        cfo_analytical_tag,
+        status,
+        confidence_score,
+        user_confirmed,
+        active,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+      json.tenant_account_mappings.push(record);
+    }
+    writeJsonDb(json);
+    return record;
+  },
+
+  confirmAccountMapping: async (tenantId: number, mappingId: number | string): Promise<any | null> => {
+    if (isPgConnected) {
+      try {
+        const { rows } = await pgPool.query(
+          `UPDATE tenant_account_mappings 
+           SET status = 'CONFIRMED', user_confirmed = TRUE, updated_at = CURRENT_TIMESTAMP 
+           WHERE id = $1 AND tenant_id = $2 
+           RETURNING *`,
+          [mappingId, tenantId]
+        );
+        return rows[0] || null;
+      } catch (e) {
+        console.error("PostgreSQL confirmAccountMapping query failed:", e);
+        return null;
+      }
+    }
+    const json = readJsonDb();
+    if (!json.tenant_account_mappings) return null;
+    const m = json.tenant_account_mappings.find((x: any) => x.id === mappingId && x.tenant_id === tenantId);
+    if (m) {
+      m.status = 'CONFIRMED';
+      m.user_confirmed = true;
+      m.updated_at = new Date().toISOString();
+      writeJsonDb(json);
+      return m;
+    }
+    return null;
+  },
+
+  overrideAccountMapping: async (tenantId: number, mappingId: number | string, updates: any): Promise<any | null> => {
+    const { financial_statement_category, subcategory, cfo_analytical_tag } = updates;
+    if (isPgConnected) {
+      try {
+        const { rows } = await pgPool.query(
+          `UPDATE tenant_account_mappings 
+           SET financial_statement_category = COALESCE($1, financial_statement_category),
+               subcategory = COALESCE($2, subcategory),
+               cfo_analytical_tag = COALESCE($3, cfo_analytical_tag),
+               status = 'CUSTOM_OVERRIDE',
+               user_confirmed = TRUE,
+               updated_at = CURRENT_TIMESTAMP 
+           WHERE id = $4 AND tenant_id = $5 
+           RETURNING *`,
+          [financial_statement_category, subcategory, cfo_analytical_tag, mappingId, tenantId]
+        );
+        return rows[0] || null;
+      } catch (e) {
+        console.error("PostgreSQL overrideAccountMapping query failed:", e);
+        return null;
+      }
+    }
+    const json = readJsonDb();
+    if (!json.tenant_account_mappings) return null;
+    const m = json.tenant_account_mappings.find((x: any) => x.id === mappingId && x.tenant_id === tenantId);
+    if (m) {
+      if (financial_statement_category) m.financial_statement_category = financial_statement_category;
+      if (subcategory) m.subcategory = subcategory;
+      if (cfo_analytical_tag !== undefined) m.cfo_analytical_tag = cfo_analytical_tag;
+      m.status = 'CUSTOM_OVERRIDE';
+      m.user_confirmed = true;
+      m.updated_at = new Date().toISOString();
+      writeJsonDb(json);
+      return m;
+    }
+    return null;
+  },
+
+  getTenantEngineMode: async (tenantId: number): Promise<'LEGACY' | 'SHADOW' | 'CANONICAL'> => {
+    if (isPgConnected) {
+      try {
+        const { rows } = await pgPool.query(
+          'SELECT engine_mode FROM tenant_engine_settings WHERE tenant_id = $1',
+          [tenantId]
+        );
+        if (rows[0] && rows[0].engine_mode) {
+          return rows[0].engine_mode as any;
+        }
+      } catch (e) {
+        console.error("PostgreSQL getTenantEngineMode query failed:", e);
+      }
+    }
+    const json: any = readJsonDb();
+    if (json.tenant_engine_settings) {
+      const rec = json.tenant_engine_settings.find((x: any) => x.tenant_id === tenantId);
+      if (rec && rec.engine_mode) return rec.engine_mode;
+    }
+    return 'LEGACY';
+  },
+
+  saveTenantEngineMode: async (tenantId: number, mode: 'LEGACY' | 'SHADOW' | 'CANONICAL'): Promise<void> => {
+    if (isPgConnected) {
+      try {
+        await pgPool.query(
+          `INSERT INTO tenants (id, name) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING`,
+          [tenantId, `Tenant ${tenantId}`]
+        );
+        await pgPool.query(
+          `INSERT INTO tenant_engine_settings (tenant_id, engine_mode, updated_at)
+           VALUES ($1, $2, CURRENT_TIMESTAMP)
+           ON CONFLICT (tenant_id) DO UPDATE SET engine_mode = $2, updated_at = CURRENT_TIMESTAMP`,
+          [tenantId, mode]
+        );
+        return;
+      } catch (e) {
+        console.error("PostgreSQL saveTenantEngineMode query failed:", e);
+      }
+    }
+    const json: any = readJsonDb();
+    if (!json.tenant_engine_settings) json.tenant_engine_settings = [];
+    const idx = json.tenant_engine_settings.findIndex((x: any) => x.tenant_id === tenantId);
+    if (idx >= 0) json.tenant_engine_settings[idx].engine_mode = mode;
+    else json.tenant_engine_settings.push({ tenant_id: tenantId, engine_mode: mode });
+    writeJsonDb(json);
   },
  
   // 2. CREDENTIAL OPERATIONS
@@ -1608,6 +2270,10 @@ export const db = {
     };
   },
  
+  saveInvoices: async (tenantId: number, records: any[]): Promise<void> => {
+    return await db.saveCachedRecords(tenantId, 'invoices', records);
+  },
+
   saveCachedRecords: async (tenantId: number, type: 'invoices' | 'contacts' | 'payments' | 'accounts', records: any[]): Promise<void> => {
     if (isPgConnected) {
       try {
@@ -1619,25 +2285,25 @@ export const db = {
           if (type === 'contacts') {
             await pgPool.query(
               'INSERT INTO contacts (tenant_id, external_id, name, email) VALUES ($1, $2, $3, $4)',
-              [tenantId, item.ContactID || null, item.Name || null, item.EmailAddress || null]
+              [tenantId, item.ContactID || item.contact_id || null, item.Name || item.name || null, item.EmailAddress || item.email || null]
             );
           } else if (type === 'invoices') {
             await pgPool.query(
               'INSERT INTO invoices (tenant_id, external_id, invoice_number, reference, type, status, total, amount_due, amount_paid, currency, invoice_date, contact_name, due_date, line_items) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)',
               [
                 tenantId,
-                item.InvoiceID || null,
-                item.InvoiceNumber || null,
-                item.Reference || null,
-                item.Type || null,
-                item.Status || null,
-                item.Total || 0,
-                item.AmountDue || 0,
-                item.AmountPaid || 0,
-                item.CurrencyCode || null,
-                parseXeroDate(item.Date),
-                item.Contact?.Name || null,
-                parseXeroDate(item.DueDate),
+                item.InvoiceID || item.invoice_id || null,
+                item.InvoiceNumber || item.invoice_number || null,
+                item.Reference || item.reference || null,
+                item.Type || item.type || null,
+                item.Status || item.status || null,
+                item.Total || item.total || 0,
+                item.AmountDue || item.amount_due || 0,
+                item.AmountPaid || item.amount_paid || 0,
+                item.CurrencyCode || item.currency || null,
+                parseXeroDate(item.Date || item.date),
+                item.Contact?.Name || item.contactName || item.contact_name || item.contact_id || null,
+                parseXeroDate(item.DueDate || item.due_date),
                 JSON.stringify(item.LineItems || item.line_items || [])
               ]
             );
@@ -1646,19 +2312,27 @@ export const db = {
               'INSERT INTO payments (tenant_id, external_id, amount, payment_type, status, payment_date, invoice_id, invoice_type) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
               [
                 tenantId,
-                item.PaymentID || null,
-                item.Amount || 0,
-                item.PaymentType || null,
-                item.Status || null,
-                item.Date ? parseXeroDate(item.Date) : null,
-                item.Invoice?.InvoiceID || null,
-                item.Invoice?.Type || null
+                item.PaymentID || item.payment_id || null,
+                item.Amount || item.amount || 0,
+                item.PaymentType || item.payment_type || null,
+                item.Status || item.status || null,
+                item.Date || item.date ? parseXeroDate(item.Date || item.date) : null,
+                item.Invoice?.InvoiceID || item.invoice_id || null,
+                item.Invoice?.Type || item.invoice_type || null
               ]
             );
           } else if (type === 'accounts') {
             await pgPool.query(
-              'INSERT INTO accounts (tenant_id, external_id, name, code, type) VALUES ($1, $2, $3, $4, $5)',
-              [tenantId, item.AccountID || null, item.Name || null, item.Code || null, item.Type || null]
+              'INSERT INTO accounts (tenant_id, external_id, account_id, name, code, type, status) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+              [
+                tenantId,
+                item.AccountID || item.account_id || null,
+                item.account_id || item.AccountID || null,
+                item.Name || item.name || null,
+                item.Code || item.code || null,
+                item.Type || item.type || null,
+                item.Status || item.status || 'ACTIVE'
+              ]
             );
           }
         }
@@ -1740,7 +2414,21 @@ export const db = {
   getInvoices: async (tenantId: number): Promise<any[]> => {
     if (isPgConnected) {
       try {
-        const { rows } = await pgPool.query('SELECT * FROM invoices WHERE tenant_id = $1', [tenantId]);
+        const { rows } = await pgPool.query(`
+          SELECT i.*, 
+                 json_agg(
+                   json_build_object(
+                     'PaymentID', p.external_id,
+                     'Amount', p.amount,
+                     'Date', p.payment_date,
+                     'Status', p.status
+                   )
+                 ) FILTER (WHERE p.id IS NOT NULL) as payments
+          FROM invoices i
+          LEFT JOIN payments p ON p.invoice_id = i.external_id AND p.tenant_id = i.tenant_id
+          WHERE i.tenant_id = $1
+          GROUP BY i.id
+        `, [tenantId]);
         if (rows.length > 0) {
           return rows.map(r => ({
             ...r,
@@ -1756,7 +2444,9 @@ export const db = {
             Date: r.invoice_date,
             ContactName: r.contact_name,
             DueDate: r.due_date,
-            LineItems: typeof r.line_items === 'string' ? JSON.parse(r.line_items) : (r.line_items || [])
+            LineItems: typeof r.line_items === 'string' ? JSON.parse(r.line_items) : (r.line_items || []),
+            Payments: r.payments || [],
+            FullyPaidOnDate: (r.payments && r.payments.length > 0) ? r.payments[0].Date : null
           }));
         }
       } catch (e) {
@@ -1799,35 +2489,10 @@ export const db = {
     return json.payments.filter(x => x.tenant_id === tenantId);
   },
 
-  getAccounts: async (tenantId: number): Promise<any[]> => {
-    if (isPgConnected) {
-      try {
-        const { rows } = await pgPool.query('SELECT * FROM accounts WHERE tenant_id = $1', [tenantId]);
-        if (rows.length > 0) {
-          return rows.map(r => ({
-            ...r,
-            AccountID: r.external_id,
-            Name: r.name,
-            Code: r.code,
-            Type: r.type,
-            Status: r.status || 'ACTIVE'
-          }));
-        }
-      } catch (e) {
-        console.error("Database query failed, falling back to JSON DB:", e);
-        isPgConnected = false;
-      }
-    }
-    const json = readJsonDb();
-    return (json.accounts || []).filter(x => x.tenant_id === tenantId).map(acc => ({
-      ...acc,
-      Status: acc.Status || 'ACTIVE'
-    }));
-  },
- 
-  // ── Cash Flow Source Getters ──────────────────────────────────────
+    // ── Cash Flow Source Getters ──────────────────────────────────────
   // BankTransactions, Prepayments, and Overpayments are stored as JSON arrays.
   // In PG mode: stored in the `reports` table with report_type keys.
+  // In JSON mode: stored in dedicated top-level arrays in db.json.eport_type keys.
   // In JSON mode: stored in dedicated top-level arrays in db.json.
 
   getBankTransactions: async (tenantId: number): Promise<any[]> => {
@@ -1871,39 +2536,13 @@ export const db = {
     const json = readJsonDb();
     return (json.overpayments || []).filter(x => x.tenant_id === tenantId);
   },
-
-  saveReport: async (tenantId: number, reportType: string, rawData: any): Promise<void> => {
-    if (isPgConnected) {
-      try {
-        await pgPool.query(
-          `INSERT INTO reports (tenant_id, report_type, raw_data)
-           VALUES ($1, $2, $3)
-           ON CONFLICT (tenant_id, report_type)
-           DO UPDATE SET raw_data = $3`,
-          [tenantId, reportType, JSON.stringify(rawData)]
-        );
-        return;
-      } catch (e) {
-        console.error("Database query failed:", e); throw e;
-      }
-    }
-    const json = readJsonDb();
-    const idx = json.reports.findIndex(r => r.tenant_id === tenantId && r.report_type === reportType);
-    const updated = { tenant_id: tenantId, report_type: reportType, raw_data: rawData };
-    if (idx >= 0) {
-      json.reports[idx] = updated;
-    } else {
-      json.reports.push(updated);
-    }
-    writeJsonDb(json);
-  },
  
   getReport: async (tenantId: number, reportType: string): Promise<any | null> => {
     if (isPgConnected) {
       try {
         const { rows } = await pgPool.query(
-          'SELECT raw_data FROM reports WHERE tenant_id = $1 AND report_type = $2',
-          [tenantId, reportType]
+          'SELECT raw_data FROM reports WHERE tenant_id = $1 AND (report_type = $2 OR report_type LIKE $3) ORDER BY updated_at DESC LIMIT 1',
+          [tenantId, reportType, `${reportType}%`]
         );
         if (rows[0] && rows[0].raw_data) {
           return rows[0].raw_data;
@@ -1914,7 +2553,7 @@ export const db = {
       }
     }
     const json = readJsonDb();
-    const item = json.reports.find(r => r.tenant_id === tenantId && r.report_type === reportType);
+    const item = json.reports.find(r => r.tenant_id === tenantId && (r.report_type === reportType || r.report_type.startsWith(reportType)));
     return item ? item.raw_data : null;
   },
 
@@ -2970,6 +3609,274 @@ export const db = {
     if (json.bookkeeping_rules) {
       json.bookkeeping_rules = json.bookkeeping_rules.filter((r: any) => !(r.tenant_id === tenantId && r.ruleCode === ruleCode));
       writeJsonDb(json);
+    }
+  },
+
+  getAccountTransactions: async (tenantId: number, fromDateStr?: string, toDateStr?: string): Promise<any[]> => {
+    if (isPgConnected) {
+      try {
+        let query = `SELECT * FROM account_transactions WHERE tenant_id = $1`;
+        const params: any[] = [tenantId];
+        if (fromDateStr && toDateStr) {
+          query += ` AND date >= $2 AND date <= $3`;
+          params.push(`${fromDateStr}T00:00:00.000Z`, `${toDateStr}T23:59:59.999Z`);
+        }
+        query += ` ORDER BY date ASC`;
+        const res = await pgPool.query(query, params);
+        return res.rows;
+      } catch (e) {
+        console.error("Database query failed in getAccountTransactions:", e);
+      }
+    }
+    const json: any = readJsonDb();
+    let txns = (json.account_transactions || []).filter((r: any) => r.tenant_id === tenantId);
+    if (fromDateStr && toDateStr) {
+      const fromTs = new Date(`${fromDateStr}T00:00:00.000Z`).getTime();
+      const toTs = new Date(`${toDateStr}T23:59:59.999Z`).getTime();
+      txns = txns.filter((r: any) => {
+        const t = new Date(r.date).getTime();
+        return !isNaN(t) && t >= fromTs && t <= toTs;
+      });
+    }
+    return txns;
+  },
+
+  getXeroAccountTransactionRows: async (tenantId: number, sourceAccountId?: string, accountCode?: string): Promise<any[]> => {
+    if (isPgConnected) {
+      try {
+        await pgPool.query(`
+          CREATE TABLE IF NOT EXISTS xero_account_transaction_rows (
+            id SERIAL PRIMARY KEY,
+            tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+            account_code VARCHAR(50),
+            account_name VARCHAR(255),
+            date TIMESTAMP,
+            source VARCHAR(100),
+            source_id VARCHAR(255),
+            description TEXT,
+            reference VARCHAR(255),
+            currency VARCHAR(10) DEFAULT 'GBP',
+            debit DECIMAL DEFAULT 0,
+            credit DECIMAL DEFAULT 0,
+            gross_amount DECIMAL DEFAULT 0,
+            tax_amount DECIMAL DEFAULT 0,
+            running_balance DECIMAL DEFAULT 0,
+            source_account_id VARCHAR(255),
+            source_line_id VARCHAR(255),
+            transaction_type VARCHAR(50),
+            source_id_type VARCHAR(50),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(tenant_id, source_account_id, date, transaction_type, reference, description, debit, credit)
+          );
+        `);
+        let query = `SELECT * FROM xero_account_transaction_rows WHERE tenant_id = $1`;
+        const params: any[] = [tenantId];
+        if (sourceAccountId) {
+          query += ` AND source_account_id = $2`;
+          params.push(sourceAccountId);
+        } else if (accountCode) {
+          query += ` AND account_code = $2`;
+          params.push(accountCode);
+        }
+        query += ` ORDER BY date ASC`;
+        const res = await pgPool.query(query, params);
+        return res.rows;
+      } catch (e) {
+        console.error("Database query failed in getXeroAccountTransactionRows:", e);
+      }
+    }
+    const json: any = readJsonDb();
+    return (json.xero_account_transaction_rows || []).filter((r: any) => {
+      if (r.tenant_id !== tenantId) return false;
+      if (sourceAccountId && r.source_account_id === sourceAccountId) return true;
+      if (accountCode && r.account_code === accountCode) return true;
+      return !sourceAccountId && !accountCode;
+    });
+  },
+
+  saveXeroAccountTransactionRows: async (tenantId: number, rows: any[]): Promise<number> => {
+    if (!rows || rows.length === 0) return 0;
+    let saved = 0;
+    if (isPgConnected) {
+      const client = await pgPool.connect();
+      try {
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS xero_account_transaction_rows (
+            id SERIAL PRIMARY KEY,
+            tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+            account_code VARCHAR(50),
+            account_name VARCHAR(255),
+            date TIMESTAMP,
+            source VARCHAR(100),
+            source_id VARCHAR(255),
+            description TEXT,
+            reference VARCHAR(255),
+            currency VARCHAR(10) DEFAULT 'GBP',
+            debit DECIMAL DEFAULT 0,
+            credit DECIMAL DEFAULT 0,
+            gross_amount DECIMAL DEFAULT 0,
+            tax_amount DECIMAL DEFAULT 0,
+            running_balance DECIMAL DEFAULT 0,
+            source_account_id VARCHAR(255),
+            source_line_id VARCHAR(255),
+            transaction_type VARCHAR(50),
+            source_id_type VARCHAR(50),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(tenant_id, source_account_id, date, transaction_type, reference, description, debit, credit)
+          );
+        `);
+        await client.query('BEGIN');
+        for (const r of rows) {
+          await client.query(`
+            INSERT INTO xero_account_transaction_rows (
+              tenant_id, account_code, account_name, date, source, source_id, description, reference, currency, debit, credit, gross_amount, tax_amount, running_balance, source_account_id, source_line_id, transaction_type, source_id_type
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+            ON CONFLICT DO NOTHING;
+          `, [
+            tenantId,
+            r.accountCode || r.account_code || '',
+            r.accountName || r.account_name || '',
+            r.date,
+            'xero',
+            r.sourceTransactionId || r.source_id || '',
+            r.description || '',
+            r.reference || '',
+            r.currency || 'GBP',
+            r.debit || 0,
+            r.credit || 0,
+            r.gross || r.gross_amount || 0,
+            r.tax || r.tax_amount || 0,
+            r.runningBalance || r.running_balance || 0,
+            r.sourceAccountId || r.source_account_id || '',
+            r.sourceLineId || r.source_line_id || '',
+            r.transactionType || r.transaction_type || 'Account Transaction',
+            r.sourceIdType || r.source_id_type || 'XERO_ID'
+          ]);
+          saved++;
+        }
+        await client.query('COMMIT');
+      } catch (err: any) {
+        await client.query('ROLLBACK');
+        console.error('Failed to save xero_account_transaction_rows in PG:', err.message);
+      } finally {
+        client.release();
+      }
+    } else {
+      const json: any = readJsonDb();
+      if (!json.xero_account_transaction_rows) json.xero_account_transaction_rows = [];
+      for (const r of rows) {
+        json.xero_account_transaction_rows.push({
+          tenant_id: tenantId,
+          account_code: r.accountCode || r.account_code || '',
+          account_name: r.accountName || r.account_name || '',
+          date: r.date,
+          source: 'xero',
+          source_id: r.sourceTransactionId || r.source_id || '',
+          description: r.description || '',
+          reference: r.reference || '',
+          currency: r.currency || 'GBP',
+          debit: r.debit || 0,
+          credit: r.credit || 0,
+          gross_amount: r.gross || r.gross_amount || 0,
+          tax_amount: r.tax || r.tax_amount || 0,
+          running_balance: r.runningBalance || r.running_balance || 0,
+          source_account_id: r.sourceAccountId || r.source_account_id || '',
+          source_line_id: r.sourceLineId || r.source_line_id || '',
+          transaction_type: r.transactionType || r.transaction_type || 'Account Transaction',
+          source_id_type: r.sourceIdType || r.source_id_type || 'XERO_ID'
+        });
+        saved++;
+      }
+      writeJsonDb(json);
+    }
+    return saved;
+  },
+
+  getMenuPermissions: async (role?: string, userEmail?: string): Promise<{ role: string; menu_key: string; is_enabled: boolean }[]> => {
+    if (isPgConnected) {
+      try {
+        let query = `SELECT role, menu_key, is_enabled FROM system_menu_permissions`;
+        const params: any[] = [];
+        const conditions: string[] = [];
+
+        if (userEmail) {
+          params.push(`USER:${userEmail.toLowerCase().trim()}`);
+          conditions.push(`role = $${params.length}`);
+        }
+        if (role) {
+          params.push(role);
+          conditions.push(`role = $${params.length}`);
+        }
+
+        if (conditions.length > 0) {
+          conditions.push(`role = 'ALL'`);
+          query += ` WHERE ` + conditions.join(' OR ');
+        }
+
+        const res = await pgPool.query(query, params);
+        return res.rows;
+      } catch (e) {
+        console.error("Database query failed in getMenuPermissions:", e);
+      }
+    }
+    const json: any = readJsonDb();
+    const rows = json.system_menu_permissions || [];
+    if (!role && !userEmail) return rows;
+    const userRoleKey = userEmail ? `USER:${userEmail.toLowerCase().trim()}` : null;
+    return rows.filter((r: any) => {
+      if (r.role === 'ALL') return true;
+      if (role && r.role === role) return true;
+      if (userRoleKey && r.role.toLowerCase() === userRoleKey) return true;
+      return false;
+    });
+  },
+
+  saveMenuPermissions: async (permissions: { role?: string; user_email?: string; menu_key: string; is_enabled: boolean }[]): Promise<boolean> => {
+    if (!permissions || permissions.length === 0) return true;
+    if (isPgConnected) {
+      const client = await pgPool.connect();
+      try {
+        await client.query('BEGIN');
+        for (const item of permissions) {
+          const roleKey = item.user_email ? `USER:${item.user_email.toLowerCase().trim()}` : (item.role || 'ALL');
+          await client.query(`
+            INSERT INTO system_menu_permissions (role, menu_key, is_enabled, updated_at)
+            VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+            ON CONFLICT (role, menu_key)
+            DO UPDATE SET is_enabled = EXCLUDED.is_enabled, updated_at = CURRENT_TIMESTAMP;
+          `, [roleKey, item.menu_key, item.is_enabled]);
+        }
+        await client.query('COMMIT');
+        return true;
+      } catch (err: any) {
+        await client.query('ROLLBACK');
+        console.error('Failed to save system_menu_permissions in PG:', err.message);
+        return false;
+      } finally {
+        client.release();
+      }
+    } else {
+      const json: any = readJsonDb();
+      if (!json.system_menu_permissions) json.system_menu_permissions = [];
+      for (const item of permissions) {
+        const roleKey = item.user_email ? `USER:${item.user_email.toLowerCase().trim()}` : (item.role || 'ALL');
+        const idx = json.system_menu_permissions.findIndex((r: any) => r.role === roleKey && r.menu_key === item.menu_key);
+        if (idx >= 0) {
+          json.system_menu_permissions[idx].is_enabled = item.is_enabled;
+          json.system_menu_permissions[idx].updated_at = new Date().toISOString();
+        } else {
+          json.system_menu_permissions.push({
+            id: json.system_menu_permissions.length + 1,
+            role: roleKey,
+            menu_key: item.menu_key,
+            is_enabled: item.is_enabled,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          });
+        }
+      }
+      writeJsonDb(json);
+      return true;
     }
   }
 };

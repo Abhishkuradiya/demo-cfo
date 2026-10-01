@@ -121,6 +121,35 @@ export default function DataSourcesPage() {
     }, 700);
   };
 
+  // Handle URL query parameters for locked connector redirection errors
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const connector = params.get('connector');
+      const error = params.get('error');
+      if (error === 'locked' && connector) {
+        const connectorNames: Record<string, string> = {
+          xero: 'Xero Integration',
+          amazon: 'Amazon Seller Central',
+          ebay: 'eBay Seller Central',
+          stripe: 'Stripe Payments',
+          shopify: 'Shopify Store',
+          paypal: 'PayPal Settlement',
+          woocommerce: 'WooCommerce',
+          etsy: 'Etsy Seller',
+          square: 'Square Payments',
+          razorpay: 'Razorpay Global'
+        };
+        const name = connectorNames[connector] || connector.toUpperCase();
+        toast.error(`${name} is Not Connected`, {
+          description: `Please connect your ${name} account to unlock access to its dashboards and reports.`,
+          duration: 6000,
+          id: `ds-locked-${connector}`
+        });
+      }
+    }
+  }, []);
+
   // Polling effect to dynamically update connection state from the database
   useEffect(() => {
     if (typeof window !== 'undefined') {

@@ -12,15 +12,11 @@ export async function getTenantIdFromSession(): Promise<number | null> {
       }
     }
 
-    // Fallback to active tenant in DB or default tenant 1 to prevent unwanted logouts
-    const tenants = await db.getTenants();
-    if (tenants && tenants.length > 0) {
-      return tenants[0].id;
+    return null;
+  } catch (err: any) {
+    if (!err?.message?.includes('cookies')) {
+      console.error('Failed to get tenant_id from session:', err);
     }
-
-    return 1;
-  } catch (err) {
-    console.error('Failed to get tenant_id from session:', err);
-    return 1;
+    return null;
   }
 }

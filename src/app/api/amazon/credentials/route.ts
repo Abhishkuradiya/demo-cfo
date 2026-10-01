@@ -106,3 +106,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: err.message || 'Failed to connect Amazon account' }, { status: 500 });
   }
 }
+
+// DELETE: Disconnect Amazon Seller Central credentials
+export async function DELETE(req: NextRequest) {
+  const tenantId = await getTenantIdFromSession();
+  if (tenantId === null) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  try {
+    if (db.isPostgres()) {
+      await db.query(`DELETE FROM tenant_credentials WHERE tenant_id = $1 AND provider = 'amazon'`, [tenantId]);
+    }
+    return NextResponse.json({ success: true, message: 'Amazon Seller Central disconnected successfully' });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message || 'Failed to disconnect Amazon account' }, { status: 500 });
+  }
+}

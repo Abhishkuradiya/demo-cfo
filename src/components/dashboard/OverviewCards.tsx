@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { MoreVertical, ExternalLink, Globe, Landmark, Calendar, DollarSign, Fingerprint, RefreshCw, FileText, ArrowRight, ClipboardList } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { Tooltip } from './KpisWidget';
 
 // --- TYPE INTERFACES ---
 
@@ -32,6 +33,7 @@ export interface BankOverviewData {
   attention_accounts: number;
   disconnected_accounts: number;
   total_balance: number;
+  as_of_date?: string;
   last_sync: string;
   accounts: BankAccount[];
 }
@@ -52,7 +54,7 @@ export interface BillStatusSummary {
 
 // Helper to format currency
 const formatCurrencyValue = (val: number, curr: string) => {
-  const symbol = curr === 'INR' ? '₹' : (curr === 'USD' ? '$' : `${curr} `);
+  const symbol = curr === 'INR' ? '₹' : (curr === 'GBP' ? '£' : (curr === 'USD' ? '$' : `${curr} `));
   return symbol + Math.abs(val).toLocaleString('en-IN', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
@@ -115,6 +117,7 @@ export function OrganizationDetailsCard({ organisation, lastSync, loading }: Org
         <div className="flex items-center gap-1.5">
           <Globe className="h-4 w-4 text-[#0064eb]" />
           <h3 className="text-[13.5px] font-bold text-slate-800">Organization Details</h3>
+          <Tooltip text="Profile, currency & financial year configuration synced from Xero ledger." />
         </div>
         <button className="text-slate-400 hover:text-slate-600 outline-none"><MoreVertical className="h-4 w-4" /></button>
       </div>
@@ -219,6 +222,7 @@ export function ConnectedBankAccountsCard({ data, loading, onRefresh, onManageCo
         <div className="flex items-center gap-1.5">
           <Landmark className="h-4 w-4 text-[#0064eb]" />
           <h3 className="text-[13.5px] font-bold text-slate-800">Connected Bank Accounts</h3>
+          <Tooltip text="Liquid bank balances & pending reconciliation counts across all connected banks." />
         </div>
         <div className="flex items-center gap-1">
           {onRefresh && (
@@ -287,10 +291,15 @@ export function ConnectedBankAccountsCard({ data, loading, onRefresh, onManageCo
       {/* Bottom section */}
       <div className="border-t border-slate-100 pt-2 shrink-0">
         <div className="flex justify-between items-center text-[10.5px] font-bold">
-          <span className="text-slate-400 font-semibold">Total Cash Balance</span>
-          <span className="text-slate-800 font-extrabold">{formatCurrencyValue(data.total_balance, primaryCurrency)}</span>
+          <div className="flex flex-col">
+            <span className="text-slate-400 font-semibold">Total Cash Balance</span>
+            <span className="text-[9px] text-[#0064eb] font-bold mt-0.5">
+              {data.as_of_date || 'As at 30 Sept 2026'}
+            </span>
+          </div>
+          <span className="text-slate-800 font-extrabold text-[12.5px]">{formatCurrencyValue(data.total_balance, primaryCurrency)}</span>
         </div>
-        <div className="flex justify-between items-center text-[8.5px] text-slate-400 font-semibold mt-1">
+        <div className="flex justify-between items-center text-[8.5px] text-slate-400 font-semibold mt-1.5">
           <span>Feed Last Synced</span>
           <span>{formatTimeAgo(data.last_sync)}</span>
         </div>
@@ -343,6 +352,7 @@ export function InvoiceStatusSummaryCard({ summary, loading, onViewAll }: Invoic
         >
           <FileText className="h-4 w-4 text-[#0064eb]" />
           <h3 className="text-[13.5px] font-bold text-slate-800">Invoice Status Summary</h3>
+          <Tooltip text="Live breakdown of sales invoices across Draft, Awaiting Approval, Awaiting Payment, and Paid." />
         </div>
         <button className="text-slate-400 hover:text-slate-600 outline-none"><MoreVertical className="h-4 w-4" /></button>
       </div>
@@ -421,6 +431,7 @@ export function BillStatusSummaryCard({ summary, loading, onViewAll }: BillCardP
         >
           <ClipboardList className="h-4 w-4 text-[#0064eb]" />
           <h3 className="text-[13.5px] font-bold text-slate-800">Bill Status Summary</h3>
+          <Tooltip text="Live breakdown of vendor payables across Draft, Submitted, Authorized, and Paid." />
         </div>
         <button className="text-slate-400 hover:text-slate-600 outline-none"><MoreVertical className="h-4 w-4" /></button>
       </div>

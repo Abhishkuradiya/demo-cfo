@@ -4,6 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import * as echarts from 'echarts';
+import { resolveBrandingTheme } from '@/lib/constants/brandingThemes';
 import {
   Calendar,
   RefreshCw,
@@ -32,6 +33,7 @@ import {
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { FormattedDatePicker, formatToDDMMYYYY } from '@/components/ui/formatted-date-picker';
+import XeroInvoiceViewerDrawer, { OpenInvoiceData } from '@/components/sales/XeroInvoiceViewerDrawer';
 
 const ReactECharts = dynamic(() => import('echarts-for-react'), { ssr: false });
 
@@ -143,6 +145,99 @@ export default function ConsistentAccountReceivablePage() {
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+
+  // Multi-window floating Xero Invoice viewer modal state
+  const [openInvoices, setOpenInvoices] = useState<OpenInvoiceData[]>([]);
+
+  const handleOpenInvoiceModal = (inv: any, customerName?: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const invId = inv.id || inv.InvoiceID || inv.invoiceNumber || inv.invoice_number || `inv-${Date.now()}`;
+    const displayRef = inv.invoiceNumber || inv.InvoiceNumber || inv.reference || inv.Reference || 'INV-001';
+
+    const count = openInvoices.length;
+    const startX = Math.min(80 + count * 35, typeof window !== 'undefined' ? window.innerWidth - 750 : 100);
+    const startY = Math.min(60 + count * 35, typeof window !== 'undefined' ? window.innerHeight - 650 : 100);
+    const winW = Math.min(800, typeof window !== 'undefined' ? window.innerWidth - 60 : 800);
+    const winH = Math.min(700, typeof window !== 'undefined' ? window.innerHeight - 80 : 700);
+    const maxZ = Math.max(...openInvoices.map(i => i.zIndex || 1000), 1000);
+
+    const grossTotal = parseFloat(inv.total ?? inv.Total ?? inv.amount ?? inv.amountDue ?? 0);
+    const subTotal = inv.subTotal !== undefined ? parseFloat(inv.subTotal) : (inv.SubTotal !== undefined ? parseFloat(inv.SubTotal) : (inv.sub_total !== undefined ? parseFloat(inv.sub_total) : grossTotal));
+    const totalTax = inv.totalTax !== undefined ? parseFloat(inv.totalTax) : (inv.TotalTax !== undefined ? parseFloat(inv.TotalTax) : (inv.total_tax !== undefined ? parseFloat(inv.total_tax) : Math.max(0, grossTotal - subTotal)));
+
+    const rawLineItems = inv.lineItems || inv.LineItems || inv.line_items || [];
+
+    setOpenInvoices(prev => {
+      const existing = prev.find(i => i.id === invId || i.refNumber === displayRef);
+      if (existing) {
+        return prev.map(i => i.id === existing.id ? { ...i, zIndex: maxZ + 1 } : i);
+      }
+
+      return [
+        ...prev,
+        {
+          id: invId,
+          refNumber: displayRef,
+          contactName: customerName || inv.contactName || inv.ContactName || (inv.Contact && inv.Contact.Name) || 'Customer',
+          date: inv.date || inv.DateString || inv.Date || new Date().toISOString(),
+          dueDate: inv.dueDate || inv.DueDateString || inv.DueDate || inv.date || new Date().toISOString(),
+          paymentDate: inv.paymentDate || inv.date,
+          desc: inv.reference || inv.Reference || inv.desc || `Invoice ${displayRef}`,
+          amount: grossTotal,
+          subTotal: subTotal,
+          totalTax: totalTax,
+          amountPaid: parseFloat(inv.amountPaid ?? inv.AmountPaid ?? inv.amount_paid ?? 0),
+          amountDue: parseFloat(inv.amountDue ?? inv.AmountDue ?? inv.amount_due ?? 0),
+          status: inv.status || inv.Status || 'AUTHORISED',
+          brandingTheme: resolveBrandingTheme(inv),
+          lineItems: Array.isArray(rawLineItems) && rawLineItems.length > 0 ? rawLineItems.map((item: any) => ({
+            desc: item.Description || item.description || item.desc || item.ItemCode || item.itemCode || `Line item for ${displayRef}`,
+            Description: item.Description || item.description || item.desc || item.ItemCode || item.itemCode || `Line item for ${displayRef}`,
+            account: item.AccountCode ? `${item.AccountCode} - ${item.AccountName || 'Sales'}` : (item.accountCode ? `${item.accountCode} - Sales` : (item.account || '410 Sales')),
+            AccountCode: item.AccountCode || item.accountCode || item.account_code || '410',
+            taxRate: item.TaxType || item.taxType || item.tax_type || item.taxRate || 'Tax on Income (20%)',
+            TaxType: item.TaxType || item.taxType || item.tax_type || 'OUTPUT2',
+            amountGbp: parseFloat(item.LineAmount ?? item.lineAmount ?? item.line_amount ?? item.amountGbp ?? item.UnitAmount ?? item.unitAmount ?? grossTotal),
+            LineAmount: item.LineAmount ?? item.lineAmount ?? item.line_amount,
+            UnitAmount: item.UnitAmount ?? item.unitAmount ?? item.unit_amount,
+            Quantity: item.Quantity ?? item.quantity,
+            TaxAmount: item.TaxAmount ?? item.taxAmount ?? item.tax_amount
+          })) : [
+            {
+              desc: `Invoice ${displayRef} - ${customerName || inv.contactName || 'Customer Services'}`,
+              account: '410 Sales',
+              taxRate: 'Tax on Income (20%)',
+              amountGbp: grossTotal
+            }
+          ],
+          attachments: inv.attachments || inv.Attachments || [],
+          x: startX,
+          y: startY,
+          width: winW,
+          height: winH,
+          zIndex: maxZ + 1,
+          isMinimized: false,
+          isMaximized: false,
+          isHighlighted: true
+        }
+      ];
+    });
+  };
+
+  const handleCloseInvoice = (id: string) => {
+    setOpenInvoices(prev => prev.filter(inv => inv.id !== id));
+  };
+
+  const handleFocusInvoice = (id: string) => {
+    setOpenInvoices(prev => {
+      const maxZ = Math.max(...prev.map(i => i.zIndex || 1000), 1000);
+      return prev.map(inv => inv.id === id ? { ...inv, zIndex: maxZ + 1 } : inv);
+    });
+  };
+
+  const handleUpdateInvoice = (id: string, updates: Partial<OpenInvoiceData>) => {
+    setOpenInvoices(prev => prev.map(inv => inv.id === id ? { ...inv, ...updates } : inv));
+  };
 
   // Fetch Live Data
   const fetchData = async () => {
@@ -1190,28 +1285,6 @@ export default function ConsistentAccountReceivablePage() {
                                     </span>
                                   </div>
                                 </div>
-
-                                <div className="flex items-center gap-2">
-                                  <button 
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      toast.success(`Dunning notice sent to ${cust.customerName}`);
-                                    }}
-                                    className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 rounded text-xs font-bold transition flex items-center gap-1 cursor-pointer"
-                                  >
-                                    <Send className="h-3 w-3" /> Send Reminder
-                                  </button>
-
-                                  <button 
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      toast.info(`Early settlement discount offered to ${cust.customerName}`);
-                                    }}
-                                    className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded text-xs font-bold transition flex items-center gap-1 cursor-pointer"
-                                  >
-                                    <Percent className="h-3 w-3" /> Offer 2% Discount
-                                  </button>
-                                </div>
                               </div>
 
                               <div className="space-y-1.5">
@@ -1219,7 +1292,13 @@ export default function ConsistentAccountReceivablePage() {
                                   {cust.invoices?.map((inv: any) => (
                                     <div key={inv.id} className="p-2.5 bg-white hover:bg-slate-50/80 transition flex items-center justify-between">
                                       <div className="flex items-center gap-3">
-                                        <span className="font-extrabold text-blue-600">{inv.invoiceNumber}</span>
+                                        <button
+                                          onClick={(e) => handleOpenInvoiceModal(inv, cust.customerName, e)}
+                                          className="font-extrabold text-blue-600 hover:underline cursor-pointer flex items-center gap-1"
+                                          title="Click to view tax invoice modal"
+                                        >
+                                          {inv.invoiceNumber}
+                                        </button>
                                         <span className="text-slate-500">Date: {inv.date ? formatToDDMMYYYY(inv.date) : '—'}</span>
                                         <span className="text-slate-500">Due: {inv.dueDate ? formatToDDMMYYYY(inv.dueDate) : '—'}</span>
                                       </div>
@@ -1303,13 +1382,20 @@ export default function ConsistentAccountReceivablePage() {
                   <th className="py-2 px-3 text-right">AMOUNT DUE</th>
                   <th className="py-2 px-3 text-center">DAYS OVERDUE</th>
                   <th className="py-2 px-3 text-center">AGEING BUCKET</th>
-                  <th className="py-2 px-3 text-center">ACTION</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-[11.5px]">
                 {overdueInvoicesList.map((inv: any) => (
                   <tr key={inv.id} className="hover:bg-slate-50 transition">
-                    <td className="py-2.5 px-3 font-extrabold text-blue-600">{inv.invoiceNumber}</td>
+                    <td className="py-2.5 px-3">
+                      <button
+                        onClick={(e) => handleOpenInvoiceModal(inv, inv.contactName, e)}
+                        className="font-extrabold text-blue-600 hover:underline cursor-pointer text-left"
+                        title="Click to view tax invoice modal"
+                      >
+                        {inv.invoiceNumber}
+                      </button>
+                    </td>
                     <td className="py-2.5 px-3 font-bold text-slate-800">{inv.contactName}</td>
                     <td className="py-2.5 px-3 text-slate-600">{inv.dueDate ? formatToDDMMYYYY(inv.dueDate) : '—'}</td>
                     <td className="py-2.5 px-3 text-right font-medium text-slate-700">{formatAmount(inv.total)}</td>
@@ -1320,14 +1406,6 @@ export default function ConsistentAccountReceivablePage() {
                       </span>
                     </td>
                     <td className="py-2.5 px-3 text-center font-bold text-slate-700 uppercase">{inv.ageingBucket}</td>
-                    <td className="py-2.5 px-3 text-center">
-                      <button
-                        onClick={() => toast.success(`Payment reminder queued for ${inv.invoiceNumber}`)}
-                        className="px-2.5 py-0.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded text-[10.5px] font-bold transition cursor-pointer"
-                      >
-                        Send Notice
-                      </button>
-                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -1380,7 +1458,15 @@ export default function ConsistentAccountReceivablePage() {
                 {ageingBucketInvoices.length > 0 ? (
                   ageingBucketInvoices.map((inv: any) => (
                     <tr key={inv.id} className="hover:bg-slate-50 transition">
-                      <td className="py-2.5 px-3 font-extrabold text-blue-600">{inv.invoiceNumber}</td>
+                      <td className="py-2.5 px-3">
+                        <button
+                          onClick={(e) => handleOpenInvoiceModal(inv, inv.contactName, e)}
+                          className="font-extrabold text-blue-600 hover:underline cursor-pointer text-left"
+                          title="Click to view tax invoice modal"
+                        >
+                          {inv.invoiceNumber}
+                        </button>
+                      </td>
                       <td className="py-2.5 px-3 font-bold text-slate-800">{inv.contactName}</td>
                       <td className="py-2.5 px-3 text-slate-600">{inv.date ? formatToDDMMYYYY(inv.date) : '—'}</td>
                       <td className="py-2.5 px-3 text-slate-600">{inv.dueDate ? formatToDDMMYYYY(inv.dueDate) : '—'}</td>
@@ -1399,6 +1485,14 @@ export default function ConsistentAccountReceivablePage() {
           </div>
         </div>
       )}
+
+      {/* Floating Multi-window Xero Invoice Viewer Modal Manager */}
+      <XeroInvoiceViewerDrawer
+        invoices={openInvoices}
+        onCloseInvoice={handleCloseInvoice}
+        onFocusInvoice={handleFocusInvoice}
+        onUpdateInvoice={handleUpdateInvoice}
+      />
 
     </div>
   );

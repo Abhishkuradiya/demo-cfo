@@ -14,8 +14,8 @@ export async function GET(req: NextRequest) {
   }
 
   const { searchParams } = new URL(req.url);
-  const paramFromDate = searchParams.get('from_date');
-  const paramToDate = searchParams.get('to_date');
+  const paramFromDate = searchParams.get('from_date') || searchParams.get('fromDate');
+  const paramToDate = searchParams.get('to_date') || searchParams.get('toDate');
 
   try {
     const tokenInfo = await getXeroAccessToken(tenantId);
@@ -39,8 +39,10 @@ export async function GET(req: NextRequest) {
     let endDate: Date;
 
     if (paramFromDate && paramToDate) {
-      startDate = new Date(`${paramFromDate}T00:00:00Z`);
-      endDate = new Date(`${paramToDate}T23:59:59Z`);
+      const cleanFrom = paramFromDate.split('T')[0];
+      const cleanTo = paramToDate.split('T')[0];
+      startDate = new Date(`${cleanFrom}T00:00:00.000Z`);
+      endDate = new Date(`${cleanTo}T23:59:59.999Z`);
     } else {
       let latestInvoiceDate: Date | null = null;
       const allInvs = await db.getInvoices(tenantId);
@@ -182,13 +184,90 @@ export async function GET(req: NextRequest) {
     let prevNetSales = 0;
     let prevGrossProfit = 0;
     let prevGrossMarginPct = 0;
+    let prevNetProfit = 0;
+
+    let cogsVal = 0;
+    let operatingExpensesVal = 0;
+    let otherIncomeVal = 0;
+    let netProfitVal = 0;
+    let pnlAccounts = {
+      turnoverStreams: [] as any[],
+      cogsStreams: [] as any[],
+      expenseStreams: [] as any[],
+      otherIncomeStreams: [] as any[]
+    };
 
     if (pnlReport) {
       const pnlSummary = ProfitAndLossService.parseReport(pnlReport);
       totalRevenue = pnlSummary.revenue;
       netSales = pnlSummary.revenue;
       grossProfit = pnlSummary.grossProfit;
+      cogsVal = pnlSummary.cogs;
+      operatingExpensesVal = pnlSummary.operatingExpenses;
+      otherIncomeVal = pnlSummary.otherIncome;
+      netProfitVal = pnlSummary.netProfit;
       grossMarginPct = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
+
+      // Extract granular account-level streams
+      const parsePnlAccounts = (report: any) => {
+        const turnoverStreams: any[] = [];
+        const cogsStreams: any[] = [];
+        const expenseStreams: any[] = [];
+        const otherIncomeStreams: any[] = [];
+
+        if (!report || !report.Rows || !Array.isArray(report.Rows)) {
+          return { turnoverStreams, cogsStreams, expenseStreams, otherIncomeStreams };
+        }
+
+        const traverse = (items: any[], currentSection: string) => {
+          for (const item of items) {
+            if (item.RowType === 'Section') {
+              const secTitle = (item.Title || '').toLowerCase();
+              traverse(item.Rows || [], secTitle || currentSection);
+            } else if (item.RowType === 'Row' && Array.isArray(item.Cells) && item.Cells.length >= 2) {
+              const name = (item.Cells[0]?.Value || '').trim();
+              const valStr = (item.Cells[1]?.Value || '0').replace(/,/g, '').replace(/\(/g, '-').replace(/\)/g, '');
+              const value = parseFloat(valStr);
+              if (!name || isNaN(value)) continue;
+
+              const nameLow = name.toLowerCase();
+              if (nameLow.includes('total') || nameLow.includes('gross profit') || nameLow.includes('net profit') || nameLow.includes('operating profit')) continue;
+
+              const accountId = item.Cells[0]?.Attributes?.find((a: any) => a.Id === 'account')?.Value || '';
+              const sec = currentSection.toLowerCase();
+
+              if (sec.includes('turnover') || sec.includes('income') || sec.includes('revenue') || sec.includes('trading income')) {
+                if (sec.includes('other income')) {
+                  otherIncomeStreams.push({ name, amount: value, accountId });
+                } else {
+                  turnoverStreams.push({ name, revenue: value, accountId });
+                }
+              } else if (sec.includes('cost of sales') || sec.includes('cogs') || sec.includes('cost of goods') || sec.includes('direct costs')) {
+                cogsStreams.push({ name, amount: value, accountId });
+              } else if (sec.includes('expense') || sec.includes('administrative') || sec.includes('overhead') || sec.includes('costs')) {
+                expenseStreams.push({ name, amount: value, accountId });
+              } else if (sec.includes('other income')) {
+                otherIncomeStreams.push({ name, amount: value, accountId });
+              } else {
+                if (nameLow.includes('sales') || nameLow.includes('revenue') || nameLow.includes('income')) {
+                  turnoverStreams.push({ name, revenue: value, accountId });
+                } else if (nameLow.includes('fee') || nameLow.includes('cogs') || nameLow.includes('shipping') || nameLow.includes('purchases') || nameLow.includes('stock') || nameLow.includes('materials')) {
+                  cogsStreams.push({ name, amount: value, accountId });
+                } else {
+                  expenseStreams.push({ name, amount: value, accountId });
+                }
+              }
+            } else if (item.Rows) {
+              traverse(item.Rows, currentSection);
+            }
+          }
+        };
+
+        traverse(report.Rows, '');
+        return { turnoverStreams, cogsStreams, expenseStreams, otherIncomeStreams };
+      };
+
+      pnlAccounts = parsePnlAccounts(pnlReport);
     }
 
     // Dynamic Database Fallback from cached invoices if P&L report is missing
@@ -209,11 +288,56 @@ export async function GET(req: NextRequest) {
       grossMarginPct = totalRevenue > 0 ? 100 : 0;
     }
 
+    if (pnlAccounts.turnoverStreams.length === 0 && rawInvoicesList.length > 0) {
+      const streamTotals: Record<string, number> = {};
+      rawInvoicesList.forEach((inv) => {
+        const st = (inv.Status || inv.status || '').toUpperCase();
+        if (st === 'VOIDED' || st === 'DELETED') return;
+        const type = (inv.Type || inv.type || '').toUpperCase();
+        if (type !== 'ACCREC') return;
+
+        const invDate = parseXeroDate(inv.Date || inv.invoice_date);
+        if (!invDate || invDate < fromDate || invDate > toDate) return;
+
+        const cName = (inv.ContactName || inv.Contact?.Name || inv.contact_name || 'Sales Income').trim();
+        const total = parseFloat(inv.Total || inv.total || 0);
+
+        let streamKey = 'Sales Income';
+        const low = cName.toLowerCase();
+        if (low.includes('amazon')) streamKey = 'Amazon Sales';
+        else if (low.includes('ebay')) streamKey = 'eBay Sales';
+        else if (low.includes('groupon')) streamKey = 'Groupon Sales';
+        else if (low.includes('berkeley care') || low.includes('bc ltd')) streamKey = 'Berkeley Care LTD';
+        else if (low.includes('stripe')) streamKey = 'Stripe / Online Sales';
+        else if (low.includes('clarity')) streamKey = 'Clarity Pharma';
+        else if (low.includes('laxmico') || low.includes('lexmico')) streamKey = 'Laxmico Ltd (B&S)';
+        else if (low.includes('rajja')) streamKey = 'Rajja Chemist';
+        else if (low.includes('sharma')) streamKey = 'Arun Sharma Chemists';
+        else if (low.includes('qmed')) streamKey = 'Qmed Pharmaceuticals';
+        else if (low.includes('core')) streamKey = 'Core Pharmaceuticals';
+        else if (low.includes('sangers')) streamKey = 'Sangers (Maidstone) Ltd';
+        else if (low.includes('tri pharma') || low.includes('vessey')) streamKey = 'TRI PHARMA LTD';
+        else if (low.includes('vu chem')) streamKey = 'Vu Chem Ltd';
+        else streamKey = cName;
+
+        streamTotals[streamKey] = (streamTotals[streamKey] || 0) + total;
+      });
+
+      pnlAccounts.turnoverStreams = Object.entries(streamTotals)
+        .filter(([_, rev]) => rev > 0)
+        .map(([name, revenue]) => ({
+          name,
+          revenue: Math.round(revenue * 100) / 100
+        }))
+        .sort((a, b) => b.revenue - a.revenue);
+    }
+
     if (prevPnlReport) {
       const prevPnlSummary = ProfitAndLossService.parseReport(prevPnlReport);
       prevTotalRevenue = prevPnlSummary.revenue;
       prevNetSales = prevPnlSummary.revenue;
       prevGrossProfit = prevPnlSummary.grossProfit;
+      prevNetProfit = prevPnlSummary.netProfit;
       prevGrossMarginPct = prevTotalRevenue > 0 ? (prevGrossProfit / prevTotalRevenue) * 100 : 0;
     }
 
@@ -231,11 +355,44 @@ export async function GET(req: NextRequest) {
       prevTotalRevenue = prevInvSum;
       prevNetSales = prevInvSum;
       prevGrossProfit = prevInvSum;
+      prevNetProfit = prevInvSum;
       prevGrossMarginPct = prevTotalRevenue > 0 ? 100 : 0;
     }
 
     const collectionRatePct = totalRevenue > 0 ? Math.min(100, Math.max(0, ((totalRevenue - outstandingAR) / totalRevenue) * 100)) : 0.0;
     const prevCollectionRatePct = prevTotalRevenue > 0 ? Math.min(100, Math.max(0, ((prevTotalRevenue - prevOutstandingAR) / prevTotalRevenue) * 100)) : 0.0;
+
+    // Fetch & Calculate Credit Notes summary
+    let cachedCreditNotes = await db.getReport(tenantId, 'CreditNotes');
+    if (!cachedCreditNotes && isConnected) {
+      try {
+        const rawCN = await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'CreditNotes');
+        if (rawCN && Array.isArray(rawCN)) {
+          cachedCreditNotes = rawCN;
+          await db.saveReport(tenantId, 'CreditNotes', cachedCreditNotes);
+        }
+      } catch (err: any) {
+        console.error('Failed to sync CreditNotes for sales route:', err.message);
+      }
+    }
+
+    let creditNotesCount = 0;
+    let creditNotesTotal = 0;
+    if (Array.isArray(cachedCreditNotes)) {
+      for (const cnItem of cachedCreditNotes) {
+        if (cnItem.Status !== 'DELETED' && cnItem.Status !== 'VOIDED') {
+          const cnDate = parseXeroDate(cnItem.Date || cnItem.invoice_date);
+          if (cnDate && cnDate >= startDate && cnDate <= endDate) {
+            creditNotesCount++;
+            creditNotesTotal += (cnItem.Total || cnItem.RemainingCredit || 0);
+          }
+        }
+      }
+    }
+
+    if (creditNotesTotal > 0 && totalRevenue > 0) {
+      netSales = Math.max(0, totalRevenue - creditNotesTotal);
+    }
 
     // Calc % Change helper
     const calcPctChange = (curr: number, prev: number) => {
@@ -269,23 +426,42 @@ export async function GET(req: NextRequest) {
     const salesSnapshot = {
       totalRevenue: {
         value: totalRevenue,
+        prevValue: prevTotalRevenue,
         change: `${revChange.pct} ${prevPeriodLabel}`,
         isPositive: revChange.isUp
       },
       netSales: {
         value: netSales,
+        prevValue: prevNetSales,
         change: `${netSalesChange.pct} ${prevPeriodLabel}`,
         isPositive: netSalesChange.isUp
       },
+      creditNotesTotal,
+      creditNotesCount,
       grossProfit: {
         value: grossProfit,
+        prevValue: prevGrossProfit,
         change: `${gpChange.pct} ${prevPeriodLabel}`,
         isPositive: gpChange.isUp
       },
       grossMargin: {
         value: grossMarginPct,
+        prevValue: prevGrossMarginPct,
         change: `${gmChange.pts} ${prevPeriodLabel}`,
         isPositive: gmChange.isUp
+      },
+      cogs: {
+        value: cogsVal || Math.max(0, totalRevenue - grossProfit)
+      },
+      expenses: {
+        value: operatingExpensesVal
+      },
+      otherIncome: {
+        value: otherIncomeVal
+      },
+      netProfit: {
+        value: netProfitVal || ((grossProfit + otherIncomeVal) - operatingExpensesVal),
+        prevValue: prevNetProfit || prevGrossProfit
       },
       invoices: {
         value: invoicesCount,
@@ -499,7 +675,7 @@ export async function GET(req: NextRequest) {
     }
 
     // Compute Executive Row 4 Metrics: Gross Profit Analysis, Revenue Quality & Customer Concentration
-    const cogsVal = Math.max(0, totalRevenue - grossProfit);
+    if (cogsVal === 0) cogsVal = Math.max(0, totalRevenue - grossProfit);
 
     // Customer Concentration
     const top1Rev = topCustomers[0]?.revenue || 0;
@@ -798,6 +974,9 @@ export async function GET(req: NextRequest) {
       return d2 - d1;
     });
 
+    const todayNow = new Date();
+    todayNow.setUTCHours(0, 0, 0, 0);
+
     const recentInvoices = periodInvoicesOnly.slice(0, 8).map((inv: any) => {
       const invDate = parseXeroDate(inv.Date || inv.invoice_date);
       const invDueDate = parseXeroDate(inv.DueDate || inv.due_date || inv.Date || inv.invoice_date) || invDate;
@@ -806,7 +985,7 @@ export async function GET(req: NextRequest) {
       let statusColor = 'bg-emerald-50 text-emerald-600 border-emerald-100';
 
       if (st !== 'PAID') {
-        if (invDueDate && invDueDate < toDate) {
+        if (invDueDate && invDueDate < todayNow) {
           statusLabel = 'Overdue';
           statusColor = 'bg-rose-50 text-rose-600 border-rose-100';
         } else if (st === 'DRAFT') {
@@ -821,11 +1000,17 @@ export async function GET(req: NextRequest) {
         }
       }
 
+      const invTotal = parseFloat(inv.Total || inv.total || 0);
+      const invSubTotal = inv.SubTotal !== undefined && inv.SubTotal !== null ? parseFloat(inv.SubTotal) : inv.sub_total !== undefined && inv.sub_total !== null ? parseFloat(inv.sub_total) : (invTotal / 1.2);
+      const invTotalTax = inv.TotalTax !== undefined && inv.TotalTax !== null ? parseFloat(inv.TotalTax) : inv.total_tax !== undefined && inv.total_tax !== null ? parseFloat(inv.total_tax) : Math.max(0, invTotal - invSubTotal);
+
       return {
         number: inv.InvoiceNumber || inv.invoice_number || inv.id || 'INV-001',
         customer: inv.Contact?.Name || inv.contact_name || inv.ContactName || 'Customer',
         date: formatDateStr(invDate),
-        amount: parseFloat(inv.Total || inv.total || 0),
+        amount: invTotal,
+        subTotal: Math.round(invSubTotal * 100) / 100,
+        totalTax: Math.round(invTotalTax * 100) / 100,
         status: statusLabel,
         statusColor
       };
@@ -837,6 +1022,9 @@ export async function GET(req: NextRequest) {
       const st = (inv.Status || inv.status || '').toUpperCase();
 
       const invTotal = parseFloat(inv.Total || inv.total || 0);
+      const invSubTotal = inv.SubTotal !== undefined && inv.SubTotal !== null ? parseFloat(inv.SubTotal) : inv.sub_total !== undefined && inv.sub_total !== null ? parseFloat(inv.sub_total) : (invTotal / 1.2);
+      const invTotalTax = inv.TotalTax !== undefined && inv.TotalTax !== null ? parseFloat(inv.TotalTax) : inv.total_tax !== undefined && inv.total_tax !== null ? parseFloat(inv.total_tax) : Math.max(0, invTotal - invSubTotal);
+
       let rawAmountDue = 0;
       if (st === 'PAID') {
         rawAmountDue = 0;
@@ -860,7 +1048,7 @@ export async function GET(req: NextRequest) {
       } else if (st === 'SUBMITTED') {
         statusLabel = 'Submitted';
         statusColor = 'bg-indigo-50 text-indigo-700 border-indigo-200';
-      } else if (invDueDate && invDueDate < toDate && rawAmountDue > 0) {
+      } else if (invDueDate && invDueDate < todayNow && rawAmountDue > 0) {
         statusLabel = 'Overdue';
         statusColor = 'bg-rose-50 text-rose-700 border-rose-200';
       } else if (st === 'AUTHORISED') {
@@ -875,21 +1063,27 @@ export async function GET(req: NextRequest) {
         date: formatDateStr(invDate),
         dueDate: formatDateStr(invDueDate),
         amount: invTotal,
+        subTotal: Math.round(invSubTotal * 100) / 100,
+        totalTax: Math.round(invTotalTax * 100) / 100,
         amountDue: rawAmountDue,
         amountPaid: Math.max(0, invTotal - rawAmountDue),
         status: statusLabel,
         rawStatus: st,
         statusColor,
         reference: inv.Reference || inv.reference || '',
-        currencyCode: inv.CurrencyCode || inv.currency || currency
+        currencyCode: inv.CurrencyCode || inv.currency || currency,
+        lineItems: typeof inv.line_items === 'string' ? JSON.parse(inv.line_items) : (inv.LineItems || inv.line_items || []),
+        type: inv.Type || inv.type || 'ACCREC'
       };
     });
 
-    // Extract Recent Credit Notes
-    const creditNotesOnly = rawInvoicesList.filter((inv: any) => {
-      const st = (inv.Status || inv.status || '').toUpperCase();
-      const t = (inv.Type || inv.type || '').toUpperCase();
-      return st !== 'VOIDED' && st !== 'DELETED' && (t === 'ACCRECCRED' || t.includes('CRED'));
+    // Extract All Credit Notes for selected period
+    const creditNotesOnly = (Array.isArray(cachedCreditNotes) ? cachedCreditNotes : []).filter((cnItem: any) => {
+      const st = (cnItem.Status || cnItem.status || '').toUpperCase();
+      if (st === 'VOIDED' || st === 'DELETED') return false;
+      const cnDate = parseXeroDate(cnItem.Date || cnItem.invoice_date);
+      if (!cnDate) return false;
+      return cnDate >= fromDate && cnDate <= toDate;
     });
 
     creditNotesOnly.sort((a: any, b: any) => {
@@ -898,15 +1092,52 @@ export async function GET(req: NextRequest) {
       return d2 - d1;
     });
 
-    const recentCreditNotes = creditNotesOnly.slice(0, 8).map((cnItem: any) => {
+    const allCreditNotes = creditNotesOnly.map((cnItem: any) => {
       const cnDate = parseXeroDate(cnItem.Date || cnItem.invoice_date);
+      const cnDueDate = parseXeroDate(cnItem.DueDate || cnItem.due_date || cnItem.Date);
+      const cnTotal = Math.abs(parseFloat(cnItem.Total || cnItem.total || 0));
+      const cnSubTotal = cnItem.SubTotal !== undefined ? Math.abs(parseFloat(cnItem.SubTotal)) : (cnTotal / 1.2);
+      const cnTotalTax = cnItem.TotalTax !== undefined ? Math.abs(parseFloat(cnItem.TotalTax)) : (cnTotal - cnSubTotal);
+      const remainingCredit = cnItem.RemainingCredit !== undefined ? Math.abs(parseFloat(cnItem.RemainingCredit)) : Math.abs(parseFloat(cnItem.AmountDue || cnItem.amount_due || 0));
+
+      const st = (cnItem.Status || cnItem.status || '').toUpperCase();
+      let statusLabel = 'Authorised';
+      let statusColor = 'bg-amber-50 text-amber-700 border-amber-200';
+
+      if (st === 'PAID') {
+        statusLabel = 'Applied';
+        statusColor = 'bg-emerald-50 text-emerald-700 border-emerald-200';
+      } else if (st === 'DRAFT') {
+        statusLabel = 'Draft';
+        statusColor = 'bg-slate-100 text-slate-700 border-slate-200';
+      } else if (st === 'SUBMITTED') {
+        statusLabel = 'Submitted';
+        statusColor = 'bg-indigo-50 text-indigo-700 border-indigo-200';
+      } else if (st === 'AUTHORISED') {
+        statusLabel = remainingCredit > 0 ? 'Active Credit' : 'Applied';
+        statusColor = remainingCredit > 0 ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200';
+      }
+
       return {
-        number: cnItem.InvoiceNumber || cnItem.invoice_number || cnItem.CreditNoteNumber || cnItem.id || 'CN-001',
+        id: cnItem.CreditNoteID || cnItem.id || cnItem.CreditNoteNumber || 'CN-001',
+        number: cnItem.CreditNoteNumber || cnItem.InvoiceNumber || cnItem.invoice_number || cnItem.id || 'CN-001',
         customer: cnItem.Contact?.Name || cnItem.contact_name || cnItem.ContactName || 'Customer',
         date: formatDateStr(cnDate),
-        amount: parseFloat(cnItem.Total || cnItem.total || 0)
+        dueDate: formatDateStr(cnDueDate),
+        amount: cnTotal,
+        subTotal: Math.round(cnSubTotal * 100) / 100,
+        totalTax: Math.round(cnTotalTax * 100) / 100,
+        amountDue: remainingCredit,
+        remainingCredit,
+        status: statusLabel,
+        rawStatus: st,
+        statusColor,
+        reference: cnItem.Reference || cnItem.reference || '',
+        currencyCode: cnItem.CurrencyCode || cnItem.currency || currency
       };
     });
+
+    const recentCreditNotes = allCreditNotes.slice(0, 8);
 
     // Extract Recent Payments
     const paymentsList: any[] = [];
@@ -1164,8 +1395,13 @@ export async function GET(req: NextRequest) {
       marginRiskOverview,
       recentInvoices,
       allInvoices,
+      allCreditNotes,
       recentCreditNotes,
-      recentPayments
+      recentPayments,
+      pnlAccounts,
+      turnoverStreams: pnlAccounts.turnoverStreams,
+      cogsStreams: pnlAccounts.cogsStreams,
+      expenseStreams: pnlAccounts.expenseStreams
     });
 
   } catch (err: any) {

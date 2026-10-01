@@ -59,7 +59,7 @@ function parseProfitAndLoss(report: any) {
           }
         } else if (section.includes('cost of sales') || section.includes('cogs') || section.includes('cost of goods sold') || section.includes('direct costs')) {
           cogs.push({ name, value });
-        } else if (section.includes('expense') || section.includes('depreciation') || section.includes('operating expenses')) {
+        } else if (section.includes('expense') || section.includes('depreciation') || section.includes('operating expenses') || section.includes('administrative') || section.includes('overhead') || section.includes('costs')) {
           if (section.includes('other expense') || section.includes('interest expense') || section.includes('tax')) {
             expenses.other.push({ name, value });
           } else {

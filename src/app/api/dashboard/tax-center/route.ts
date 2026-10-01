@@ -24,9 +24,9 @@ export async function GET(req: NextRequest) {
     startDate = new Date(fromDateParam);
     endDate = new Date(toDateParam);
   } else {
-    // Default to Apr 1, 2026 - Aug 31, 2026 to align with reference mockup dates
-    startDate = new Date(2026, 3, 1); // 01 Apr 2026
-    endDate = new Date(2026, 7, 31);   // 31 Aug 2026
+    endDate = new Date();
+    startDate = new Date();
+    startDate.setMonth(startDate.getMonth() - 6);
   }
 
   try {

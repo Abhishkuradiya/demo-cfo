@@ -313,21 +313,19 @@ export const XeroBudgetService = {
       variance_pct: totalVariancePct
     });
 
-    // 5. Generate Monthly trends (last 5 months or custom range)
+    // 5. Generate Monthly trends dynamically (last 5 months)
     const monthly_trends: { month: string; budget: number; actual: number; variance: number }[] = [];
-    const months = ['Apr 2026', 'May 2026', 'Jun 2026', 'Jul 2026', 'Aug 2026'];
-    
-    // Values matching line chart in mockup
-    const mockActuals = [3450.00, 10450.00, 15000.00, 21700.00, 19700.00];
-    const mockBudgets = [0.00, 0.00, 0.00, 0.00, 0.00];
+    const currentDate = new Date();
+    const avgMonthlyActual = parseFloat((plSummary.revenue / 5).toFixed(2));
 
-    for (let i = 0; i < months.length; i++) {
-      const budget = mockBudgets[i];
-      const actual = mockActuals[i];
-      // Monthly chart variance is based on revenue/income (actual - budget)
+    for (let i = 4; i >= 0; i--) {
+      const d = new Date(currentDate.getFullYear(), currentDate.getMonth() - i, 1);
+      const monthLabel = d.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
+      const actual = avgMonthlyActual;
+      const budget = parseFloat(((categoryBudgets['Income'] || 0) / 5).toFixed(2));
       const variance = parseFloat((actual - budget).toFixed(2));
       monthly_trends.push({
-        month: months[i],
+        month: monthLabel,
         budget,
         actual,
         variance

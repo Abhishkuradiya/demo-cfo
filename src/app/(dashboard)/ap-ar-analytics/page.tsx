@@ -39,9 +39,27 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { FormattedDatePicker } from '@/components/ui/formatted-date-picker';
 
-// Currency Formatter
+// Currency Formatter & Helper
+export const getCurrencySymbol = (currencyCode?: string): string => {
+  const code = (currencyCode || 'GBP').toUpperCase();
+  switch (code) {
+    case 'USD': return '$';
+    case 'EUR': return '€';
+    case 'AUD': return 'A$';
+    case 'CAD': return 'C$';
+    case 'NZD': return 'NZ$';
+    case 'INR': return '₹';
+    case 'JPY': return '¥';
+    case 'SGD': return 'S$';
+    case 'AED': return 'AED ';
+    case 'ZAR': return 'R';
+    case 'CHF': return 'CHF ';
+    default: return '£';
+  }
+};
+
 const formatAmount = (val: number, currencyStr: string = 'GBP') => {
-  const sym = currencyStr === 'USD' ? '$' : currencyStr === 'EUR' ? '€' : '£';
+  const sym = getCurrencySymbol(currencyStr);
   if (val < 0) {
     return `(${sym}${Math.abs(val).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`;
   }
@@ -138,7 +156,14 @@ export default function APARAnalyticsDashboard() {
   const [exportLoading, setExportLoading] = useState<boolean>(false);
   const [exportSelectedBankId, setExportSelectedBankId] = useState<string>('ALL');
 
-  // Credit Limit & Payment Terms Configuration State
+  // Credit Limit & Payment Terms Configuration State & Drawer
+  const [showCreditDrawer, setShowCreditDrawer] = useState<boolean>(false);
+  const [drawerTab, setDrawerTab] = useState<'all' | 'breached' | 'ar' | 'ap'>('all');
+  const [drawerSearchTerm, setDrawerSearchTerm] = useState<string>('');
+  const [drawerEditingContactId, setDrawerEditingContactId] = useState<string | null>(null);
+  const [drawerEditLimit, setDrawerEditLimit] = useState<number>(0);
+  const [drawerEditTerms, setDrawerEditTerms] = useState<number>(30);
+
   const [showCreditModal, setShowCreditModal] = useState<boolean>(false);
   const [creditContactName, setCreditContactName] = useState<string>('');
   const [creditContactId, setCreditContactId] = useState<string>('');
@@ -181,14 +206,18 @@ export default function APARAnalyticsDashboard() {
       setSavingCreditLimit(false);
     }
   };
-  // Right-to-Left Sliding Drawer State
-  const [showCreditDrawer, setShowCreditDrawer] = useState<boolean>(false);
-  const [drawerSearchTerm, setDrawerSearchTerm] = useState<string>('');
-  const [drawerTab, setDrawerTab] = useState<'all' | 'breached' | 'ar' | 'ap'>('all');
-  const [drawerEditingContactId, setDrawerEditingContactId] = useState<string | null>(null);
-  const [drawerEditLimit, setDrawerEditLimit] = useState<number>(100000);
-  const [drawerEditTerms, setDrawerEditTerms] = useState<number>(90);
-  const [drawerSaving, setDrawerSaving] = useState<boolean>(false);
+  // Web Interactive Matrix View State
+  const [activeMainTab, setActiveMainTab] = useState<'matrix' | 'ledger' | 'charts'>('matrix');
+  const [webMatrixViewMode, setWebMatrixViewMode] = useState<'weekly' | 'daily'>('weekly');
+  const [webMatrixWeekMode, setWebMatrixWeekMode] = useState<'7days' | 'custom'>('7days');
+  const [webMatrixWeekEndDay, setWebMatrixWeekEndDay] = useState<number>(0);
+  const [webMatrixBankId, setWebMatrixBankId] = useState<string>('ALL');
+  const [expandedContacts, setExpandedContacts] = useState<Record<string, boolean>>({});
+  const [matrixSearchTerm, setMatrixSearchTerm] = useState<string>('');
+
+  const toggleExpandContact = (cName: string) => {
+    setExpandedContacts(prev => ({ ...prev, [cName]: !prev[cName] }));
+  };
 
   // Fetch API Data with Date Range support
   const fetchData = async () => {
@@ -224,6 +253,13 @@ export default function APARAnalyticsDashboard() {
     }
     return [];
   }, [data]);
+
+  // Derived Organization Currency & Symbol from API data
+  const orgCurrency = useMemo(() => {
+    return data?.meta?.currency || data?.currency || (rawInvoicesList.length > 0 ? rawInvoicesList[0].currency : 'GBP');
+  }, [data, rawInvoicesList]);
+
+  const orgSym = useMemo(() => getCurrencySymbol(orgCurrency), [orgCurrency]);
 
   // Compute Drawer Contacts List with Live Exposure Percentage & Breach Totals
   const drawerContacts = useMemo(() => {
@@ -394,6 +430,211 @@ export default function APARAnalyticsDashboard() {
     return baseBal + netChange;
   }, [exportSelectedBankId, availableBankAccounts, exportFromDate, asOnDate, rawInvoicesList]);
 
+  // Compute Web Cash Flow Matrix Data (Weekly & Daily Grid) matching Excel matrix layout
+  const webMatrixData = useMemo(() => {
+    const sourceInvoices = rawInvoicesList || [];
+    const startD = new Date(fromDate || asOnDate);
+    startD.setHours(0, 0, 0, 0);
+
+    let endD: Date;
+    if (toDate) {
+      endD = new Date(toDate);
+    } else {
+      endD = new Date(startD);
+      endD.setDate(endD.getDate() + (webMatrixViewMode === 'weekly' ? 91 : 30));
+    }
+    endD.setHours(23, 59, 59, 999);
+
+    const timeCols: { key: string; label: string; startDate: Date; endDate: Date }[] = [];
+
+    // 1. OVERDUE Column
+    timeCols.push({
+      key: 'overdue',
+      label: 'OVERDUE',
+      startDate: new Date(0),
+      endDate: new Date(startD.getTime() - 1)
+    });
+
+    if (webMatrixViewMode === 'daily') {
+      const curr = new Date(startD);
+      while (curr.getTime() <= endD.getTime() && timeCols.length < 90) {
+        const dStr = curr.toISOString().split('T')[0];
+        const dLabel = `${curr.getDate()} ${curr.toLocaleString('en-GB', { month: 'short' })}`;
+        const dayStart = new Date(curr); dayStart.setHours(0, 0, 0, 0);
+        const dayEnd = new Date(curr); dayEnd.setHours(23, 59, 59, 999);
+
+        timeCols.push({ key: dStr, label: dLabel, startDate: dayStart, endDate: dayEnd });
+        curr.setDate(curr.getDate() + 1);
+      }
+    } else {
+      let currStart = new Date(startD);
+      let wIndex = 1;
+      while (currStart.getTime() <= endD.getTime() && wIndex <= 52) {
+        const wStart = new Date(currStart);
+        wStart.setHours(0, 0, 0, 0);
+
+        let wEnd = new Date(wStart);
+        if (webMatrixWeekMode === '7days') {
+          wEnd.setDate(wEnd.getDate() + 6);
+        } else {
+          const currentDay = wStart.getDay();
+          const daysToAdd = (webMatrixWeekEndDay - currentDay + 7) % 7;
+          wEnd.setDate(wEnd.getDate() + daysToAdd);
+        }
+
+        if (wEnd.getTime() > endD.getTime()) {
+          wEnd = new Date(endD);
+        }
+        wEnd.setHours(23, 59, 59, 999);
+
+        const label = `W${wIndex} (${wStart.getDate()} ${wStart.toLocaleString('en-GB', { month: 'short' })} - ${wEnd.getDate()} ${wEnd.toLocaleString('en-GB', { month: 'short' })})`;
+        timeCols.push({ key: `week-${wIndex}`, label, startDate: wStart, endDate: wEnd });
+
+        currStart = new Date(wEnd);
+        currStart.setDate(currStart.getDate() + 1);
+        currStart.setHours(0, 0, 0, 0);
+        wIndex++;
+      }
+    }
+
+    // 2. LATER Column
+    timeCols.push({
+      key: 'later',
+      label: 'LATER',
+      startDate: new Date(endD.getTime() + 1),
+      endDate: new Date(8640000000000000)
+    });
+
+    const arMap = new Map<string, any>();
+    const apMap = new Map<string, any>();
+
+    sourceInvoices.forEach((inv: any) => {
+      if (!inv.dueDate || !inv.contactName) return;
+      const cNameNorm = (inv.contactName || '').toLowerCase().trim();
+      const refNorm = (inv.reference || '').toLowerCase().trim();
+      const numNorm = (inv.invoiceNumber || '').toLowerCase().trim();
+
+      if (
+        cNameNorm === 'opening balance' ||
+        cNameNorm.includes('opening balance') ||
+        refNorm.includes('opening balance') ||
+        numNorm.includes('opening balance') ||
+        inv.isOpeningBalance
+      ) return;
+
+      if (matrixSearchTerm) {
+        const term = matrixSearchTerm.toLowerCase();
+        if (!cNameNorm.includes(term) && !refNorm.includes(term) && !numNorm.includes(term)) {
+          return;
+        }
+      }
+
+      const invDueDate = new Date(inv.dueDate);
+      const amt = Math.abs(inv.amountDue);
+      const isAR = inv.category === 'AR';
+      const targetMap = isAR ? arMap : apMap;
+
+      if (!targetMap.has(inv.contactName)) {
+        targetMap.set(inv.contactName, {
+          contactName: inv.contactName,
+          totalColVals: {},
+          invoices: [],
+          total: 0
+        });
+      }
+      const group = targetMap.get(inv.contactName)!;
+
+      const invNum = inv.invoiceNumber || 'INV-DUE';
+      const invRef = inv.reference && inv.reference !== '—' ? ` (${inv.reference})` : '';
+      const invLabel = `${invNum}${invRef}`;
+
+      let subItem = group.invoices.find((i: any) => i.invoiceLabel === invLabel);
+      if (!subItem) {
+        subItem = { invoiceLabel: invLabel, colVals: {}, total: 0, dueDate: inv.dueDate, currency: inv.currency };
+        group.invoices.push(subItem);
+      }
+
+      timeCols.forEach(col => {
+        if (invDueDate.getTime() >= col.startDate.getTime() && invDueDate.getTime() <= col.endDate.getTime()) {
+          group.totalColVals[col.key] = (group.totalColVals[col.key] || 0) + amt;
+          subItem.colVals[col.key] = (subItem.colVals[col.key] || 0) + amt;
+          subItem.total += amt;
+          group.total += amt;
+        }
+      });
+    });
+
+    const arContacts = Array.from(arMap.values()).sort((a, b) => b.total - a.total);
+    const apContacts = Array.from(apMap.values()).sort((a, b) => b.total - a.total);
+
+    const arTotals: Record<string, number> = {};
+    const apTotals: Record<string, number> = {};
+    const netTotals: Record<string, number> = {};
+    let arGrandTotal = 0;
+    let apGrandTotal = 0;
+
+    timeCols.forEach(col => {
+      let arSum = 0;
+      arContacts.forEach(c => { arSum += (c.totalColVals[col.key] || 0); });
+      arTotals[col.key] = arSum;
+      arGrandTotal += arSum;
+
+      let apSum = 0;
+      apContacts.forEach(c => { apSum += (c.totalColVals[col.key] || 0); });
+      apTotals[col.key] = apSum;
+      apGrandTotal += apSum;
+
+      netTotals[col.key] = arSum - apSum;
+    });
+
+    const netGrandTotal = arGrandTotal - apGrandTotal;
+
+    let baseBankBal = 0;
+    if (webMatrixBankId === 'ALL') {
+      baseBankBal = availableBankAccounts.reduce((sum: number, acc: any) => sum + (acc.balance || 0), 0);
+    } else if (webMatrixBankId !== 'NONE') {
+      const found = availableBankAccounts.find((acc: any) => acc.accountId === webMatrixBankId || acc.accountName === webMatrixBankId);
+      baseBankBal = found ? (found.balance || 0) : 0;
+    }
+
+    const openingBals: Record<string, number> = {};
+    const closingBals: Record<string, number> = {};
+    let currentBal = baseBankBal;
+
+    timeCols.forEach(col => {
+      openingBals[col.key] = currentBal;
+      const net = netTotals[col.key] || 0;
+      currentBal += net;
+      closingBals[col.key] = currentBal;
+    });
+
+    return {
+      timeCols,
+      arContacts,
+      apContacts,
+      arTotals,
+      apTotals,
+      netTotals,
+      openingBals,
+      closingBals,
+      arGrandTotal,
+      apGrandTotal,
+      netGrandTotal,
+      startingBankBal: baseBankBal
+    };
+  }, [rawInvoicesList, fromDate, toDate, asOnDate, webMatrixViewMode, webMatrixWeekMode, webMatrixWeekEndDay, webMatrixBankId, availableBankAccounts, matrixSearchTerm]);
+
+  const expandAllContacts = () => {
+    const next: Record<string, boolean> = {};
+    webMatrixData.arContacts.forEach(c => { next[`AR-${c.contactName}`] = true; });
+    webMatrixData.apContacts.forEach(c => { next[`AP-${c.contactName}`] = true; });
+    setExpandedContacts(next);
+  };
+
+  const collapseAllContacts = () => {
+    setExpandedContacts({});
+  };
+
   // Filter & Sort Invoices
   const filteredInvoices = useMemo(() => {
     let list = rawInvoicesList.filter((inv: any) => {
@@ -440,13 +681,15 @@ export default function APARAnalyticsDashboard() {
       if (inv.category === 'AR') totalAR += inv.amountDue;
       else totalAP += inv.amountDue;
     });
+    const currency = filteredInvoices.length > 0 ? (filteredInvoices[0].currency || orgCurrency) : orgCurrency;
     return {
       totalAR,
       totalAP,
       netBalance: totalAR - totalAP,
-      count: filteredInvoices.length
+      count: filteredInvoices.length,
+      currency
     };
-  }, [filteredInvoices]);
+  }, [filteredInvoices, orgCurrency]);
 
   // Pagination Logic
   const totalPages = pageSize === 0 ? 1 : Math.ceil(filteredInvoices.length / pageSize) || 1;
@@ -478,7 +721,7 @@ export default function APARAnalyticsDashboard() {
           if (!params || params.length === 0) return '';
           let res = `<div style="font-weight:bold;margin-bottom:4px;color:#cbd5e1;">${params[0].name}</div>`;
           params.forEach((item: any) => {
-            const sym = data?.meta?.currency === 'USD' ? '$' : data?.meta?.currency === 'EUR' ? '€' : '£';
+            const sym = getCurrencySymbol(orgCurrency);
             const valFormatted = `${sym}${Math.abs(item.value).toLocaleString('en-GB', { minimumFractionDigits: 2 })}`;
             res += `<div style="display:flex;justify-content:space-between;gap:16px;align-items:center;margin-top:2px;">
               <span style="color:${item.color};font-weight:600;">${item.seriesName}:</span>
@@ -514,7 +757,7 @@ export default function APARAnalyticsDashboard() {
           fontSize: 11,
           fontWeight: 500,
           formatter: (val: number) => {
-            const sym = data?.meta?.currency === 'USD' ? '$' : data?.meta?.currency === 'EUR' ? '€' : '£';
+            const sym = getCurrencySymbol(orgCurrency);
             if (Math.abs(val) >= 1000) return `${sym}${(val / 1000).toFixed(0)}k`;
             return `${sym}${val}`;
           }
@@ -1594,70 +1837,615 @@ export default function APARAnalyticsDashboard() {
       </div>
 
       {/* ========================================================================= */}
+      {/* MAIN VIEW SELECTOR TABS (MATRIX VIEW | LEDGER TABLE | CHARTS) */}
+      {/* ========================================================================= */}
+      <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-2 rounded-xl border border-slate-200 shadow-2xs">
+        <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-lg">
+          <button
+            onClick={() => setActiveMainTab('matrix')}
+            className={cn(
+              "flex items-center gap-2 px-3.5 py-1.5 rounded-md text-xs font-bold transition cursor-pointer",
+              activeMainTab === 'matrix'
+                ? "bg-[#0f172a] text-white shadow-xs"
+                : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/60"
+            )}
+          >
+            <FileSpreadsheet className="h-4 w-4 text-[#00b7e2]" />
+            <span>Cash Flow Matrix View</span>
+            <span className="px-1.5 py-0.2 rounded text-[9.5px] font-black uppercase bg-[#00b7e2]/20 text-[#00b7e2]">
+              Excel Format
+            </span>
+          </button>
+
+          <button
+            onClick={() => setActiveMainTab('ledger')}
+            className={cn(
+              "flex items-center gap-2 px-3.5 py-1.5 rounded-md text-xs font-bold transition cursor-pointer",
+              activeMainTab === 'ledger'
+                ? "bg-[#0f172a] text-white shadow-xs"
+                : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/60"
+            )}
+          >
+            <FileText className="h-4 w-4 text-emerald-400" />
+            <span>AP & AR Invoices Ledger</span>
+          </button>
+
+          <button
+            onClick={() => setActiveMainTab('charts')}
+            className={cn(
+              "flex items-center gap-2 px-3.5 py-1.5 rounded-md text-xs font-bold transition cursor-pointer",
+              activeMainTab === 'charts'
+                ? "bg-[#0f172a] text-white shadow-xs"
+                : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/60"
+            )}
+          >
+            <BarChart3 className="h-4 w-4 text-purple-400" />
+            <span>Forecast & Charts</span>
+          </button>
+        </div>
+
+        {/* Quick Export Button */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowExportModal(true)}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-2xs transition cursor-pointer"
+          >
+            <Download className="h-3.5 w-3.5" />
+            <span>Export Matrix Excel</span>
+          </button>
+        </div>
+      </div>
+
+      {/* ========================================================================= */}
       {/* SUMMARY KPI CARDS */}
       {/* ========================================================================= */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
         
         {/* Receivables Card */}
-        <div className="bg-white rounded-xl border border-slate-200 p-3.5 shadow-2xs">
-          <div className="flex items-center justify-between text-xs font-bold text-slate-500 uppercase">
-            <span>Accounts Receivable (AR)</span>
-            <span className="h-2 w-2 rounded-full bg-emerald-500"></span>
+        <div className="bg-gradient-to-br from-white via-white to-emerald-50/40 rounded-2xl border border-emerald-200/70 p-4 shadow-2xs hover:shadow-md transition-all relative overflow-hidden group">
+          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-400"></div>
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">Accounts Receivable (AR)</span>
+            <div className="h-8 w-8 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center font-bold text-xs shrink-0 group-hover:scale-105 transition-transform border border-emerald-200/50">
+              <TrendingUp className="h-4 w-4 text-emerald-600" />
+            </div>
           </div>
-          <div className="text-xl font-extrabold mt-1 text-emerald-700">
-            {formatAmount(tableTotals.totalAR)}
+          <div className="text-2xl font-black mt-2 text-emerald-950 tracking-tight">
+            {formatAmount(tableTotals.totalAR, tableTotals.currency)}
           </div>
-          <div className="text-[11px] font-semibold text-slate-500 mt-1">
-            {filteredInvoices.filter(i => i.category === 'AR').length} Unpaid Customer Invoices
+          <div className="flex items-center justify-between mt-2 pt-2 border-t border-emerald-100/70 text-[11.5px]">
+            <span className="font-medium text-slate-500">Unpaid Customer Invoices</span>
+            <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-extrabold text-[10.5px]">
+              {filteredInvoices.filter(i => i.category === 'AR').length}
+            </span>
           </div>
         </div>
 
         {/* Payables Card */}
-        <div className="bg-white rounded-xl border border-slate-200 p-3.5 shadow-2xs">
-          <div className="flex items-center justify-between text-xs font-bold text-slate-500 uppercase">
-            <span>Accounts Payable (AP)</span>
-            <span className="h-2 w-2 rounded-full bg-rose-500"></span>
+        <div className="bg-gradient-to-br from-white via-white to-rose-50/40 rounded-2xl border border-rose-200/70 p-4 shadow-2xs hover:shadow-md transition-all relative overflow-hidden group">
+          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-rose-500 via-pink-500 to-rose-400"></div>
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">Accounts Payable (AP)</span>
+            <div className="h-8 w-8 rounded-xl bg-rose-500/10 text-rose-600 flex items-center justify-center font-bold text-xs shrink-0 group-hover:scale-105 transition-transform border border-rose-200/50">
+              <TrendingDown className="h-4 w-4 text-rose-600" />
+            </div>
           </div>
-          <div className="text-xl font-extrabold mt-1 text-rose-700">
-            {formatAmount(tableTotals.totalAP)}
+          <div className="text-2xl font-black mt-2 text-rose-950 tracking-tight">
+            {formatAmount(tableTotals.totalAP, tableTotals.currency)}
           </div>
-          <div className="text-[11px] font-semibold text-slate-500 mt-1">
-            {filteredInvoices.filter(i => i.category === 'AP').length} Unpaid Vendor Bills
+          <div className="flex items-center justify-between mt-2 pt-2 border-t border-rose-100/70 text-[11.5px]">
+            <span className="font-medium text-slate-500">Unpaid Vendor Bills</span>
+            <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 font-extrabold text-[10.5px]">
+              {filteredInvoices.filter(i => i.category === 'AP').length}
+            </span>
           </div>
         </div>
 
         {/* Net Working Position */}
-        <div className="bg-white rounded-xl border border-slate-200 p-3.5 shadow-2xs">
-          <div className="flex items-center justify-between text-xs font-bold text-slate-500 uppercase">
-            <span>Net Balance (AR - AP)</span>
-            <span className="h-2 w-2 rounded-full bg-blue-500"></span>
+        <div className="bg-gradient-to-br from-white via-white to-indigo-50/40 rounded-2xl border border-indigo-200/70 p-4 shadow-2xs hover:shadow-md transition-all relative overflow-hidden group">
+          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-indigo-500 via-blue-500 to-cyan-400"></div>
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">Net Balance (AR - AP)</span>
+            <div className="h-8 w-8 rounded-xl bg-indigo-500/10 text-indigo-600 flex items-center justify-center font-bold text-xs shrink-0 group-hover:scale-105 transition-transform border border-indigo-200/50">
+              <Scale className="h-4 w-4 text-indigo-600" />
+            </div>
           </div>
           <div className={cn(
-            "text-xl font-extrabold mt-1",
+            "text-2xl font-black mt-2 tracking-tight",
             tableTotals.netBalance >= 0 ? "text-slate-900" : "text-rose-700"
           )}>
-            {formatAmount(tableTotals.netBalance)}
+            {formatAmount(tableTotals.netBalance, tableTotals.currency)}
           </div>
-          <div className="text-[11px] font-semibold text-slate-500 mt-1">
-            {tableTotals.netBalance >= 0 ? 'Positive Net Buffer' : 'Payables Exceed Receivables'}
+          <div className="flex items-center justify-between mt-2 pt-2 border-t border-indigo-100/70 text-[11.5px]">
+            <span className="font-medium text-slate-500">Working Capital</span>
+            <span className={cn(
+              "px-2 py-0.5 rounded-full font-extrabold text-[10.5px]",
+              tableTotals.netBalance >= 0 ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"
+            )}>
+              {tableTotals.netBalance >= 0 ? 'Surplus Buffer' : 'Deficit'}
+            </span>
           </div>
         </div>
 
-        {/* Overdue Total Card */}
-        <div className="bg-white rounded-xl border border-slate-200 p-3.5 shadow-2xs">
-          <div className="flex items-center justify-between text-xs font-bold text-slate-500 uppercase">
-            <span>Overdue Status</span>
-            <span className="h-2 w-2 rounded-full bg-amber-500"></span>
+        {/* Overdue Status Card */}
+        <div className="bg-gradient-to-br from-white via-white to-amber-50/40 rounded-2xl border border-amber-200/70 p-4 shadow-2xs hover:shadow-md transition-all relative overflow-hidden group">
+          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-400"></div>
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">Overdue Status</span>
+            <div className="h-8 w-8 rounded-xl bg-amber-500/10 text-amber-600 flex items-center justify-center font-bold text-xs shrink-0 group-hover:scale-105 transition-transform border border-amber-200/50">
+              <AlertCircle className="h-4 w-4 text-amber-600" />
+            </div>
           </div>
-          <div className="text-xl font-extrabold mt-1 text-amber-800">
-            {filteredInvoices.filter(i => i.daysOverdue > 0).length} Overdue
+          <div className="text-2xl font-black mt-2 text-amber-950 tracking-tight flex items-baseline gap-1.5">
+            <span>{filteredInvoices.filter(i => i.daysOverdue > 0).length}</span>
+            <span className="text-xs font-bold text-amber-700 uppercase">Overdue</span>
           </div>
-          <div className="text-[11px] font-semibold text-slate-500 mt-1">
-            {tableTotals.count} Total Filtered Invoices
+          <div className="flex items-center justify-between mt-2 pt-2 border-t border-amber-100/70 text-[11.5px]">
+            <span className="font-medium text-slate-500">Filtered Total</span>
+            <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 font-extrabold text-[10.5px]">
+              {tableTotals.count} Invoices
+            </span>
           </div>
         </div>
 
       </div>
+
+      {/* ========================================================================= */}
+      {/* 1. INTERACTIVE CASH FLOW MATRIX VIEW (EXCEL FORMAT MATCH) */}
+      {/* ========================================================================= */}
+      {activeMainTab === 'matrix' && (
+        <div className="space-y-4">
+          {/* Matrix Control Bar */}
+          <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+            <div className="flex flex-wrap items-center gap-3">
+              {/* Granularity Selector */}
+              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
+                <button
+                  onClick={() => setWebMatrixViewMode('weekly')}
+                  className={cn(
+                    "px-3 py-1 rounded-lg font-bold text-xs transition cursor-pointer",
+                    webMatrixViewMode === 'weekly' ? "bg-emerald-600 text-white shadow-2xs" : "text-slate-600 hover:text-slate-900"
+                  )}
+                >
+                  Weekly Schedule
+                </button>
+                <button
+                  onClick={() => setWebMatrixViewMode('daily')}
+                  className={cn(
+                    "px-3 py-1 rounded-lg font-bold text-xs transition cursor-pointer",
+                    webMatrixViewMode === 'daily' ? "bg-emerald-600 text-white shadow-2xs" : "text-slate-600 hover:text-slate-900"
+                  )}
+                >
+                  Daily Matrix
+                </button>
+              </div>
+
+              {/* Week Boundary Strategy (Active for Weekly Schedule) */}
+              {webMatrixViewMode === 'weekly' && (
+                <div className="flex items-center gap-1.5 bg-emerald-50/70 p-1 rounded-xl border border-emerald-200/80 shadow-2xs">
+                  <span className="text-[11px] font-bold text-emerald-950 pl-1">Week Ending:</span>
+                  <div className="flex items-center gap-0.5 bg-white p-0.5 rounded-lg border border-emerald-300">
+                    <button
+                      onClick={() => setWebMatrixWeekMode('7days')}
+                      className={cn(
+                        "px-2 py-0.5 rounded text-[11px] font-bold transition cursor-pointer",
+                        webMatrixWeekMode === '7days' ? "bg-emerald-600 text-white shadow-2xs" : "text-slate-600 hover:text-slate-900"
+                      )}
+                    >
+                      Fixed 7 Days
+                    </button>
+                    <button
+                      onClick={() => setWebMatrixWeekMode('custom')}
+                      className={cn(
+                        "px-2 py-0.5 rounded text-[11px] font-bold transition cursor-pointer",
+                        webMatrixWeekMode === 'custom' ? "bg-emerald-600 text-white shadow-2xs" : "text-slate-600 hover:text-slate-900"
+                      )}
+                    >
+                      Custom Day
+                    </button>
+                  </div>
+
+                  <select
+                    value={webMatrixWeekEndDay}
+                    onChange={(e) => {
+                      setWebMatrixWeekEndDay(Number(e.target.value));
+                      setWebMatrixWeekMode('custom');
+                    }}
+                    className="bg-white border border-emerald-300 rounded-lg px-2 py-1 text-[11px] font-bold text-slate-900 focus:outline-none cursor-pointer shadow-2xs"
+                  >
+                    <option value={0}>Sunday (Mon – Sun)</option>
+                    <option value={6}>Saturday (Sun – Sat)</option>
+                    <option value={5}>Friday (Sat – Fri)</option>
+                    <option value={4}>Thursday (Fri – Thu)</option>
+                    <option value={3}>Wednesday (Thu – Wed)</option>
+                    <option value={2}>Tuesday (Wed – Tue)</option>
+                    <option value={1}>Monday (Tue – Mon)</option>
+                  </select>
+                </div>
+              )}
+
+              {/* Bank Account Selector for Rolling Forecast */}
+              <div className="flex items-center gap-1.5">
+                <span className="font-bold text-slate-600">Bank Liquidity:</span>
+                <select
+                  value={webMatrixBankId}
+                  onChange={(e) => setWebMatrixBankId(e.target.value)}
+                  className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-800 outline-none cursor-pointer"
+                >
+                  <option value="ALL">ALL Linked Bank Accounts (Combined)</option>
+                  {availableBankAccounts.map((acc: any) => (
+                    <option key={acc.accountId} value={acc.accountId}>
+                      {acc.accountName} ({formatAmount(acc.balance || 0, acc.currency)})
+                    </option>
+                  ))}
+                  <option value="NONE">No Bank Balance (Flows Only)</option>
+                </select>
+              </div>
+
+              {/* Search Box inside Matrix */}
+              <div className="relative min-w-[200px]">
+                <Search className="h-3.5 w-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  value={matrixSearchTerm}
+                  onChange={(e) => setMatrixSearchTerm(e.target.value)}
+                  placeholder="Filter contact or invoice..."
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-800 outline-none focus:border-blue-500"
+                />
+              </div>
+            </div>
+
+            {/* Right Buttons: Expand / Collapse All */}
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={expandAllContacts}
+                className="px-2.5 py-1.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-bold transition cursor-pointer"
+              >
+                + Expand All Invoices
+              </button>
+              <button
+                onClick={collapseAllContacts}
+                className="px-2.5 py-1.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-bold transition cursor-pointer"
+              >
+                − Collapse All
+              </button>
+            </div>
+          </div>
+
+          {/* Matrix Scrollable Table Container */}
+          <div className="bg-white rounded-2xl border border-slate-200/90 shadow-md overflow-hidden">
+            <div className="overflow-x-auto max-w-full">
+              <table className="w-full text-left text-xs border-collapse">
+                
+                {/* Header Row */}
+                <thead>
+                  <tr className="bg-[#0f172a] text-white text-[11px] font-bold tracking-wider">
+                    <th className="py-3 px-4 sticky left-0 bg-[#0f172a] z-20 min-w-[320px] shadow-r border-r border-slate-700">
+                      Particulars / Contact Name & Invoices
+                    </th>
+                    {webMatrixData.timeCols.map((col) => (
+                      <th
+                        key={col.key}
+                        className={cn(
+                          "py-3 px-3 text-right whitespace-nowrap border-r border-slate-800 min-w-[130px]",
+                          col.key === 'overdue' ? "bg-rose-950/80 text-rose-300" :
+                          col.key === 'later' ? "bg-slate-800 text-slate-300" : ""
+                        )}
+                      >
+                        {col.label}
+                      </th>
+                    ))}
+                    <th className="py-3 px-4 text-right bg-slate-900 text-white min-w-[140px] font-black">
+                      TOTAL
+                    </th>
+                  </tr>
+                </thead>
+
+                {/* Body */}
+                <tbody className="divide-y divide-slate-100 text-slate-700">
+                  
+                  {/* ========================================== */}
+                  {/* SECTION 1: CASH IN - CUSTOMERS (RECEIVABLES) */}
+                  {/* ========================================== */}
+                  <tr className="bg-gradient-to-r from-emerald-800 via-teal-800 to-emerald-900 text-white font-bold tracking-wide shadow-xs">
+                    <td colSpan={webMatrixData.timeCols.length + 2} className="py-2.5 px-4">
+                      <div className="flex items-center justify-between text-xs font-extrabold tracking-wider uppercase">
+                        <span className="flex items-center gap-2">
+                          <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                          CASH IN — CUSTOMERS (RECEIVABLES)
+                        </span>
+                        <span className="text-[10px] bg-emerald-950/60 px-2.5 py-0.5 rounded-full font-mono font-bold text-emerald-200 border border-emerald-700/50">
+                          {webMatrixData.arContacts.length} Customers
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+
+                  {webMatrixData.arContacts.map((group: any) => {
+                    const cKey = `AR-${group.contactName}`;
+                    const isExpanded = Boolean(expandedContacts[cKey]);
+
+                    return (
+                      <React.Fragment key={cKey}>
+                        {/* Parent Contact Summary Row */}
+                        <tr className="bg-emerald-50/50 hover:bg-emerald-100/70 transition-colors font-bold border-b border-emerald-200/60">
+                          <td className="py-2.5 px-4 sticky left-0 bg-emerald-50/95 z-10 border-r border-slate-200 shadow-2xs">
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => toggleExpandContact(cKey)}
+                                className="h-5 w-5 rounded-md bg-emerald-200/90 hover:bg-emerald-300 text-emerald-950 flex items-center justify-center text-xs font-black shrink-0 transition cursor-pointer shadow-2xs"
+                              >
+                                {isExpanded ? '−' : '+'}
+                              </button>
+                              <ContactAvatar name={group.contactName} type="AR" />
+                              <span className="font-bold text-slate-900 truncate">{group.contactName}</span>
+                              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-200/70 text-emerald-950 font-bold shrink-0">
+                                {group.invoices.length} Inv
+                              </span>
+                            </div>
+                          </td>
+
+                          {webMatrixData.timeCols.map((col) => {
+                            const val = group.totalColVals[col.key] || 0;
+                            return (
+                              <td key={col.key} className="py-2.5 px-3 text-right border-r border-slate-200 font-bold text-slate-900 whitespace-nowrap">
+                                {val > 0 ? formatAmount(val, orgCurrency) : '—'}
+                              </td>
+                            );
+                          })}
+
+                          <td className="py-2.5 px-4 text-right font-black text-emerald-900 bg-emerald-100/80 whitespace-nowrap">
+                            {formatAmount(group.total, orgCurrency)}
+                          </td>
+                        </tr>
+
+                        {/* Indented Individual Invoice Sub-Rows */}
+                        {isExpanded && group.invoices.map((sub: any, idx: number) => {
+                          const isLast = idx === group.invoices.length - 1;
+                          const prefix = isLast ? '└── ' : '├── ';
+
+                          return (
+                            <tr key={idx} className="bg-slate-50/90 hover:bg-slate-100/90 transition-colors text-slate-600 text-[11px]">
+                              <td className="py-1.5 px-4 pl-10 sticky left-0 bg-slate-50/95 z-10 border-r border-slate-200 font-mono italic">
+                                <span className="text-slate-400 font-normal">{prefix}</span>
+                                <span className="font-bold text-slate-800">{sub.invoiceLabel}</span>
+                              </td>
+
+                              {webMatrixData.timeCols.map((col) => {
+                                const val = sub.colVals[col.key] || 0;
+                                return (
+                                  <td key={col.key} className="py-1.5 px-3 text-right border-r border-slate-200 whitespace-nowrap font-semibold">
+                                    {val > 0 ? formatAmount(val, sub.currency || orgCurrency) : '—'}
+                                  </td>
+                                );
+                              })}
+
+                              <td className="py-1.5 px-4 text-right font-bold text-slate-700 bg-slate-100 whitespace-nowrap">
+                                {formatAmount(sub.total, sub.currency || orgCurrency)}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </React.Fragment>
+                    );
+                  })}
+
+                  {/* TOTAL CASH IN (AR) ROW */}
+                  <tr className="bg-gradient-to-r from-emerald-100 via-teal-100 to-emerald-100 font-extrabold text-emerald-950 text-xs border-t-2 border-b-2 border-emerald-400 shadow-2xs">
+                    <td className="py-3 px-4 sticky left-0 bg-emerald-100 z-10 border-r border-emerald-300 font-black tracking-wider uppercase">
+                      TOTAL CASH IN (AR)
+                    </td>
+
+                    {webMatrixData.timeCols.map((col) => (
+                      <td key={col.key} className="py-3 px-3 text-right border-r border-emerald-300 font-black whitespace-nowrap text-emerald-950">
+                        {webMatrixData.arTotals[col.key] > 0 ? formatAmount(webMatrixData.arTotals[col.key], orgCurrency) : '—'}
+                      </td>
+                    ))}
+
+                    <td className="py-3 px-4 text-right font-black text-emerald-950 bg-emerald-200/90 text-sm whitespace-nowrap">
+                      {formatAmount(webMatrixData.arGrandTotal, orgCurrency)}
+                    </td>
+                  </tr>
+
+                  {/* ========================================== */}
+                  {/* SECTION 2: CASH OUT - VENDORS (PAYABLES) */}
+                  {/* ========================================== */}
+                  <tr className="bg-gradient-to-r from-rose-800 via-pink-800 to-rose-900 text-white font-bold tracking-wide shadow-xs">
+                    <td colSpan={webMatrixData.timeCols.length + 2} className="py-2.5 px-4">
+                      <div className="flex items-center justify-between text-xs font-extrabold tracking-wider uppercase">
+                        <span className="flex items-center gap-2">
+                          <span className="h-2 w-2 rounded-full bg-rose-400 animate-pulse"></span>
+                          CASH OUT — VENDORS (PAYABLES)
+                        </span>
+                        <span className="text-[10px] bg-rose-950/60 px-2.5 py-0.5 rounded-full font-mono font-bold text-rose-200 border border-rose-700/50">
+                          {webMatrixData.apContacts.length} Vendors
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+
+                  {webMatrixData.apContacts.map((group: any) => {
+                    const cKey = `AP-${group.contactName}`;
+                    const isExpanded = Boolean(expandedContacts[cKey]);
+
+                    return (
+                      <React.Fragment key={cKey}>
+                        {/* Parent Contact Summary Row */}
+                        <tr className="bg-rose-50/50 hover:bg-rose-100/70 transition-colors font-bold border-b border-rose-200/60">
+                          <td className="py-2.5 px-4 sticky left-0 bg-rose-50/95 z-10 border-r border-slate-200 shadow-2xs">
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => toggleExpandContact(cKey)}
+                                className="h-5 w-5 rounded-md bg-rose-200/90 hover:bg-rose-300 text-rose-950 flex items-center justify-center text-xs font-black shrink-0 transition cursor-pointer shadow-2xs"
+                              >
+                                {isExpanded ? '−' : '+'}
+                              </button>
+                              <ContactAvatar name={group.contactName} type="AP" />
+                              <span className="font-bold text-slate-900 truncate">{group.contactName}</span>
+                              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-rose-200/70 text-rose-950 font-bold shrink-0">
+                                {group.invoices.length} Bills
+                              </span>
+                            </div>
+                          </td>
+
+                          {webMatrixData.timeCols.map((col) => {
+                            const val = group.totalColVals[col.key] || 0;
+                            return (
+                              <td key={col.key} className="py-2.5 px-3 text-right border-r border-slate-200 font-bold text-rose-700 whitespace-nowrap">
+                                {val > 0 ? formatAmount(val, orgCurrency) : '—'}
+                              </td>
+                            );
+                          })}
+
+                          <td className="py-2.5 px-4 text-right font-black text-rose-900 bg-rose-100/80 whitespace-nowrap">
+                            {formatAmount(group.total, orgCurrency)}
+                          </td>
+                        </tr>
+
+                        {/* Indented Individual Bill Sub-Rows */}
+                        {isExpanded && group.invoices.map((sub: any, idx: number) => {
+                          const isLast = idx === group.invoices.length - 1;
+                          const prefix = isLast ? '└── ' : '├── ';
+
+                          return (
+                            <tr key={idx} className="bg-slate-50/90 hover:bg-slate-100/90 transition-colors text-slate-600 text-[11px]">
+                              <td className="py-1.5 px-4 pl-10 sticky left-0 bg-slate-50/95 z-10 border-r border-slate-200 font-mono italic">
+                                <span className="text-slate-400 font-normal">{prefix}</span>
+                                <span className="font-bold text-slate-800">{sub.invoiceLabel}</span>
+                              </td>
+
+                              {webMatrixData.timeCols.map((col) => {
+                                const val = sub.colVals[col.key] || 0;
+                                return (
+                                  <td key={col.key} className="py-1.5 px-3 text-right border-r border-slate-200 whitespace-nowrap font-semibold text-rose-600">
+                                    {val > 0 ? formatAmount(val, sub.currency || orgCurrency) : '—'}
+                                  </td>
+                                );
+                              })}
+
+                              <td className="py-1.5 px-4 text-right font-bold text-slate-700 bg-slate-100 whitespace-nowrap">
+                                {formatAmount(sub.total, sub.currency || orgCurrency)}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </React.Fragment>
+                    );
+                  })}
+
+                  {/* TOTAL CASH OUT (AP) ROW */}
+                  <tr className="bg-gradient-to-r from-rose-100 via-pink-100 to-rose-100 font-extrabold text-rose-950 text-xs border-t-2 border-b-2 border-rose-400 shadow-2xs">
+                    <td className="py-3 px-4 sticky left-0 bg-rose-100 z-10 border-r border-rose-300 font-black tracking-wider uppercase">
+                      TOTAL CASH OUT (AP)
+                    </td>
+
+                    {webMatrixData.timeCols.map((col) => (
+                      <td key={col.key} className="py-3 px-3 text-right border-r border-rose-300 font-black whitespace-nowrap text-rose-950">
+                        {webMatrixData.apTotals[col.key] > 0 ? formatAmount(webMatrixData.apTotals[col.key], orgCurrency) : '—'}
+                      </td>
+                    ))}
+
+                    <td className="py-3 px-4 text-right font-black text-rose-950 bg-rose-200/90 text-sm whitespace-nowrap">
+                      {formatAmount(webMatrixData.apGrandTotal, orgCurrency)}
+                    </td>
+                  </tr>
+
+                  {/* ========================================== */}
+                  {/* SECTION 3: NET CASH FLOW POSITION */}
+                  {/* ========================================== */}
+                  <tr className="bg-gradient-to-r from-slate-800 via-slate-900 to-slate-800 text-white font-extrabold text-xs border-y border-slate-700 shadow-xs">
+                    <td className="py-3 px-4 sticky left-0 bg-slate-900 z-10 border-r border-slate-700 uppercase tracking-wider text-slate-200">
+                      NET CASH FLOW POSITION (IN - OUT)
+                    </td>
+
+                    {webMatrixData.timeCols.map((col) => {
+                      const net = webMatrixData.netTotals[col.key] || 0;
+                      return (
+                        <td
+                          key={col.key}
+                          className={cn(
+                            "py-3 px-3 text-right border-r border-slate-700 font-black whitespace-nowrap",
+                            net >= 0 ? "text-emerald-400" : "text-rose-400"
+                          )}
+                        >
+                          {formatAmount(net, orgCurrency)}
+                        </td>
+                      );
+                    })}
+
+                    <td className={cn(
+                      "py-3 px-4 text-right font-black text-sm whitespace-nowrap bg-slate-950 border-l border-slate-700",
+                      webMatrixData.netGrandTotal >= 0 ? "text-emerald-300" : "text-rose-300"
+                    )}>
+                      {formatAmount(webMatrixData.netGrandTotal, orgCurrency)}
+                    </td>
+                  </tr>
+
+                  {/* ========================================== */}
+                  {/* SECTION 4: BANK LIQUIDITY & CLOSING BALANCE */}
+                  {/* ========================================== */}
+                  {webMatrixBankId !== 'NONE' && (
+                    <>
+                      <tr className="bg-gradient-to-r from-slate-950 via-indigo-950 to-slate-950 text-indigo-200 font-bold border-t border-indigo-900/60 shadow-xs">
+                        <td colSpan={webMatrixData.timeCols.length + 2} className="py-2.5 px-4 uppercase tracking-wider text-xs font-extrabold flex items-center justify-between">
+                          <span className="flex items-center gap-2 text-indigo-300">
+                            <Building2 className="h-4 w-4 text-indigo-400" />
+                            BANK LIQUIDITY & CLOSING BALANCE FORECAST
+                          </span>
+                        </td>
+                      </tr>
+
+                      {/* OPENING BANK BALANCE */}
+                      <tr className="bg-indigo-50/70 hover:bg-indigo-50 font-bold text-indigo-950 border-b border-indigo-200/80">
+                        <td className="py-2.5 px-4 sticky left-0 bg-indigo-50/95 z-10 border-r border-indigo-200/80 uppercase text-[11px] font-extrabold text-indigo-900">
+                          OPENING BANK BALANCE ({orgSym})
+                        </td>
+
+                        {webMatrixData.timeCols.map((col) => (
+                          <td key={col.key} className="py-2.5 px-3 text-right border-r border-indigo-200/80 whitespace-nowrap font-bold text-slate-800">
+                            {formatAmount(webMatrixData.openingBals[col.key] || 0, orgCurrency)}
+                          </td>
+                        ))}
+
+                        <td className="py-2.5 px-4 text-right font-black bg-indigo-100/90 text-indigo-950 whitespace-nowrap">
+                          {formatAmount(webMatrixData.startingBankBal, orgCurrency)}
+                        </td>
+                      </tr>
+
+                      {/* PROJECTED CLOSING BANK BALANCE */}
+                      <tr className="bg-gradient-to-r from-emerald-100 via-teal-100 to-emerald-100 font-black text-emerald-950 text-xs border-t-2 border-b-2 border-emerald-500 shadow-sm">
+                        <td className="py-3.5 px-4 sticky left-0 bg-emerald-100 z-10 border-r border-emerald-300 uppercase tracking-wider text-emerald-950">
+                          PROJECTED CLOSING BANK BALANCE ({orgSym})
+                        </td>
+
+                        {webMatrixData.timeCols.map((col) => {
+                          const closeBal = webMatrixData.closingBals[col.key] || 0;
+                          return (
+                            <td
+                              key={col.key}
+                              className={cn(
+                                "py-3.5 px-3 text-right border-r border-emerald-300 font-black whitespace-nowrap text-sm",
+                                closeBal >= 0 ? "text-emerald-950" : "text-rose-950 bg-rose-200/80"
+                              )}
+                            >
+                              {formatAmount(closeBal, orgCurrency)}
+                            </td>
+                          );
+                        })}
+
+                        <td className="py-3.5 px-4 text-right font-black text-emerald-950 bg-emerald-300 text-base whitespace-nowrap shadow-xs">
+                          {formatAmount(webMatrixData.closingBals[webMatrixData.timeCols[webMatrixData.timeCols.length - 1]?.key] || 0, orgCurrency)}
+                        </td>
+                      </tr>
+                    </>
+                  )}
+
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ========================================================================= */}
       {/* AP & AR CASH FLOW FORECAST GRAPH */}
@@ -2070,13 +2858,13 @@ export default function APARAnalyticsDashboard() {
                   Total Ledger Summary ({tableTotals.count} Entries)
                 </td>
                 <td className="py-2.5 px-3 text-right font-black text-emerald-700 whitespace-nowrap border-r border-slate-200">
-                  {formatAmount(tableTotals.totalAR)}
+                  {formatAmount(tableTotals.totalAR, tableTotals.currency)}
                 </td>
                 <td className="py-2.5 px-3 text-right font-black text-rose-700 whitespace-nowrap border-r border-slate-200">
-                  {formatAmount(tableTotals.totalAP)}
+                  {formatAmount(tableTotals.totalAP, tableTotals.currency)}
                 </td>
                 <td className="py-2.5 px-3 text-right font-black text-slate-900 text-xs whitespace-nowrap border-r border-slate-200">
-                  {formatAmount(tableTotals.netBalance)}
+                  {formatAmount(tableTotals.netBalance, tableTotals.currency)}
                 </td>
                 <td className="py-2.5 px-3 text-center text-slate-500 font-semibold text-[11px]">
                   Net Buffer
@@ -2468,11 +3256,11 @@ export default function APARAnalyticsDashboard() {
                   className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 font-bold text-slate-900 text-xs focus:outline-none focus:border-blue-500 cursor-pointer shadow-2xs"
                 >
                   <option value="ALL">
-                    All Linked Bank Accounts (Combined Opening: £{availableBankAccounts.reduce((sum: number, a: any) => sum + (a.balance || 0), 0).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+                    All Linked Bank Accounts (Combined Opening: {formatAmount(availableBankAccounts.reduce((sum: number, a: any) => sum + (a.balance || 0), 0), orgCurrency)})
                   </option>
                   {availableBankAccounts.map((b: any) => (
                     <option key={b.accountId || b.accountName} value={b.accountId || b.accountName}>
-                      {b.accountName} ({b.currency || 'GBP'} £{(b.balance || 0).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+                      {b.accountName} ({b.currency || orgCurrency} {formatAmount(b.balance || 0, b.currency || orgCurrency)})
                     </option>
                   ))}
                   <option value="NONE">None (Pure Receivables/Payables Net Only)</option>
@@ -2485,7 +3273,7 @@ export default function APARAnalyticsDashboard() {
                       Initial Opening Bank Balance (as of {formatToDDMMYYYY(exportFromDate || asOnDate)}):
                     </span>
                     <span className="font-extrabold text-blue-900 text-xs">
-                      £{selectedBankBalance.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {formatAmount(selectedBankBalance, orgCurrency)}
                     </span>
                   </div>
                 )}
@@ -2572,14 +3360,14 @@ export default function APARAnalyticsDashboard() {
                 />
               </div>
 
-              {/* Credit Limit (£) */}
+              {/* Credit Limit (Org Currency) */}
               <div>
                 <label className="text-[11px] font-bold text-slate-700 block mb-1 flex items-center justify-between">
-                  <span>Max Credit Exposure Limit (£):</span>
-                  <span className="text-[10px] text-slate-400 font-normal">e.g. £100,000</span>
+                  <span>Max Credit Exposure Limit ({orgSym}):</span>
+                  <span className="text-[10px] text-slate-400 font-normal">e.g. {orgSym}100,000</span>
                 </label>
                 <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 font-bold text-xs">£</span>
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 font-bold text-xs">{orgSym}</span>
                   <input
                     type="number"
                     min="0"
@@ -2622,7 +3410,7 @@ export default function APARAnalyticsDashboard() {
                     }}
                     className="px-2 py-1 bg-white hover:bg-blue-50 text-slate-700 font-bold text-[10.5px] rounded-lg border border-slate-200"
                   >
-                    £50k (60d)
+                    {orgSym}50k (60d)
                   </button>
                   <button
                     type="button"
@@ -2632,7 +3420,7 @@ export default function APARAnalyticsDashboard() {
                     }}
                     className="px-2 py-1 bg-blue-50 text-blue-700 font-bold text-[10.5px] rounded-lg border border-blue-200"
                   >
-                    £100k (90d)
+                    {orgSym}100k (90d)
                   </button>
                   <button
                     type="button"
@@ -2642,7 +3430,7 @@ export default function APARAnalyticsDashboard() {
                     }}
                     className="px-2 py-1 bg-white hover:bg-blue-50 text-slate-700 font-bold text-[10.5px] rounded-lg border border-slate-200"
                   >
-                    £250k (90d)
+                    {orgSym}250k (90d)
                   </button>
                 </div>
               </div>
@@ -2715,7 +3503,7 @@ export default function APARAnalyticsDashboard() {
               <div className="grid grid-cols-3 gap-2 p-3 bg-slate-50 border-b border-slate-200">
                 <div className="bg-white p-2.5 rounded-lg border border-slate-200 text-center">
                   <span className="text-[10px] uppercase tracking-wider font-bold text-slate-500 block">Total Allocated</span>
-                  <span className="text-sm font-bold text-slate-900">£{drawerMetrics.totalLimit.toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
+                  <span className="text-sm font-bold text-slate-900">{formatAmount(drawerMetrics.totalLimit, orgCurrency)}</span>
                 </div>
                 <div className="bg-white p-2.5 rounded-lg border border-slate-200 text-center">
                   <span className="text-[10px] uppercase tracking-wider font-bold text-slate-500 block">Active Breaches</span>
@@ -2725,7 +3513,7 @@ export default function APARAnalyticsDashboard() {
                 </div>
                 <div className="bg-white p-2.5 rounded-lg border border-slate-200 text-center">
                   <span className="text-[10px] uppercase tracking-wider font-bold text-slate-500 block">Total Exposure</span>
-                  <span className="text-sm font-bold text-blue-700">£{drawerMetrics.totalExposure.toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
+                  <span className="text-sm font-bold text-blue-700">{formatAmount(drawerMetrics.totalExposure, orgCurrency)}</span>
                 </div>
               </div>
 
@@ -2830,7 +3618,7 @@ export default function APARAnalyticsDashboard() {
                             {isBreached ? (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 text-[10px] font-extrabold border border-rose-300 animate-pulse">
                                 <AlertTriangle className="h-3 w-3 text-rose-600" />
-                                Breached (+£{contact.excessAmount.toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 0 })})
+                                Breached (+{formatAmount(contact.excessAmount, orgCurrency)})
                               </span>
                             ) : contact.creditLimit ? (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-extrabold border border-emerald-300">
@@ -2849,10 +3637,10 @@ export default function APARAnalyticsDashboard() {
                         <div className="mt-3 space-y-1">
                           <div className="flex justify-between items-center text-[11px] font-semibold">
                             <span className="text-slate-600">
-                              Outstanding Exposure: <strong className="text-slate-900">£{contact.totalAmount.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                              Outstanding Exposure: <strong className="text-slate-900">{formatAmount(contact.totalAmount, orgCurrency)}</strong>
                             </span>
                             <span className="text-slate-500">
-                              Limit: <strong className="text-slate-900">{contact.creditLimit ? `£${contact.creditLimit.toLocaleString('en-GB')}` : 'Uncapped'}</strong>
+                              Limit: <strong className="text-slate-900">{contact.creditLimit ? formatAmount(contact.creditLimit, orgCurrency) : 'Uncapped'}</strong>
                             </span>
                           </div>
 

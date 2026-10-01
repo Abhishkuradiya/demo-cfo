@@ -18,8 +18,13 @@ export async function GET(req: NextRequest) {
   const accountType = searchParams.get('type') || '';
   const statusFilter = searchParams.get('status') || '';
 
-  const fromDateStr = searchParams.get('from_date') || searchParams.get('fromDate') || '2026-08-01';
-  const toDateStr = searchParams.get('to_date') || searchParams.get('toDate') || searchParams.get('as_of_date') || '2026-08-31';
+  const now = new Date();
+  const currentMonthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const currentMonthEnd = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+
+  const fromDateStr = searchParams.get('from_date') || searchParams.get('fromDate') || currentMonthStart;
+  const toDateStr = searchParams.get('to_date') || searchParams.get('toDate') || searchParams.get('as_of_date') || currentMonthEnd;
 
   try {
     const tokenInfo = await getXeroAccessToken(tenantId);
@@ -127,26 +132,7 @@ export async function GET(req: NextRequest) {
 
     // Format output DTO for frontend
     const formattedAccounts = mergedAccounts.map((acc, index) => {
-      let bal = acc.balance || 0;
-
-      // Realistic bank balance fallback if Xero sandbox returned 0 for all bank accounts
-      if (bal === 0 && mergedAccounts.every((a) => (a.balance || 0) === 0)) {
-        const fallbackBalances: Record<string, number> = {
-          'Starling Business Account': 48250.75,
-          'BC Inter company bank': 14820.50,
-          'Ebay Control Account': 3450.20,
-          'Groupon Control account': -1850.40,
-          'SUM UP': 5210.00,
-          'Stripe Control account': 12400.80,
-          'IT Platinum Business Supplement': -7570.86,
-          'Capital on Tap Account BC - MS': 8950.00,
-          'Capital on Tap Account NEW': 16500.00,
-          'PayPal': 2850.00,
-          'MS American Express Platinum B': -4200.00,
-          'TT Gold Business Supplementary': 9650.00
-        };
-        bal = fallbackBalances[acc.accountName] ?? (index % 2 === 0 ? (index + 1) * 2450.50 : -((index + 1) * 1250.00));
-      }
+      const bal = acc.balance || 0;
 
       return {
         id: index + 1,

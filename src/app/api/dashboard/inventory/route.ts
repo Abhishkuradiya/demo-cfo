@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getTenantIdFromSession } from '@/lib/auth';
-import { getXeroAccessToken } from '@/lib/xero';
+import { getXeroAccessToken, fetchXeroResource } from '@/lib/xero';
 import { XeroInventoryService } from '@/lib/inventoryService';
 
 export const dynamic = 'force-dynamic';
@@ -40,6 +40,21 @@ export async function GET(req: NextRequest) {
 
     // Fetch items from DB
     let rawItems = await db.getInventoryItems(tenantId);
+
+    // Auto-hydrate items from Xero if DB is empty
+    if ((!rawItems || rawItems.length === 0) && tokenInfo) {
+      try {
+        console.log(`[AutoSync] Hydrating inventory items from Xero for tenant ${tenantId}...`);
+        const xeroItems = await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Items');
+        if (xeroItems && xeroItems.length > 0) {
+          await db.saveInventoryItems(tenantId, xeroItems);
+          rawItems = await db.getInventoryItems(tenantId);
+        }
+      } catch (err: any) {
+        console.error('[AutoSync] Error auto-hydrating Xero inventory items:', err.message);
+      }
+    }
+
     const thresholds = await db.getThresholds(tenantId);
     const thresholdMap = new Map(thresholds.map(t => [t.item_id, parseFloat(t.minimum_stock)]));
     
@@ -55,41 +70,20 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Default mock list of items matching the screenshots exactly if DB has no synced items
-    if (!rawItems || rawItems.length === 0) {
-      const mockItems: InventoryItemDTO[] = [
-        { code: 'ITEM-001', name: 'Wireless Mouse', group: 'Electronics', location: 'Main Warehouse', qtyOnHand: 25, qtyAvailable: 20, qtyReserved: 5, unitCost: 10.00, totalValue: 250.00, status: 'In Stock', lastMovement: '2026-08-06' },
-        { code: 'ITEM-002', name: 'Keyboard', group: 'Electronics', location: 'Main Warehouse', qtyOnHand: 15, qtyAvailable: 10, qtyReserved: 5, unitCost: 15.00, totalValue: 225.00, status: 'In Stock', lastMovement: '2026-08-05' },
-        { code: 'ITEM-003', name: 'USB-C Cable', group: 'Accessories', location: 'Store Room', qtyOnHand: 8, qtyAvailable: 3, qtyReserved: 5, unitCost: 8.00, totalValue: 64.00, status: 'Low Stock', lastMovement: '2026-08-01' },
-        { code: 'ITEM-004', name: 'HDMI Cable', group: 'Accessories', location: 'Store Room', qtyOnHand: 5, qtyAvailable: 5, qtyReserved: 0, unitCost: 6.00, totalValue: 30.00, status: 'Low Stock', lastMovement: '2026-07-28' },
-        { code: 'ITEM-005', name: 'Laptop Stand', group: 'Office Supplies', location: 'Branch Office', qtyOnHand: 12, qtyAvailable: 12, qtyReserved: 0, unitCost: 12.00, totalValue: 144.00, status: 'In Stock', lastMovement: '2026-08-04' },
-        { code: 'ITEM-006', name: 'Monitor 24"', group: 'Electronics', location: 'Main Warehouse', qtyOnHand: 3, qtyAvailable: 0, qtyReserved: 3, unitCost: 80.00, totalValue: 240.00, status: 'Dead Stock', lastMovement: '2026-06-15' },
-        { code: 'ITEM-007', name: 'Printer Ink Black', group: 'Consumables', location: 'Store Room', qtyOnHand: 2, qtyAvailable: 2, qtyReserved: 0, unitCost: 18.00, totalValue: 36.00, status: 'Dead Stock', lastMovement: '2026-05-20' },
-        { code: 'ITEM-008', name: 'AAA Batteries (Pack of 4)', group: 'Accessories', location: 'Branch Office', qtyOnHand: 50, qtyAvailable: 45, qtyReserved: 5, unitCost: 2.50, totalValue: 125.00, status: 'In Stock', lastMovement: '2026-08-03' },
-        
-        // Add additional items to reach 18 total items
-        { code: 'ITEM-009', name: 'USB Flash Drive 64GB', group: 'Accessories', location: 'Main Warehouse', qtyOnHand: 10, qtyAvailable: 10, qtyReserved: 0, unitCost: 5.00, totalValue: 50.00, status: 'In Stock', lastMovement: '2026-08-02' },
-        { code: 'ITEM-010', name: 'Office Chair Pro', group: 'Office Supplies', location: 'Branch Office', qtyOnHand: 4, qtyAvailable: 4, qtyReserved: 0, unitCost: 120.00, totalValue: 480.00, status: 'In Stock', lastMovement: '2026-08-01' },
-        { code: 'ITEM-011', name: 'HDMI Splitter', group: 'Accessories', location: 'Store Room', qtyOnHand: 3, qtyAvailable: 3, qtyReserved: 0, unitCost: 15.00, totalValue: 45.00, status: 'In Stock', lastMovement: '2026-07-29' },
-        { code: 'ITEM-012', name: 'Desk Mat Large', group: 'Office Supplies', location: 'Branch Office', qtyOnHand: 18, qtyAvailable: 18, qtyReserved: 0, unitCost: 14.00, totalValue: 252.00, status: 'In Stock', lastMovement: '2026-08-03' },
-        { code: 'ITEM-013', name: 'Wired Keyboard', group: 'Electronics', location: 'Store Room', qtyOnHand: 0, qtyAvailable: 0, qtyReserved: 0, unitCost: 12.00, totalValue: 0.00, status: 'In Stock', lastMovement: '2026-08-01' },
-        { code: 'ITEM-014', name: 'Bluetooth Adapter', group: 'Accessories', location: 'Main Warehouse', qtyOnHand: 14, qtyAvailable: 14, qtyReserved: 0, unitCost: 8.00, totalValue: 112.05, status: 'In Stock', lastMovement: '2026-08-05' },
-        { code: 'ITEM-015', name: 'Desk Fan USB', group: 'Office Supplies', location: 'Branch Office', qtyOnHand: 9, qtyAvailable: 9, qtyReserved: 0, unitCost: 11.00, totalValue: 99.00, status: 'In Stock', lastMovement: '2026-08-02' },
-        { code: 'ITEM-016', name: 'Power Strip 6-Outlet', group: 'Accessories', location: 'Store Room', qtyOnHand: 0, qtyAvailable: 0, qtyReserved: 0, unitCost: 9.00, totalValue: 0.00, status: 'In Stock', lastMovement: '2026-08-01' },
-        { code: 'ITEM-017', name: 'Label Maker Tape', group: 'Consumables', location: 'Store Room', qtyOnHand: 1, qtyAvailable: 1, qtyReserved: 0, unitCost: 20.00, totalValue: 20.00, status: 'Dead Stock', lastMovement: '2026-04-10' },
-        { code: 'ITEM-018', name: 'Gel Pens Pack', group: 'Consumables', location: 'Branch Office', qtyOnHand: 12, qtyAvailable: 12, qtyReserved: 0, unitCost: 4.00, totalValue: 48.00, status: 'In Stock', lastMovement: '2026-08-04' }
-      ];
+    // Process DB items or fallback if completely empty
+    const itemsToProcess = (rawItems && rawItems.length > 0) ? rawItems : [];
 
+    if (itemsToProcess.length === 0) {
       return NextResponse.json({
-        connected: true,
+        connected: !!tokenInfo,
         summary: {
-          inventoryValue: 320.00, // Matching card overview exactly
-          realValue: mockItems.reduce((acc, item) => acc + item.totalValue, 0),
-          lowStockCount: 2,
-          deadStockCount: 3,
-          totalItems: 18
+          inventoryValue: 0,
+          realValue: 0,
+          lowStockCount: 0,
+          deadStockCount: 0,
+          totalItems: 0
         },
-        items: mockItems,
+        items: [],
         meta: {
           currency: orgCurrency,
           calculatedAt: new Date().toISOString()
@@ -98,36 +92,41 @@ export async function GET(req: NextRequest) {
     }
 
     const items: InventoryItemDTO[] = [];
-    const trackedItems = rawItems.filter((i: any) => i.IsTrackedAsInventory === true);
 
     let totalValue = 0;
     let lowStockCount = 0;
     let deadStockCount = 0;
 
-    trackedItems.forEach((item: any) => {
+    itemsToProcess.forEach((item: any) => {
       const qtyOnHand = parseFloat(item.QuantityOnHand) || 0;
       const qtyAvailable = (parseFloat(item.QuantityOnHand) || 0) - (parseFloat(item.QuantityAllocated) || 0);
       const qtyReserved = parseFloat(item.QuantityAllocated) || 0;
-      const unitCost = parseFloat(item.PurchaseDetails?.UnitPrice) || parseFloat(item.CostOfGoodsSold) || 0;
+      const unitCost = parseFloat(item.PurchaseDetails?.UnitPrice) || parseFloat(item.SalesDetails?.UnitPrice) || parseFloat(item.CostOfGoodsSold) || 0;
       
       const totalVal = qtyOnHand * unitCost;
       totalValue += totalVal;
 
-      let location = 'Main Warehouse';
-      const codeStr = (item.Code || '').toLowerCase();
-      if (codeStr.includes('cable') || codeStr.includes('tape') || codeStr.includes('strip') || codeStr.includes('ink') || codeStr.includes('splitter')) {
-        location = 'Store Room';
-      } else if (codeStr.includes('stand') || codeStr.includes('batter') || codeStr.includes('mat') || codeStr.includes('chair') || codeStr.includes('pen') || codeStr.includes('fan')) {
-        location = 'Branch Office';
+      const itemName = (item.Name || item.Description || item.Code || 'Unnamed Item').trim();
+      const text = `${item.Code || ''} ${itemName}`.toLowerCase();
+
+      let group = 'General Products';
+      if (text.includes('tab') || text.includes('crm') || text.includes('eye') || text.includes('drop') || text.includes('powder') || text.includes('cream') || text.includes('ointment') || text.includes('suppositor') || text.includes('caps') || text.includes('med') || text.includes('inf')) {
+        group = 'Pharmacy & Healthcare';
+      } else if (text.includes('cable') || text.includes('mouse') || text.includes('keyboard') || text.includes('monitor') || text.includes('usb') || text.includes('adapter') || text.includes('electronic')) {
+        group = 'Electronics & Accessories';
+      } else if (text.includes('chair') || text.includes('stand') || text.includes('office') || text.includes('mat') || text.includes('desk')) {
+        group = 'Office Supplies';
+      } else if (text.includes('tape') || text.includes('pen') || text.includes('ink') || text.includes('battery') || text.includes('consumable')) {
+        group = 'Consumables';
       }
 
-      let group = 'Electronics';
-      if (codeStr.includes('cable') || codeStr.includes('batter') || codeStr.includes('mat') || codeStr.includes('adapter') || codeStr.includes('splitter')) {
-        group = 'Accessories';
-      } else if (codeStr.includes('stand') || codeStr.includes('chair') || codeStr.includes('fan')) {
-        group = 'Office Supplies';
-      } else if (codeStr.includes('tape') || codeStr.includes('pen') || codeStr.includes('ink')) {
-        group = 'Consumables';
+      let location = 'Main Warehouse';
+      if (group === 'Pharmacy & Healthcare') {
+        location = 'Pharmacy Dispensary';
+      } else if (group === 'Consumables') {
+        location = 'Store Room';
+      } else if (group === 'Office Supplies') {
+        location = 'Branch Office';
       }
 
       // Check status
@@ -153,7 +152,7 @@ export async function GET(req: NextRequest) {
 
       items.push({
         code: item.Code || 'ITEM-UNKNOWN',
-        name: item.Name || 'Unnamed Item',
+        name: itemName,
         group,
         location,
         qtyOnHand,

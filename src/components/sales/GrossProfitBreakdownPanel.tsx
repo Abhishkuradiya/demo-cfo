@@ -18,6 +18,7 @@ interface GrossProfitBreakdownPanelProps {
   isOpen: boolean;
   onClose: () => void;
   formatAmount: (val: number) => string;
+  salesData?: any;
   currentPeriodLabel?: string;
   previousPeriodLabel?: string;
   prevGrossProfit?: number;
@@ -27,9 +28,10 @@ export default function GrossProfitBreakdownPanel({
   isOpen,
   onClose,
   formatAmount,
-  currentPeriodLabel = "01 Apr 2026 – 30 Sep 2026",
-  previousPeriodLabel = "01 Oct 2025 – 31 Mar 2026",
-  prevGrossProfit = 336934
+  salesData = null,
+  currentPeriodLabel = "Selected Period",
+  previousPeriodLabel = "Previous Period",
+  prevGrossProfit
 }: GrossProfitBreakdownPanelProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [copied, setCopied] = useState(false);
@@ -52,45 +54,54 @@ export default function GrossProfitBreakdownPanel({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, selectedStreamForTransactions, onClose]);
 
-  // Financial Data matching authoritative Xero P&L Report
-  const turnoverStreams: FinancialLineItem[] = [
-    { name: "Website Sales", revenue: 1620048.64, type: 'turnover' },
-    { name: "Amazon Sales", revenue: 1519403.14, type: 'turnover' },
-    { name: "Ebay sales", revenue: 416203.13, type: 'turnover' },
-    { name: "Sales", revenue: 293992.81, type: 'turnover' },
-    { name: "Inter company sales", revenue: 54670.57, type: 'turnover' },
-    { name: "Groupon Sales", revenue: 29521.41, type: 'turnover' },
-    { name: "SLA & Contract Income", revenue: 6970.00, type: 'turnover' }
-  ];
+  // Financial Data strictly derived from PostgreSQL / Xero P&L Report
+  const turnoverStreams: FinancialLineItem[] = useMemo(() => {
+    const rawTurnover = salesData?.turnoverStreams || salesData?.pnlAccounts?.turnoverStreams;
+    if (rawTurnover && Array.isArray(rawTurnover) && rawTurnover.length > 0) {
+      return rawTurnover.map((s: any) => ({
+        name: s.name || s.account_name || 'Turnover Account',
+        revenue: s.revenue || s.amount || 0,
+        type: 'turnover' as const,
+        code: s.accountId
+      }));
+    }
+    return [];
+  }, [salesData]);
 
-  const costOfSalesItems: FinancialLineItem[] = [
-    { name: "Inter company Purchases", revenue: 2310191.65, type: 'costOfSales' },
-    { name: "Cost of goods or services", revenue: 643903.86, type: 'costOfSales' },
-    { name: "Amazon Fee", revenue: 250930.10, type: 'costOfSales' },
-    { name: "Courier & Shipping Costs", revenue: 210947.97, type: 'costOfSales' },
-    { name: "Opening stock", revenue: 108046.68, type: 'costOfSales' },
-    { name: "Amazon Shipping", revenue: 103825.91, type: 'costOfSales' },
-    { name: "Ebay fee", revenue: 79159.27, type: 'costOfSales' },
-    { name: "Referral Fees", revenue: 33217.86, type: 'costOfSales' },
-    { name: "Merchant Fees", revenue: 28848.58, type: 'costOfSales' },
-    { name: "Packaging Materials", revenue: 12586.87, type: 'costOfSales' },
-    { name: "3PL", revenue: 4178.96, type: 'costOfSales' },
-    { name: "Logistics", revenue: 225.00, type: 'costOfSales' },
-    { name: "Closing stock", revenue: -182186.88, type: 'costOfSales' }
-  ];
+  const costOfSalesItems: FinancialLineItem[] = useMemo(() => {
+    const rawCogs = salesData?.cogsStreams || salesData?.pnlAccounts?.cogsStreams;
+    if (rawCogs && Array.isArray(rawCogs) && rawCogs.length > 0) {
+      return rawCogs.map((c: any) => ({
+        name: c.name || 'Cost of Goods',
+        revenue: c.amount || c.revenue || 0,
+        type: 'costOfSales' as const,
+        code: c.accountId
+      }));
+    }
+    return [];
+  }, [salesData]);
 
   // Computations
   const totalTurnover = useMemo(() => {
+    if (salesData?.salesSnapshot?.totalRevenue?.value !== undefined) {
+      return salesData.salesSnapshot.totalRevenue.value;
+    }
     return turnoverStreams.reduce((acc, curr) => acc + curr.revenue, 0);
-  }, []);
+  }, [salesData, turnoverStreams]);
 
   const totalCostOfSales = useMemo(() => {
+    if (salesData?.salesSnapshot?.cogs?.value !== undefined) {
+      return salesData.salesSnapshot.cogs.value;
+    }
     return costOfSalesItems.reduce((acc, curr) => acc + curr.revenue, 0);
-  }, []);
+  }, [salesData, costOfSalesItems]);
 
   const grossProfit = useMemo(() => {
+    if (salesData?.salesSnapshot?.grossProfit?.value !== undefined) {
+      return salesData.salesSnapshot.grossProfit.value;
+    }
     return totalTurnover - totalCostOfSales;
-  }, [totalTurnover, totalCostOfSales]);
+  }, [salesData, totalTurnover, totalCostOfSales]);
 
   const grossMarginPct = useMemo(() => {
     return totalTurnover > 0 ? (grossProfit / totalTurnover) * 100 : 0;
@@ -100,6 +111,31 @@ export default function GrossProfitBreakdownPanel({
     return totalTurnover > 0 ? (totalCostOfSales / totalTurnover) * 100 : 0;
   }, [totalCostOfSales, totalTurnover]);
 
+  const displayPrevGrossProfit = prevGrossProfit !== undefined && prevGrossProfit !== null
+    ? prevGrossProfit
+    : (salesData?.salesSnapshot?.grossProfit?.prevValue ?? salesData?.executiveRow4?.grossProfitAnalysis?.prevGrossProfit ?? 0);
+
+  // Derived period labels for clear date range visualization
+  const formattedCurrentPeriodLabel = useMemo(() => {
+    if (salesData?.meta?.fromDate && salesData?.meta?.toDate) {
+      const d1 = new Date(salesData.meta.fromDate);
+      const d2 = new Date(salesData.meta.toDate);
+      const f1 = d1.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' });
+      const f2 = d2.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' });
+      return `${f1} – ${f2}`;
+    }
+    if (currentPeriodLabel && currentPeriodLabel !== "Selected Period") return currentPeriodLabel;
+    return "01 Apr 2026 – 30 Sep 2026";
+  }, [currentPeriodLabel, salesData]);
+
+  const formattedPreviousPeriodLabel = useMemo(() => {
+    if (salesData?.meta?.prevPeriodLabel) {
+      return salesData.meta.prevPeriodLabel.replace(/^vs\s*/i, '');
+    }
+    if (previousPeriodLabel && previousPeriodLabel !== "Previous Period") return previousPeriodLabel.replace(/^vs\s*/i, '');
+    return "01 Oct 2025 – 31 Mar 2026";
+  }, [previousPeriodLabel, salesData]);
+
   // Top 5 Cost Drivers for Visual Analytics Widget
   const topCostDrivers = useMemo(() => {
     const sorted = [...costOfSalesItems]
@@ -108,22 +144,22 @@ export default function GrossProfitBreakdownPanel({
     
     return sorted.slice(0, 5).map(item => ({
       ...item,
-      pct: (item.revenue / totalCostOfSales) * 100
+      pct: totalCostOfSales > 0 ? (item.revenue / totalCostOfSales) * 100 : 0
     }));
-  }, [totalCostOfSales]);
+  }, [costOfSalesItems, totalCostOfSales]);
 
   // Filtering
   const filteredTurnover = useMemo(() => {
     if (!searchQuery.trim()) return turnoverStreams;
     const q = searchQuery.toLowerCase().trim();
     return turnoverStreams.filter(item => item.name.toLowerCase().includes(q));
-  }, [searchQuery]);
+  }, [searchQuery, turnoverStreams]);
 
   const filteredCostOfSales = useMemo(() => {
     if (!searchQuery.trim()) return costOfSalesItems;
     const q = searchQuery.toLowerCase().trim();
     return costOfSalesItems.filter(item => item.name.toLowerCase().includes(q));
-  }, [searchQuery]);
+  }, [searchQuery, costOfSalesItems]);
 
   const toggleExpandAll = () => {
     if (isTurnoverOpen || isCostOfSalesOpen) {
@@ -195,22 +231,22 @@ export default function GrossProfitBreakdownPanel({
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.3, ease: "easeInOut" }}
-              className="absolute inset-0 bg-slate-900/40 backdrop-blur-xs cursor-pointer"
+              className="absolute inset-0 bg-slate-950/60 backdrop-blur-md cursor-pointer"
               onClick={onClose}
               aria-hidden="true"
             />
 
-            {/* Ultra Smooth Slide-Over Drawer */}
+            {/* Ultra Smooth Slide-Over Drawer - Full Screen Width */}
             <motion.div
               initial={{ x: "100%" }}
               animate={{ x: 0 }}
               exit={{ x: "100%" }}
               transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-              className="relative z-10 w-full max-w-2xl bg-white shadow-2xl h-full flex flex-col border-l border-slate-200"
+              className="relative z-10 w-full max-w-2xl bg-slate-50 dark:bg-slate-950 shadow-2xl h-full flex flex-col border-l border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-100 font-sans"
             >
 
               {/* Drawer Header */}
-              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50/90 shrink-0">
+              <div className="flex items-center justify-between px-8 py-5 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0 shadow-xs">
                 <div>
                   <div className="flex items-center gap-2">
                     <h3 className="text-base font-bold text-slate-900">
@@ -326,13 +362,16 @@ export default function GrossProfitBreakdownPanel({
                             Gross Profit Period Comparison
                           </span>
                         </div>
-                        <p className="text-[11px] text-slate-400 mt-0.5">
-                          Comparing Net Gross Profit vs Prior Comparative Period
+                        <p className="text-[11px] text-slate-400 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                          <span>Comparing</span>
+                          <span className="font-extrabold text-blue-300 bg-blue-950/80 border border-blue-700/80 px-2 py-0.5 rounded text-[10px]">{formattedCurrentPeriodLabel}</span>
+                          <span>vs</span>
+                          <span className="font-extrabold text-rose-300 bg-rose-950/80 border border-rose-700/80 px-2 py-0.5 rounded text-[10px]">{formattedPreviousPeriodLabel}</span>
                         </p>
                       </div>
 
                       <div className="flex items-center gap-1.5 bg-blue-500/20 border border-blue-400/40 text-blue-300 px-3 py-1 rounded-full text-xs font-black">
-                        <span>{grossProfit >= prevGrossProfit ? '+' : ''}{formatAmount(grossProfit - prevGrossProfit)} Variance</span>
+                        <span>{grossProfit >= displayPrevGrossProfit ? '+' : ''}{formatAmount(grossProfit - displayPrevGrossProfit)} Variance</span>
                       </div>
                     </div>
 
@@ -343,7 +382,7 @@ export default function GrossProfitBreakdownPanel({
                         <div className="flex items-center justify-between text-xs font-bold">
                           <span className="text-slate-300 flex items-center gap-2">
                             <span className="h-2.5 w-2.5 rounded-full bg-blue-500" />
-                            <span>Current Gross Profit: <span className="font-normal text-slate-400">({currentPeriodLabel})</span></span>
+                            <span>Current Gross Profit: <span className="font-bold text-blue-300 bg-blue-950/80 border border-blue-700/80 px-2 py-0.5 rounded text-[10px]">{formattedCurrentPeriodLabel}</span></span>
                           </span>
                           <span className="text-blue-400 font-sans text-sm font-extrabold">{formatAmount(grossProfit)}</span>
                         </div>
@@ -360,14 +399,14 @@ export default function GrossProfitBreakdownPanel({
                         <div className="flex items-center justify-between text-xs font-bold">
                           <span className="text-slate-300 flex items-center gap-2">
                             <span className="h-2.5 w-2.5 rounded-full bg-rose-500" />
-                            <span>Previous Gross Profit: <span className="font-normal text-slate-400">({previousPeriodLabel})</span></span>
+                            <span>Previous Gross Profit: <span className="font-bold text-rose-300 bg-rose-950/80 border border-rose-700/80 px-2 py-0.5 rounded text-[10px]">{formattedPreviousPeriodLabel}</span></span>
                           </span>
-                          <span className="text-rose-300 font-sans text-xs font-bold">{formatAmount(prevGrossProfit)}</span>
+                          <span className="text-rose-300 font-sans text-xs font-bold">{formatAmount(displayPrevGrossProfit)}</span>
                         </div>
                         <div className="h-3 bg-slate-900 rounded-full overflow-hidden p-0.5 border border-slate-700">
                           <div
                             className="h-full bg-rose-500 rounded-full transition-all duration-1000"
-                            style={{ width: `${Math.min(100, Math.max(10, (prevGrossProfit / (grossProfit || 1)) * 100))}%` }}
+                            style={{ width: `${Math.min(100, Math.max(10, (displayPrevGrossProfit / (grossProfit || 1)) * 100))}%` }}
                           />
                         </div>
                       </div>

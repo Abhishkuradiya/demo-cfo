@@ -3,6 +3,7 @@
 import React, { Suspense } from 'react';
 import { Sidebar } from './sidebar';
 import { Header } from './header';
+import { ConnectorRouteGuard } from './connector-route-guard';
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -25,7 +26,9 @@ export function AppLayout({ children }: AppLayoutProps) {
         <main className="flex-1 overflow-y-auto overflow-x-hidden p-6 md:p-8 bg-background">
           <div className="mx-auto max-w-[1600px] space-y-8">
             <Suspense fallback={<div className="text-xs font-bold text-slate-400 select-none">Loading dashboard contents...</div>}>
-              {children}
+              <ConnectorRouteGuard>
+                {children}
+              </ConnectorRouteGuard>
             </Suspense>
           </div>
         </main>

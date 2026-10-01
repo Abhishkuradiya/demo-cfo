@@ -8,7 +8,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const isPg = db.isPgActive();
+  let isPg = db.isPgActive();
 
   try {
     let tenants: any[] = [];
@@ -19,24 +19,29 @@ export async function GET(req: NextRequest) {
 
     // Get PG Data if active
     if (isPg) {
-      const tenantRes = await db.query('SELECT * FROM tenants ORDER BY id ASC');
-      tenants = tenantRes.rows;
+      try {
+        const tenantRes = await db.query('SELECT * FROM tenants ORDER BY id ASC');
+        tenants = tenantRes.rows;
 
-      const userRes = await db.query('SELECT id, email, tenant_id, created_at FROM users ORDER BY id ASC');
-      users = userRes.rows;
+        const userRes = await db.query('SELECT id, email, tenant_id, created_at FROM users ORDER BY id ASC');
+        users = userRes.rows;
 
-      const credRes = await db.query('SELECT tenant_id, provider, client_id, expires_at, scopes FROM tenant_credentials');
-      credentials = credRes.rows;
+        const credRes = await db.query('SELECT tenant_id, provider, client_id, expires_at, scopes FROM tenant_credentials');
+        credentials = credRes.rows;
 
-      // Table counts in PG
-      const tables = ['tenants', 'users', 'sessions', 'tenant_credentials', 'contacts', 'invoices', 'payments', 'accounts', 'reports', 'fixed_assets', 'tax_transactions'];
-      for (const t of tables) {
-        try {
-          const countRes = await db.query(`SELECT COUNT(*) as count FROM ${t}`);
-          pgStats[t] = parseInt(countRes.rows[0].count || '0');
-        } catch (e) {
-          pgStats[t] = -1;
+        // Table counts in PG
+        const tables = ['tenants', 'users', 'sessions', 'tenant_credentials', 'contacts', 'invoices', 'payments', 'accounts', 'reports', 'fixed_assets', 'tax_transactions'];
+        for (const t of tables) {
+          try {
+            const countRes = await db.query(`SELECT COUNT(*) as count FROM ${t}`);
+            pgStats[t] = parseInt(countRes.rows[0].count || '0');
+          } catch (e) {
+            pgStats[t] = -1;
+          }
         }
+      } catch (e: any) {
+        console.warn('PostgreSQL query error in db-management, falling back to JSON DB:', e.message);
+        isPg = false;
       }
     }
 

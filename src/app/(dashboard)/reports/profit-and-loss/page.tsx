@@ -25,11 +25,16 @@ import {
   Check,
   Eye,
   CreditCard,
-  History
+  History,
+  X,
+  ArrowUpAZ,
+  ArrowDownZA,
+  Filter
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageContainer } from '@/components/common/page-container';
 import { toast } from 'sonner';
+import XeroInvoiceViewerDrawer, { OpenInvoiceData } from '@/components/sales/XeroInvoiceViewerDrawer';
 
 interface PLItem {
   name: string;
@@ -111,6 +116,28 @@ export default function ProfitAndLossPage() {
   const [txTotalDebit, setTxTotalDebit] = useState<number>(0);
   const [txTotalCredit, setTxTotalCredit] = useState<number>(0);
 
+  // Excel Column Filtering & Sorting States for Level 2 Account Transactions
+  const [filterSelections, setFilterSelections] = useState<Record<string, string[]>>({});
+  const [draftSelections, setDraftSelections] = useState<string[]>([]);
+  const [activeFilterColumn, setActiveFilterColumn] = useState<string | null>(null);
+  const [searchTerms, setSearchTerms] = useState<Record<string, string>>({});
+  const [sortConfig, setSortConfig] = useState<{ colKey: string; direction: 'asc' | 'desc' } | null>(null);
+
+  // Close filter popover on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (activeFilterColumn && !target.closest('.excel-filter-cell')) {
+        setActiveFilterColumn(null);
+      }
+    };
+    window.addEventListener('click', handleClickOutside);
+    return () => window.removeEventListener('click', handleClickOutside);
+  }, [activeFilterColumn]);
+
+  // Multi-Instance Floating Xero Invoice Windows (Matching Sales Dashboard)
+  const [openInvoices, setOpenInvoices] = useState<OpenInvoiceData[]>([]);
+
   // LEVEL 3: Official Xero Invoice Document View State
   const [selectedInvoice, setSelectedInvoice] = useState<{
     reference: string;
@@ -135,13 +162,147 @@ export default function ProfitAndLossPage() {
     hasFeeRow?: boolean;
   } | null>(null);
 
+  const handleOpenInvoice = (tx: any) => {
+    setOpenInvoices(prev => {
+      const isReceiveMoney = tx.source === 'Receive Money';
+      const isSpendMoney = tx.source === 'Spend Money';
+      const txRef = tx.reference || tx.ref;
+      const txDesc = tx.description || tx.desc || selectedAccount?.name || 'Transaction';
+      const refKey = txRef || (isReceiveMoney ? `REC-${tx.date.replace(/\s+/g, '')}` : (isSpendMoney ? `SPEND-${tx.date.replace(/\s+/g, '')}` : `TXN-${Date.now()}`));
+      const displayRef = txRef || (isReceiveMoney ? 'Receive Money' : (isSpendMoney ? 'Spend Money' : 'INV-001'));
+
+      const existing = prev.find(inv => inv.id.startsWith(refKey) || (txRef && inv.refNumber === txRef));
+      if (existing) {
+        const maxZ = Math.max(...prev.map(i => i.zIndex), 1000);
+        toast.info(`Transaction ${displayRef} is already open and brought to front!`);
+        return prev.map(inv => inv.id === existing.id ? { ...inv, zIndex: maxZ + 1, isMinimized: false, isHighlighted: true } : inv);
+      }
+      const offset = (prev.length % 5) * 30;
+      const maxZ = Math.max(...prev.map(i => i.zIndex), 1000);
+      const winW = typeof window !== 'undefined' ? Math.min(820, window.innerWidth - 60) : 820;
+      const winH = typeof window !== 'undefined' ? Math.min(520, window.innerHeight - 180) : 520;
+      const startX = typeof window !== 'undefined' ? Math.max(30, Math.round((window.innerWidth - winW) / 2) + offset) : 90;
+      const startY = typeof window !== 'undefined' ? Math.max(30, Math.round((window.innerHeight - winH) / 2 - 30) + offset) : 50;
+
+      const matchingInv = tx.rawInvoice;
+      const streamName = selectedAccount?.name || 'Account';
+      const contactName = matchingInv?.customer || matchingInv?.contactName || (txDesc.includes('-') ? txDesc.split('-')[0].trim() : (txDesc || streamName));
+      const amountVal = tx.credit || tx.debit || tx.creditGbp || tx.debitGbp || matchingInv?.amount || 0;
+
+      const grossTotalVal = matchingInv?.amount || (matchingInv?.subTotal && matchingInv?.totalTax ? matchingInv.subTotal + matchingInv.totalTax : amountVal);
+      const subTotalVal = matchingInv?.subTotal !== undefined ? matchingInv.subTotal : amountVal;
+      const totalTaxVal = matchingInv?.totalTax !== undefined ? matchingInv.totalTax : (grossTotalVal > subTotalVal ? grossTotalVal - subTotalVal : 0);
+      const paidVal = matchingInv?.amountPaid !== undefined ? matchingInv.amountPaid : grossTotalVal;
+      const dueVal = matchingInv?.amountDue !== undefined ? matchingInv.amountDue : 0;
+
+      return [
+        ...prev,
+        {
+          id: `${refKey}-${Date.now()}`,
+          refNumber: displayRef,
+          contactName: contactName,
+          date: tx.date,
+          dueDate: matchingInv?.dueDate || tx.date,
+          paymentDate: matchingInv?.paymentDate || matchingInv?.fullyPaidOnDate || matchingInv?.Payments?.[0]?.Date || tx.date,
+          desc: txDesc,
+          amount: grossTotalVal,
+          subTotal: subTotalVal,
+          totalTax: totalTaxVal,
+          amountPaid: paidVal,
+          amountDue: dueVal,
+          status: matchingInv?.status || (isReceiveMoney || isSpendMoney ? 'Reconciled' : 'PAID'),
+          lineItems: matchingInv?.lineItems || tx.lineItems || [
+            {
+              desc: txDesc.includes('-') ? txDesc.split('-').slice(1).join('-').trim() : txDesc,
+              account: `${txAccountCode || ''} ${streamName}`.trim(),
+              taxRate: matchingInv?.taxType || 'Zero Rated Income',
+              amountGbp: subTotalVal
+            }
+          ],
+          attachments: matchingInv?.attachments || matchingInv?.Attachments || [],
+          x: startX,
+          y: startY,
+          width: winW,
+          height: winH,
+          zIndex: maxZ + 1,
+          isMinimized: false,
+          isMaximized: false,
+          isHighlighted: true
+        }
+      ];
+    });
+  };
+
+  const handleCloseInvoice = (id: string) => {
+    setOpenInvoices(prev => prev.filter(inv => inv.id !== id));
+  };
+
+  const handleFocusInvoice = (id: string) => {
+    setOpenInvoices(prev => {
+      const maxZ = Math.max(...prev.map(i => i.zIndex), 1000);
+      return prev.map(inv => inv.id === id ? { ...inv, zIndex: maxZ + 1 } : inv);
+    });
+  };
+
+  const handleUpdateInvoice = (id: string, updates: Partial<OpenInvoiceData>) => {
+    setOpenInvoices(prev => prev.map(inv => inv.id === id ? { ...inv, ...updates } : inv));
+  };
+
+  const handleOpenPaymentDoc = (doc: Partial<OpenInvoiceData>) => {
+    setOpenInvoices(prev => {
+      const maxZ = Math.max(...prev.map(i => i.zIndex), 1000);
+      const winW = typeof window !== 'undefined' ? Math.min(820, window.innerWidth - 60) : 820;
+      const winH = typeof window !== 'undefined' ? Math.min(520, window.innerHeight - 180) : 520;
+      const offset = (prev.length % 5) * 35;
+      const startX = typeof window !== 'undefined' ? Math.max(30, Math.round((window.innerWidth - winW) / 2) + offset) : 90;
+      const startY = typeof window !== 'undefined' ? Math.max(30, Math.round((window.innerHeight - winH) / 2 - 30) + offset) : 50;
+
+      return [
+        ...prev,
+        {
+          id: doc.id || `pay-${Date.now()}`,
+          refNumber: doc.refNumber || 'Receive Money',
+          contactName: doc.contactName || 'Client',
+          date: doc.date || '01 Apr 2026',
+          dueDate: doc.dueDate || doc.date || '01 Apr 2026',
+          paymentDate: doc.paymentDate || doc.date || '01 Apr 2026',
+          desc: doc.desc || 'Payment Document',
+          amount: doc.amount || 0,
+          subTotal: doc.subTotal || doc.amount || 0,
+          totalTax: 0,
+          amountPaid: doc.amount || 0,
+          amountDue: 0,
+          status: doc.status || 'Reconciled',
+          accountName: doc.accountName || '100 - Starling Business Account',
+          lineItems: doc.lineItems || [],
+          x: startX,
+          y: startY,
+          width: winW,
+          height: winH,
+          zIndex: maxZ + 1,
+          isMinimized: false,
+          isMaximized: false,
+          isHighlighted: true
+        }
+      ];
+    });
+  };
+
   const openAccountTransactions = async (item: { name: string; value: number; code?: string }) => {
     setSelectedAccount(item);
     setSelectedInvoice(null);
     setSelectedPayment(null);
+    setOpenInvoices([]);
     setTxLoading(true);
     setAccountTransactions([]);
     setTxSearchQuery('');
+
+    // Reset Excel column filters and sorting
+    setFilterSelections({});
+    setDraftSelections([]);
+    setActiveFilterColumn(null);
+    setSearchTerms({});
+    setSortConfig(null);
 
     let initialCode = item.code || '';
     if (!initialCode) {
@@ -176,19 +337,11 @@ export default function ProfitAndLossPage() {
     setSelectedAccount(null);
     setSelectedInvoice(null);
     setSelectedPayment(null);
+    setOpenInvoices([]);
   };
 
   const openInvoiceView = (tx: any) => {
-    setSelectedInvoice({
-      reference: tx.reference,
-      date: tx.date,
-      amount: tx.amount || tx.credit || tx.debit,
-      source: tx.source,
-      contactName: tx.contactName || (selectedAccount?.name?.toLowerCase()?.includes('ebay') ? 'eBay' : 'Amazon'),
-      description: tx.description,
-      lineItems: tx.lineItems || tx.LineItems || tx.line_items || []
-    });
-    setSelectedPayment(null);
+    handleOpenInvoice(tx);
   };
 
   const closeInvoiceView = () => {
@@ -356,6 +509,327 @@ export default function ProfitAndLossPage() {
     );
   };
 
+  // Excel Column Filtering & Sorting Helpers for Level 2 Account Transactions
+  const getColVal = (item: any, colKey: string) => {
+    if (colKey === 'date') return item.date || '';
+    if (colKey === 'source') return item.source || '';
+    if (colKey === 'desc') return item.description || item.desc || '';
+    if (colKey === 'ref') return item.reference || item.ref || (item.source === 'Receive Money' ? 'Receive Money' : 'INV-001');
+    if (colKey === 'currency') return item.currency || 'GBP';
+    if (colKey === 'debitGbp') return item.debit ? formatAmount(item.debit) : '-';
+    if (colKey === 'creditGbp') return item.credit ? formatAmount(item.credit) : '-';
+    if (colKey === 'runningBalance') return item.runningBalance !== undefined ? formatAmount(item.runningBalance) : '-';
+    if (colKey === 'gross') return (item.gross || item.gross_amount) ? formatAmount(item.gross || item.gross_amount) : '-';
+    if (colKey === 'tax') return (item.tax || item.tax_amount) ? formatAmount(item.tax || item.tax_amount) : '-';
+    return "";
+  };
+
+  const processedTransactions = React.useMemo(() => {
+    let result = [...accountTransactions];
+
+    // Apply txSearchQuery if present
+    if (txSearchQuery) {
+      const q = txSearchQuery.toLowerCase();
+      result = result.filter(tx => {
+        const ref = (tx.reference || tx.ref || '').toLowerCase();
+        const desc = (tx.description || tx.desc || '').toLowerCase();
+        const src = (tx.source || '').toLowerCase();
+        const dt = (tx.date || '').toLowerCase();
+        return ref.includes(q) || desc.includes(q) || src.includes(q) || dt.includes(q);
+      });
+    }
+
+    // Apply Excel column filters
+    Object.keys(filterSelections).forEach(colKey => {
+      const selectedVals = filterSelections[colKey];
+      if (selectedVals) {
+        const selectedSet = new Set(selectedVals);
+        result = result.filter(item => {
+          const valStr = getColVal(item, colKey);
+          return selectedSet.has(valStr);
+        });
+      }
+    });
+
+    // Apply sorting
+    if (sortConfig) {
+      const { colKey, direction } = sortConfig;
+      result.sort((a, b) => {
+        let valA: any = "";
+        let valB: any = "";
+        if (colKey === 'date') { 
+          valA = new Date(a.date).getTime() || 0; 
+          valB = new Date(b.date).getTime() || 0; 
+        }
+        else if (colKey === 'source') { valA = a.source || ''; valB = b.source || ''; }
+        else if (colKey === 'desc') { valA = a.description || a.desc || ''; valB = b.description || b.desc || ''; }
+        else if (colKey === 'ref') { valA = a.reference || a.ref || ''; valB = b.reference || b.ref || ''; }
+        else if (colKey === 'currency') { valA = a.currency || 'GBP'; valB = b.currency || 'GBP'; }
+        else if (colKey === 'debitGbp') { valA = a.debit || 0; valB = b.debit || 0; }
+        else if (colKey === 'creditGbp') { valA = a.credit || 0; valB = b.credit || 0; }
+        else if (colKey === 'runningBalance') { valA = a.runningBalance || 0; valB = b.runningBalance || 0; }
+        else if (colKey === 'gross') { valA = a.gross || a.gross_amount || 0; valB = b.gross || b.gross_amount || 0; }
+        else if (colKey === 'tax') { valA = a.tax || a.tax_amount || 0; valB = b.tax || b.tax_amount || 0; }
+
+        if (valA < valB) return direction === 'asc' ? -1 : 1;
+        if (valA > valB) return direction === 'asc' ? 1 : -1;
+        return 0;
+      });
+    }
+
+    // Determine if expense ledger
+    const isExpenseLedger = accountTransactions.some(t => (t.debit || 0) > 0) && 
+      accountTransactions.reduce((sum, t) => sum + (t.debit || 0), 0) >= accountTransactions.reduce((sum, t) => sum + (t.credit || 0), 0);
+
+    let running = 0;
+    return result.map(item => {
+      const debit = item.debit || 0;
+      const credit = item.credit || 0;
+      const delta = isExpenseLedger ? (debit - credit) : (credit - debit);
+      running = Math.round((running + delta) * 100) / 100;
+      return {
+        ...item,
+        runningBalance: running
+      };
+    });
+  }, [accountTransactions, txSearchQuery, filterSelections, sortConfig]);
+
+  const handleExportCSV = () => {
+    try {
+      const headers = ["Date,Source,Description,Reference,Invoice Number / ID,Currency,Debit (GBP),Credit (GBP),Running Balance (GBP),Gross (GBP),Tax (GBP)"];
+      const rows = processedTransactions.map(t => {
+        const mainRef = t.reference || t.ref || '';
+        const invNum = t.invoiceNumber || t.rawInvoice?.number || t.rawInvoice?.InvoiceNumber || t.invoiceId || t.rawInvoice?.id || '';
+        return `"${t.date || ''}","${t.source || ''}","${t.description || t.desc || ''}","${mainRef}","${invNum}","${t.currency || 'GBP'}",${t.debit || 0},${t.credit || 0},${t.runningBalance || 0},${t.gross || t.gross_amount || 0},${t.tax || t.tax_amount || 0}`;
+      });
+      const csvContent = "data:text/csv;charset=utf-8," + [headers, ...rows].join("\n");
+      const encodedUri = encodeURI(csvContent);
+      const link = document.createElement("a");
+      link.setAttribute("href", encodedUri);
+      link.setAttribute("download", `${selectedAccount?.name || 'Account'}_Transactions_${new Date().toISOString().slice(0, 10)}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      toast.success("Account transactions CSV exported successfully!");
+    } catch (err) {
+      toast.error("Failed to export CSV");
+    }
+  };
+
+  const renderColumnHeader = (colKey: string, label: string, align: 'left' | 'center' | 'right' = 'left') => {
+    const isFilterActive = filterSelections[colKey] !== undefined;
+    const isPopoverOpen = activeFilterColumn === colKey;
+
+    const allUniqueValues = Array.from(new Set(accountTransactions.map(item => getColVal(item, colKey)))).sort();
+
+    const searchTerm = searchTerms[colKey] || '';
+
+    const visibleOptions = allUniqueValues.filter(val =>
+      val.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+
+    const isAllSelected = visibleOptions.length > 0 && visibleOptions.every(v => draftSelections.includes(v));
+
+    const toggleSelectAll = () => {
+      if (isAllSelected) {
+        setDraftSelections(prev => prev.filter(v => !visibleOptions.includes(v)));
+      } else {
+        setDraftSelections(prev => Array.from(new Set([...prev, ...visibleOptions])));
+      }
+    };
+
+    const toggleOption = (val: string) => {
+      setDraftSelections(prev => 
+        prev.includes(val) ? prev.filter(v => v !== val) : [...prev, val]
+      );
+    };
+
+    const applyFilter = () => {
+      if (draftSelections.length === allUniqueValues.length) {
+        setFilterSelections(prev => {
+          const copy = { ...prev };
+          delete copy[colKey];
+          return copy;
+        });
+      } else {
+        setFilterSelections(prev => ({ ...prev, [colKey]: draftSelections }));
+      }
+      setActiveFilterColumn(null);
+    };
+
+    const clearColumnFilter = () => {
+      setFilterSelections(prev => {
+        const copy = { ...prev };
+        delete copy[colKey];
+        return copy;
+      });
+      setSearchTerms(prev => ({ ...prev, [colKey]: '' }));
+      setActiveFilterColumn(null);
+    };
+
+    const openPopover = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (isPopoverOpen) {
+        setActiveFilterColumn(null);
+      } else {
+        const existing = filterSelections[colKey];
+        setDraftSelections(existing !== undefined ? [...existing] : [...allUniqueValues]);
+        setActiveFilterColumn(colKey);
+      }
+    };
+
+    return (
+      <th className={`py-2.5 px-4 relative select-none excel-filter-cell text-${align}`}>
+        <div 
+          className={`inline-flex items-center gap-1.5 cursor-pointer group ${align === 'right' ? 'flex-row-reverse' : align === 'center' ? 'justify-center w-full' : ''}`}
+          onClick={openPopover}
+        >
+          <span>{label}</span>
+          <button
+            type="button"
+            className={`p-1 rounded-md transition-all ${
+              isFilterActive 
+                ? 'bg-blue-600 text-white font-bold shadow-2xs' 
+                : 'text-slate-400 group-hover:text-slate-700 group-hover:bg-slate-200/80'
+            }`}
+            title={`Filter / Sort ${label}`}
+          >
+            <ChevronDown className="h-3.5 w-3.5" />
+          </button>
+        </div>
+
+        {/* Excel Filter Dropdown Popover */}
+        {isPopoverOpen && (
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className={`absolute top-full mt-1.5 z-50 w-72 bg-white rounded-xl border border-slate-200 shadow-2xl p-3.5 text-slate-800 text-xs font-normal normal-case text-left ${
+              align === 'right' ? 'right-0' : 'left-0'
+            }`}
+          >
+            
+            {/* Header Bar */}
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100 font-bold text-slate-900">
+              <span>Filter: {label}</span>
+              <button
+                type="button"
+                onClick={() => setActiveFilterColumn(null)}
+                className="text-slate-400 hover:text-slate-700 p-0.5 rounded cursor-pointer transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Sort Buttons */}
+            <div className="py-2 flex flex-col gap-1 border-b border-slate-100">
+              <button
+                type="button"
+                onClick={() => {
+                  setSortConfig({ colKey, direction: 'asc' });
+                  setActiveFilterColumn(null);
+                }}
+                className={`flex items-center gap-2 w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-100 transition cursor-pointer ${
+                  sortConfig?.colKey === colKey && sortConfig?.direction === 'asc' ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-700'
+                }`}
+              >
+                <ArrowUpAZ className="h-4 w-4 text-slate-400" />
+                <span>Sort A to Z (Ascending)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSortConfig({ colKey, direction: 'desc' });
+                  setActiveFilterColumn(null);
+                }}
+                className={`flex items-center gap-2 w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-100 transition cursor-pointer ${
+                  sortConfig?.colKey === colKey && sortConfig?.direction === 'desc' ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-700'
+                }`}
+              >
+                <ArrowDownZA className="h-4 w-4 text-slate-400" />
+                <span>Sort Z to A (Descending)</span>
+              </button>
+            </div>
+
+            {/* Search Box */}
+            <div className="pt-2.5 pb-2">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Search values..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerms(prev => ({ ...prev, [colKey]: e.target.value }))}
+                  className="w-full pl-8 pr-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition"
+                />
+              </div>
+            </div>
+
+            {/* Checkbox Multiselect List */}
+            <div className="max-h-48 overflow-y-auto border border-slate-200/90 rounded-lg bg-slate-50/50 p-1 space-y-0.5">
+              <label className="flex items-center gap-2 px-2 py-1.5 hover:bg-slate-200/60 rounded cursor-pointer font-bold text-slate-800 border-b border-slate-200/80 mb-1">
+                <input
+                  type="checkbox"
+                  checked={isAllSelected}
+                  onChange={toggleSelectAll}
+                  className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 h-3.5 w-3.5 cursor-pointer"
+                />
+                <span>(Select All)</span>
+              </label>
+
+              {visibleOptions.length === 0 ? (
+                <div className="py-3 text-center text-slate-400 italic">No matching items</div>
+              ) : (
+                visibleOptions.map((optVal, idx) => {
+                  const isChecked = draftSelections.includes(optVal);
+                  return (
+                    <label key={idx} className="flex items-center gap-2 px-2 py-1 hover:bg-blue-50/70 rounded cursor-pointer text-slate-700 text-xs transition-colors">
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => toggleOption(optVal)}
+                        className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 h-3.5 w-3.5 cursor-pointer"
+                      />
+                      <span className="truncate">{optVal}</span>
+                    </label>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Action Footer */}
+            <div className="flex items-center justify-between mt-3 pt-2.5 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={clearColumnFilter}
+                className="text-xs text-slate-500 hover:text-red-600 font-medium transition cursor-pointer"
+              >
+                Clear Filter
+              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveFilterColumn(null)}
+                  className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium text-xs transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={applyFilter}
+                  className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs transition cursor-pointer shadow-xs active:scale-95"
+                >
+                  OK
+                </button>
+              </div>
+            </div>
+
+          </div>
+        )}
+      </th>
+    );
+  };
+
   // =========================================================================
   // LEVEL 4: BANK TRANSACTION RECONCILIATION VIEW (MATCHING XERO 100%)
   // =========================================================================
@@ -494,6 +968,15 @@ export default function ProfitAndLossPage() {
 
           </div>
         </div>
+
+        {/* Multi-Instance Floating Xero Invoice Windows (Matching Sales Dashboard) */}
+        <XeroInvoiceViewerDrawer
+          invoices={openInvoices}
+          onCloseInvoice={handleCloseInvoice}
+          onFocusInvoice={handleFocusInvoice}
+          onUpdateInvoice={handleUpdateInvoice}
+          onOpenPayment={handleOpenPaymentDoc}
+        />
       </PageContainer>
     );
   }
@@ -784,6 +1267,15 @@ export default function ProfitAndLossPage() {
 
           </div>
         </div>
+
+        {/* Multi-Instance Floating Xero Invoice Windows (Matching Sales Dashboard) */}
+        <XeroInvoiceViewerDrawer
+          invoices={openInvoices}
+          onCloseInvoice={handleCloseInvoice}
+          onFocusInvoice={handleFocusInvoice}
+          onUpdateInvoice={handleUpdateInvoice}
+          onOpenPayment={handleOpenPaymentDoc}
+        />
       </PageContainer>
     );
   }
@@ -810,12 +1302,26 @@ export default function ProfitAndLossPage() {
                 {selectedAccount.name} Transactions
               </h1>
               <p className="text-xs text-slate-500 font-medium mt-0.5">
-                MI Health Ltd • For the period {fromDate} to {toDate}
+                Organization • For the period {fromDate} to {toDate}
               </p>
             </div>
 
             {/* Action Buttons */}
             <div className="flex items-center gap-2.5">
+              {(Object.keys(filterSelections).length > 0 || sortConfig !== null) && (
+                <button
+                  onClick={() => {
+                    setFilterSelections({});
+                    setSortConfig(null);
+                    setSearchTerms({});
+                  }}
+                  className="flex items-center gap-1 px-2.5 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-md text-xs font-semibold transition cursor-pointer border border-red-200"
+                >
+                  <Filter className="h-3 w-3" />
+                  <span>Reset Filters ({Object.keys(filterSelections).length + (sortConfig ? 1 : 0)})</span>
+                </button>
+              )}
+
               <div className="relative">
                 <Search className="h-3.5 w-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
                 <input
@@ -828,11 +1334,11 @@ export default function ProfitAndLossPage() {
               </div>
 
               <button
-                onClick={() => toast.success(`Exported ${selectedAccount.name} transactions`)}
+                onClick={handleExportCSV}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-300 rounded-md text-xs font-semibold text-slate-700 hover:bg-slate-50 transition cursor-pointer"
               >
                 <Download className="h-3.5 w-3.5 text-slate-600" />
-                <span>Export</span>
+                <span>Export CSV</span>
               </button>
 
               <button
@@ -845,19 +1351,27 @@ export default function ProfitAndLossPage() {
             </div>
           </div>
 
-          {/* Clean Executive Accounting Table */}
+          {/* Clean Executive Accounting Table with Excel Column Header Filters */}
           {(() => {
-            const calcDebit = filteredTransactions.length > 0
-              ? filteredTransactions.reduce((sum, t) => sum + (t.debit || 0), 0)
+            const calcDebit = processedTransactions.length > 0
+              ? processedTransactions.reduce((sum, t) => sum + (t.debit || 0), 0)
               : (txTotalDebit || 0);
 
-            const calcCredit = filteredTransactions.length > 0
-              ? filteredTransactions.reduce((sum, t) => sum + (t.credit || 0), 0)
+            const calcCredit = processedTransactions.length > 0
+              ? processedTransactions.reduce((sum, t) => sum + (t.credit || 0), 0)
               : (txTotalCredit || 0);
 
-            const calcBalance = filteredTransactions.length > 0
-              ? (filteredTransactions[filteredTransactions.length - 1]?.runningBalance ?? (calcCredit - calcDebit))
+            const calcBalance = processedTransactions.length > 0
+              ? (processedTransactions[processedTransactions.length - 1]?.runningBalance ?? (calcCredit - calcDebit))
               : (calcCredit || calcDebit ? (calcCredit - calcDebit) : (selectedAccount.value || 0));
+
+            const calcGross = processedTransactions.length > 0
+              ? processedTransactions.reduce((sum, t) => sum + (t.gross || t.gross_amount || 0), 0)
+              : 0;
+
+            const calcTax = processedTransactions.length > 0
+              ? processedTransactions.reduce((sum, t) => sum + (t.tax || t.tax_amount || 0), 0)
+              : 0;
 
             const displayAccCode = txAccountCode || selectedAccount.code || 
               (selectedAccount.name.toLowerCase().includes('amazon') ? '412' : 
@@ -875,14 +1389,16 @@ export default function ProfitAndLossPage() {
                   <table className="w-full text-left border-collapse text-xs">
                     <thead>
                       <tr className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200 text-[11px]">
-                        <th className="py-2.5 px-4">Date</th>
-                        <th className="py-2.5 px-4">Source</th>
-                        <th className="py-2.5 px-4">Description</th>
-                        <th className="py-2.5 px-4">Reference</th>
-                        <th className="py-2.5 px-4 text-center">Currency</th>
-                        <th className="py-2.5 px-4 text-right">Debit (GBP)</th>
-                        <th className="py-2.5 px-4 text-right">Credit (GBP)</th>
-                        <th className="py-2.5 px-4 text-right">Running Balance (GBP)</th>
+                        {renderColumnHeader('date', 'Date', 'left')}
+                        {renderColumnHeader('source', 'Source', 'left')}
+                        {renderColumnHeader('desc', 'Description', 'left')}
+                        {renderColumnHeader('ref', 'Reference / Invoice No.', 'left')}
+                        {renderColumnHeader('currency', 'Currency', 'center')}
+                        {renderColumnHeader('debitGbp', 'Debit (GBP)', 'right')}
+                        {renderColumnHeader('creditGbp', 'Credit (GBP)', 'right')}
+                        {renderColumnHeader('runningBalance', 'Running Balance (GBP)', 'right')}
+                        {renderColumnHeader('gross', 'Gross (GBP)', 'right')}
+                        {renderColumnHeader('tax', 'Tax (GBP)', 'right')}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 bg-white text-[11.5px] tabular-nums">
@@ -897,23 +1413,52 @@ export default function ProfitAndLossPage() {
                             <td className="py-2.5 px-4 text-right"><div className="h-3.5 bg-slate-200/80 rounded w-16 ml-auto"></div></td>
                             <td className="py-2.5 px-4 text-right"><div className="h-3.5 bg-slate-200/80 rounded w-16 ml-auto"></div></td>
                             <td className="py-2.5 px-4 text-right"><div className="h-3.5 bg-slate-200/80 rounded w-20 ml-auto"></div></td>
+                            <td className="py-2.5 px-4 text-right"><div className="h-3.5 bg-slate-200/80 rounded w-16 ml-auto"></div></td>
+                            <td className="py-2.5 px-4 text-right"><div className="h-3.5 bg-slate-200/80 rounded w-16 ml-auto"></div></td>
                           </tr>
                         ))
-                      ) : filteredTransactions.length > 0 ? (
-                        filteredTransactions.map((tx, idx) => (
-                          <tr 
-                            key={idx} 
-                            onClick={() => openInvoiceView(tx)}
-                            className="hover:bg-[#f0f4ff] transition cursor-pointer group"
-                            title={`Click to open Xero Invoice ${tx.reference}`}
-                          >
-                            <td className="py-2 px-4 text-slate-600 whitespace-nowrap">{tx.date}</td>
-                            <td className="py-2 px-4 font-semibold text-slate-800 whitespace-nowrap">{tx.source}</td>
-                            <td className="py-2 px-4 text-slate-700">{tx.description}</td>
-                            <td className="py-2 px-4 font-bold text-blue-600 group-hover:underline whitespace-nowrap">
-                              {tx.reference}
-                            </td>
-                            <td className="py-2 px-4 text-center text-slate-500">GBP</td>
+                      ) : processedTransactions.length > 0 ? (
+                        processedTransactions.map((tx, idx) => {
+                          const isBankTxn = tx.source === 'Receive Money' || tx.source === 'Spend Money';
+                          const isJournal = tx.source === 'Manual Journal';
+                          const mainRef = tx.reference || tx.ref || (isBankTxn ? tx.source : 'INV-001');
+                          const actualInvNum = tx.invoiceNumber || tx.rawInvoice?.number || tx.rawInvoice?.InvoiceNumber;
+                          const actualInvId = tx.invoiceId || tx.rawInvoice?.id || tx.rawInvoice?.InvoiceID;
+                          
+                          let extraLabel: string | null = null;
+                          if (isBankTxn && actualInvId) {
+                            extraLabel = `Bank Txn ID: ${actualInvId}`;
+                          } else if (isJournal && actualInvId) {
+                            extraLabel = `Journal ID: ${actualInvId}`;
+                          } else if (actualInvNum && actualInvNum !== mainRef) {
+                            extraLabel = (actualInvId && actualInvId !== actualInvNum && !mainRef.includes(actualInvId.toString()))
+                              ? `Inv #: ${actualInvNum} | Inv ID: ${actualInvId}`
+                              : `Inv #: ${actualInvNum}`;
+                          } else if (actualInvId && !mainRef.includes(actualInvId.toString())) {
+                            extraLabel = `Inv ID: ${actualInvId}`;
+                          }
+
+                          return (
+                            <tr 
+                              key={idx} 
+                              onClick={() => openInvoiceView(tx)}
+                              className="hover:bg-[#f0f4ff] transition cursor-pointer group"
+                              title={`Click to open Xero Invoice ${mainRef}`}
+                            >
+                              <td className="py-2 px-4 text-slate-600 whitespace-nowrap">{tx.date}</td>
+                              <td className="py-2 px-4 font-semibold text-slate-800 whitespace-nowrap">{tx.source}</td>
+                              <td className="py-2 px-4 text-slate-700">{tx.description || tx.desc}</td>
+                              <td className="py-2 px-4 font-bold text-blue-600 group-hover:underline whitespace-nowrap">
+                                <div>{mainRef}</div>
+                                {extraLabel && (
+                                  <div className="text-[10px] text-slate-500 font-mono font-normal flex items-center gap-1 mt-0.5">
+                                    <span className="bg-blue-50/90 text-blue-700 border border-blue-200/70 px-1 py-0.2 rounded text-[9.5px]">
+                                      {extraLabel}
+                                    </span>
+                                  </div>
+                                )}
+                              </td>
+                            <td className="py-2 px-4 text-center text-slate-500">{tx.currency || 'GBP'}</td>
                             <td className="py-2 px-4 text-right font-semibold text-slate-900 whitespace-nowrap">
                               {tx.debit ? formatAmount(tx.debit) : '-'}
                             </td>
@@ -923,12 +1468,31 @@ export default function ProfitAndLossPage() {
                             <td className="py-2 px-4 text-right font-bold text-slate-900 bg-slate-50/40 whitespace-nowrap">
                               {formatAmount(tx.runningBalance)}
                             </td>
+                            <td className="py-2 px-4 text-right font-semibold text-slate-900 whitespace-nowrap">
+                              {tx.gross || tx.gross_amount ? formatAmount(tx.gross || tx.gross_amount) : '-'}
+                            </td>
+                            <td className="py-2 px-4 text-right font-semibold text-slate-900 whitespace-nowrap">
+                              {tx.tax || tx.tax_amount ? formatAmount(tx.tax || tx.tax_amount) : '-'}
+                            </td>
                           </tr>
-                        ))
+                          );
+                        })
                       ) : (
                         <tr>
-                          <td colSpan={8} className="py-8 text-center text-xs text-slate-400">
-                            No transactions found for this account.
+                          <td colSpan={10} className="py-8 px-6 text-center">
+                            {Math.abs(selectedAccount.value || 0) > 0 ? (
+                              <div className="max-w-xl mx-auto p-4 rounded-xl bg-amber-50 border border-amber-200/90 text-amber-900 text-left flex items-start gap-3 shadow-2xs">
+                                <Info className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+                                <div>
+                                  <h4 className="text-xs font-extrabold text-amber-950 uppercase tracking-wider">Detailed Source Transactions Unavailable (DATA_PARTIAL)</h4>
+                                  <p className="text-xs text-amber-800 mt-1 leading-relaxed font-medium">
+                                    The authoritative Xero Profit & Loss report records an account balance of <strong>{formatAmount(selectedAccount.value)}</strong> for <strong>{selectedAccount.name}</strong>. However, detailed invoice or journal line-item records are not available in the database cache for this specific account and period ({fromDate} to {toDate}).
+                                  </p>
+                                </div>
+                              </div>
+                            ) : (
+                              <span className="text-xs text-slate-400 font-medium">No transactions found matching the selected filters.</span>
+                            )}
                           </td>
                         </tr>
                       )}
@@ -946,6 +1510,12 @@ export default function ProfitAndLossPage() {
                         <td className="py-2.5 px-4 text-right font-bold text-slate-900">
                           {txLoading ? 'Loading...' : formatAmount(calcBalance)}
                         </td>
+                        <td className="py-2.5 px-4 text-right font-bold text-slate-900">
+                          {txLoading ? '-' : (calcGross ? formatAmount(calcGross) : '-')}
+                        </td>
+                        <td className="py-2.5 px-4 text-right font-bold text-slate-900">
+                          {txLoading ? '-' : (calcTax ? formatAmount(calcTax) : '-')}
+                        </td>
                       </tr>
                       {/* Grand Total Row with double underline */}
                       <tr className="bg-slate-100 font-extrabold text-xs text-slate-900 border-t border-b-2 border-slate-400 tabular-nums">
@@ -959,6 +1529,12 @@ export default function ProfitAndLossPage() {
                         <td className="py-2.5 px-4 text-right font-bold text-slate-900">
                           {txLoading ? 'Loading...' : formatAmount(calcBalance)}
                         </td>
+                        <td className="py-2.5 px-4 text-right font-bold text-slate-900">
+                          {txLoading ? '-' : (calcGross ? formatAmount(calcGross) : '-')}
+                        </td>
+                        <td className="py-2.5 px-4 text-right font-bold text-slate-900">
+                          {txLoading ? '-' : (calcTax ? formatAmount(calcTax) : '-')}
+                        </td>
                       </tr>
                     </tfoot>
                   </table>
@@ -968,6 +1544,15 @@ export default function ProfitAndLossPage() {
           })()}
 
         </div>
+
+        {/* Multi-Instance Floating Xero Invoice Windows (Matching Sales Dashboard) */}
+        <XeroInvoiceViewerDrawer
+          invoices={openInvoices}
+          onCloseInvoice={handleCloseInvoice}
+          onFocusInvoice={handleFocusInvoice}
+          onUpdateInvoice={handleUpdateInvoice}
+          onOpenPayment={handleOpenPaymentDoc}
+        />
       </PageContainer>
     );
   }
@@ -993,7 +1578,7 @@ export default function ProfitAndLossPage() {
               <span>Profit & Loss Statement</span>
             </h1>
             <p className="text-[12px] text-slate-500 font-medium mt-0.5">
-              Consolidated income statement for MI Health Ltd ({currencyCode}).
+              Consolidated income statement ({currencyCode}).
             </p>
           </div>
 
@@ -1129,7 +1714,7 @@ export default function ProfitAndLossPage() {
               <div>
                 <div className="flex items-center gap-2 text-[#0064eb] text-xs font-extrabold uppercase tracking-wider">
                   <Building2 className="h-4 w-4" />
-                  <span>MI Health Ltd</span>
+                  <span>Profit & Loss</span>
                   <span className="text-slate-300">•</span>
                   <span className="text-slate-600 font-semibold">Profit & Loss Statement</span>
                 </div>
@@ -1629,6 +2214,15 @@ export default function ProfitAndLossPage() {
             </div>
           </div>
         )}
+
+        {/* Multi-Instance Floating Xero Invoice Windows (Matching Sales Dashboard) */}
+        <XeroInvoiceViewerDrawer
+          invoices={openInvoices}
+          onCloseInvoice={handleCloseInvoice}
+          onFocusInvoice={handleFocusInvoice}
+          onUpdateInvoice={handleUpdateInvoice}
+          onOpenPayment={handleOpenPaymentDoc}
+        />
 
       </div>
     </PageContainer>

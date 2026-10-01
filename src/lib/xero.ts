@@ -95,11 +95,8 @@ export async function fetchXeroResource(
     return [];
   }
 
-  if (res.status === 429 && retriesLeft > 0) {
-    const retryAfter = parseInt(res.headers.get('Retry-After') || '2') * 1000;
-    console.warn(`[Xero API] Rate limit (429) hit for [${resource}]. Waiting ${retryAfter}ms before retry...`);
-    await new Promise(resolve => setTimeout(resolve, retryAfter));
-    return fetchXeroResource(accessToken, xeroTenantId, resource, queryParams, retriesLeft - 1, modifiedSince);
+  if (res.status === 429) {
+    throw new Error(`Xero API Rate Limit (429) Exceeded for resource [${resource}]`);
   }
 
   if (!res.ok) {
@@ -110,20 +107,37 @@ export async function fetchXeroResource(
   const data = await res.json();
   return data[resource] || [];
 }
+
+export async function fetchXeroResourcePaginated(
+  accessToken: string,
+  xeroTenantId: string,
+  resource: string,
+  maxPages: number = 100
+): Promise<any[]> {
+  let allRecords: any[] = [];
+  let page = 1;
+  while (page <= maxPages) {
+    const pageRecords = await fetchXeroResource(accessToken, xeroTenantId, resource, `page=${page}`);
+    if (!pageRecords || pageRecords.length === 0) break;
+    allRecords.push(...pageRecords);
+    if (pageRecords.length < 100) break;
+    page++;
+  }
+  return allRecords;
+}
  
 export async function fetchXeroReport(
   accessToken: string, 
   xeroTenantId: string, 
   reportPath: string, 
-  queryParams?: string,
-  retriesLeft: number = 3
+  queryParams?: string
 ): Promise<any> {
-  const url = `https://api.xero.com/api.xro/2.0/Reports/${reportPath}${queryParams ? `?${queryParams}` : ''}`;
+  const fullUrl = `https://api.xero.com/api.xro/2.0/Reports/${reportPath}${queryParams ? `?${queryParams}` : ''}`;
   
   // Throttle to naturally pace concurrent requests
-  await new Promise(resolve => setTimeout(resolve, 150));
+  await new Promise(resolve => setTimeout(resolve, 50));
 
-  const res = await fetch(url, {
+  const res = await fetch(fullUrl, {
     headers: {
       'Authorization': `Bearer ${accessToken}`,
       'Xero-Tenant-Id': xeroTenantId,
@@ -131,11 +145,8 @@ export async function fetchXeroReport(
     }
   });
 
-  if (res.status === 429 && retriesLeft > 0) {
-    const retryAfter = parseInt(res.headers.get('Retry-After') || '2') * 1000;
-    console.warn(`[Xero API] Rate limit (429) hit for report [${reportPath}]. Waiting ${retryAfter}ms before retry...`);
-    await new Promise(resolve => setTimeout(resolve, retryAfter));
-    return fetchXeroReport(accessToken, xeroTenantId, reportPath, queryParams, retriesLeft - 1);
+  if (res.status === 429) {
+    throw new Error(`Xero API Rate Limit (429) Exceeded for report [${reportPath}]`);
   }
 
   if (!res.ok) {

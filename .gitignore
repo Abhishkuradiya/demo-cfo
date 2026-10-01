@@ -40,5 +40,15 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# scratch
+# scratch & debug scripts
 scratch/
+scratch_*
+*.json.bak
+db.json
+r.json*
+phase_*.md
+*.zip
+VISUAL
+test.txt
+update.py
+profitability-analysis-banner-bg(1).svg

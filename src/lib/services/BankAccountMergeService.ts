@@ -12,7 +12,8 @@ export interface EnterpriseBankAccountDTO {
 
 export class BankAccountMergeService {
   /**
-   * Merges accounts metadata from Accounts API and balance sheet balances.
+   * Merges accounts metadata from Xero Accounts API and Balance Sheet report.
+   * Strictly filters ONLY accounts that have BankAccountType or Type === 'BANK' | 'CREDITCARD' | 'PAYPAL'.
    */
   static mergeAccounts(
     accounts: any[], 
@@ -21,22 +22,21 @@ export class BankAccountMergeService {
     const results: EnterpriseBankAccountDTO[] = [];
     const matchedBsNames = new Set<string>();
 
-    const bankKeywords = [
-      'bank', 'cash', 'paypal', 'tap', 'express', 'amex', 'charge', 
-      'platinum', 'stripe', 'sum up', 'starling', 'groupon', 'petty', 
-      'savings', 'card', 'gold', 'ebay', 'inter company'
-    ];
-
     if (Array.isArray(accounts) && accounts.length > 0) {
+      // Filter strictly by Xero BankAccountType / Type === 'BANK' / BankAccountNumber
       const bankAccounts = accounts.filter(acc => {
-        const t = (acc.Type || '').toUpperCase();
-        if (t === 'BANK' || t === 'PAYPAL' || t === 'CREDITCARD') return true;
-        const nameLower = (acc.Name || '').toLowerCase();
-        return bankKeywords.some(k => nameLower.includes(k));
+        const type = (acc.Type || acc.type || '').toUpperCase();
+        const bankAccType = (acc.BankAccountType || acc.bankAccountType || '').toUpperCase();
+        const hasAccountNum = Boolean(acc.BankAccountNumber || acc.bankAccountNumber);
+
+        if (bankAccType || hasAccountNum) return true;
+        if (type === 'BANK' || type === 'CREDITCARD' || type === 'PAYPAL') return true;
+        
+        return false;
       });
 
       bankAccounts.forEach(acc => {
-        const normalizedName = acc.Name.toLowerCase().trim();
+        const normalizedName = (acc.Name || acc.accountName || '').toLowerCase().trim();
         
         const match = balanceSheetAccounts.find(bsAcc => {
           const bsName = bsAcc.name.toLowerCase().trim();
@@ -47,40 +47,18 @@ export class BankAccountMergeService {
           matchedBsNames.add(match.name.toLowerCase().trim());
         }
 
-        // Xero Trial Balance Debit balances are positive assets
         const rawBal = match ? match.balance : 0;
         const posBal = Math.abs(rawBal);
 
         results.push({
           accountId: acc.AccountID || acc.accountId || acc.Name,
-          accountName: acc.Name,
-          accountCode: acc.Code || "",
-          currency: acc.CurrencyCode || "GBP",
+          accountName: acc.Name || acc.accountName,
+          accountCode: acc.Code || acc.accountCode || "",
+          currency: acc.CurrencyCode || acc.currency || "GBP",
           balance: posBal,
-          status: acc.Status || "ACTIVE",
-          type: acc.Type || "BANK"
+          status: acc.Status || acc.status || "ACTIVE",
+          type: acc.BankAccountType || acc.Type || "BANK"
         });
-      });
-    }
-
-    // Include any Balance Sheet bank accounts that were not in metadata
-    if (Array.isArray(balanceSheetAccounts)) {
-      balanceSheetAccounts.forEach((bsAcc, idx) => {
-        const bsNameNorm = bsAcc.name.toLowerCase().trim();
-        if (!matchedBsNames.has(bsNameNorm)) {
-          const exists = results.some(r => r.accountName.toLowerCase().trim() === bsNameNorm);
-          if (!exists) {
-            results.push({
-              accountId: `BS-BANK-${idx + 1}`,
-              accountName: bsAcc.name,
-              accountCode: "",
-              currency: "GBP",
-              balance: Math.abs(bsAcc.balance),
-              status: "ACTIVE",
-              type: "BANK"
-            });
-          }
-        }
       });
     }
 

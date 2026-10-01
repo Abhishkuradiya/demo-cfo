@@ -677,6 +677,16 @@ export async function GET(req: NextRequest) {
         totalRecordsProcessed: allEvents.length,
         totalRecordsSkipped: duplicatesCount
       },
+      events: allEvents.filter(e => !e.isDuplicate).map(e => ({
+        id: e.id,
+        source: e.source,
+        direction: e.direction,
+        amount: e.amount,
+        date: e.date,
+        contact: e.contact,
+        isVerified: e.isVerified,
+        currency: e.currency
+      })),
       history,
       historyDetailed
     });

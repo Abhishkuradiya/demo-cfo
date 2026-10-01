@@ -79,12 +79,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           ? args[0]
           : (args[0] instanceof URL ? args[0].toString() : (args[0] as Request).url);
         
-        // Don't intercept authentication routes to avoid redirection loops
+        // Don't intercept authentication and admin routes to avoid redirection loops
         if (
           !url.includes('/api/auth/login') &&
           !url.includes('/api/auth/register') &&
           !url.includes('/api/auth/logout') &&
-          !url.includes('/api/auth/me')
+          !url.includes('/api/auth/me') &&
+          !url.includes('/api/admin') &&
+          !url.includes('/admin')
         ) {
           await logout();
         }

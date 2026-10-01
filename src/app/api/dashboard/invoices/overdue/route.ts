@@ -1,14 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getTenantIdFromSession } from '@/lib/auth';
-import { Pool } from 'pg';
-
-const pgPool = new Pool({
-  host: process.env.DB_HOST || 'localhost',
-  port: parseInt(process.env.DB_PORT || '5432'),
-  user: process.env.DB_USER || 'postgres',
-  password: process.env.DB_PASSWORD || 'postgres',
-  database: process.env.DB_NAME || 'virtual_cfo',
-});
+import { db, parseXeroDate } from '@/lib/db';
+import { getXeroAccessToken, fetchXeroResource } from '@/lib/xero';
 
 export async function GET(req: NextRequest) {
   const tenantId = await getTenantIdFromSession();
@@ -28,35 +21,132 @@ export async function GET(req: NextRequest) {
   const toDate = searchParams.get('to_date');
 
   try {
-    const queryStr = `
-      SELECT 
-        id,
-        invoice_number, 
-        contact_name, 
-        invoice_date, 
-        due_date, 
-        total, 
-        amount_due, 
-        amount_paid, 
-        status, 
-        type, 
-        currency,
-        CASE 
-          WHEN due_date IS NOT NULL THEN (CURRENT_DATE - due_date::date)
-          ELSE 0
-        END as overdue_days
-      FROM invoices
-      WHERE tenant_id = $1 AND type = 'ACCREC'
-    `;
+    const tokenInfo = await getXeroAccessToken(tenantId);
+    const isConnected = !!tokenInfo;
 
-    const result = await pgPool.query(queryStr, [tenantId]);
-    let allInvoices: any[] = result.rows;
+    let rawInvoicesList: any[] = [];
+
+    // 1. Fetch from DB
+    const pgInvoices = await db.getInvoices(tenantId);
+    if (Array.isArray(pgInvoices) && pgInvoices.length > 0) {
+      rawInvoicesList = pgInvoices.filter((inv: any) => {
+        const t = (inv.Type || inv.type || '').toUpperCase();
+        return t === 'ACCREC';
+      });
+    }
+
+    // 2. Report Fallback
+    if (rawInvoicesList.length === 0) {
+      const cachedReport = await db.getReport(tenantId, 'Invoices');
+      if (cachedReport && Array.isArray(cachedReport)) {
+        rawInvoicesList = cachedReport.filter((inv: any) => {
+          const t = (inv.Type || inv.type || '').toUpperCase();
+          return t === 'ACCREC';
+        });
+      }
+    }
+
+    // 3. Live Xero Fallback
+    if (rawInvoicesList.length === 0 && isConnected) {
+      try {
+        const xeroInvoices = await fetchXeroResource(
+          tokenInfo.accessToken,
+          tokenInfo.xeroTenantId,
+          'Invoices',
+          'where=Type=="ACCREC"'
+        );
+        if (Array.isArray(xeroInvoices) && xeroInvoices.length > 0) {
+          rawInvoicesList = xeroInvoices;
+        }
+      } catch (err: any) {
+        console.error('Failed to fetch Xero ACCREC invoices for overdue API:', err.message);
+      }
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    let allInvoices = rawInvoicesList.map((inv: any) => {
+      const invNumber = inv.invoice_number || inv.InvoiceNumber || inv.reference || inv.Reference || 'INV-000';
+      const contactName = inv.contact_name || inv.ContactName || inv.Contact?.Name || 'Unknown Customer';
+      const invDate = inv.invoice_date || inv.Date || inv.DateString;
+      const dueDate = inv.due_date || inv.DueDate || inv.DueDateString || invDate;
+
+      const total = parseFloat(inv.total ?? inv.Total ?? 0);
+      const amountPaid = parseFloat(inv.amount_paid ?? inv.AmountPaid ?? 0);
+      const amountDue = inv.amount_due !== undefined && inv.amount_due !== null ? parseFloat(inv.amount_due) : (inv.AmountDue !== undefined && inv.AmountDue !== null ? parseFloat(inv.AmountDue) : Math.max(0, total - amountPaid));
+
+      const status = (inv.status || inv.Status || 'AUTHORISED').toUpperCase();
+      const currency = inv.currency || inv.CurrencyCode || 'GBP';
+      const rawLineItems = inv.line_items || inv.LineItems || [];
+
+      let subTotal = inv.sub_total ?? inv.SubTotal;
+      let totalTax = inv.total_tax ?? inv.TotalTax;
+
+      if (subTotal === undefined || subTotal === null) {
+        if (Array.isArray(rawLineItems) && rawLineItems.length > 0) {
+          subTotal = rawLineItems.reduce((acc: number, item: any) => {
+            const lAmt = parseFloat(item.LineAmount ?? item.lineAmount ?? item.line_amount ?? item.UnitAmount ?? 0);
+            return acc + lAmt;
+          }, 0);
+        } else {
+          subTotal = total;
+        }
+      } else {
+        subTotal = parseFloat(subTotal);
+      }
+
+      if (totalTax === undefined || totalTax === null) {
+        if (Array.isArray(rawLineItems) && rawLineItems.length > 0) {
+          totalTax = rawLineItems.reduce((acc: number, item: any) => {
+            const tAmt = parseFloat(item.TaxAmount ?? item.taxAmount ?? item.tax_amount ?? 0);
+            return acc + tAmt;
+          }, 0);
+        } else {
+          totalTax = Math.max(0, total - subTotal);
+        }
+      } else {
+        totalTax = parseFloat(totalTax);
+      }
+
+      let overdueDays = 0;
+      const parsedDueDate = parseXeroDate(dueDate);
+      if (parsedDueDate) {
+        const dObj = new Date(parsedDueDate);
+        dObj.setHours(0, 0, 0, 0);
+        const diffMs = today.getTime() - dObj.getTime();
+        overdueDays = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+      }
+
+      return {
+        id: inv.id || inv.external_id || inv.InvoiceID || invNumber,
+        invoice_number: invNumber,
+        contact_name: contactName,
+        invoice_date: invDate,
+        due_date: dueDate,
+        total,
+        sub_total: subTotal,
+        total_tax: totalTax,
+        amount_due: amountDue,
+        amount_paid: amountPaid,
+        status,
+        currency,
+        line_items: typeof rawLineItems === 'string' ? JSON.parse(rawLineItems) : (rawLineItems || []),
+        attachments: inv.attachments || inv.Attachments || [],
+        overdue_days: overdueDays
+      };
+    });
+
+    // Filter out deleted/voided/draft
+    allInvoices = allInvoices.filter((inv: any) => inv.status !== 'DELETED' && inv.status !== 'VOIDED' && inv.status !== 'DRAFT');
 
     // Filter by Date Range if provided
     if (fromDate || toDate) {
       allInvoices = allInvoices.filter((inv: any) => {
         if (!inv.invoice_date) return false;
-        const invDateStr = new Date(inv.invoice_date).toISOString().slice(0, 10);
+        const parsedDate = parseXeroDate(inv.invoice_date);
+        if (!parsedDate) return false;
+        const invDateStr = parsedDate.toISOString().slice(0, 10);
         if (fromDate && invDateStr < fromDate) return false;
         if (toDate && invDateStr > toDate) return false;
         return true;
@@ -64,21 +154,21 @@ export async function GET(req: NextRequest) {
     }
 
     const overdueInvoices = allInvoices.filter((inv: any) => {
-      const isUnpaid = (inv.status === 'AUTHORISED' || inv.status === 'SUBMITTED') && parseFloat(inv.amount_due) > 0;
-      const isOverdue = parseInt(inv.overdue_days || '0', 10) > 0;
+      const isUnpaid = inv.amount_due > 0.001;
+      const isOverdue = inv.overdue_days > 0;
       return isUnpaid && isOverdue;
     });
 
-    const totalOverdueAmount = overdueInvoices.reduce((sum: number, inv: any) => sum + parseFloat(inv.amount_due || 0), 0);
+    const totalOverdueAmount = overdueInvoices.reduce((sum: number, inv: any) => sum + inv.amount_due, 0);
     const totalOverdueCount = overdueInvoices.length;
     const totalAccrecCount = allInvoices.length;
     const overduePercentage = totalAccrecCount > 0 ? (totalOverdueCount / totalAccrecCount) * 100 : 0;
 
     const avgOverdueDays = totalOverdueCount > 0
-      ? Math.round(overdueInvoices.reduce((sum: number, inv: any) => sum + parseInt(inv.overdue_days || 0, 10), 0) / totalOverdueCount)
+      ? Math.round(overdueInvoices.reduce((sum: number, inv: any) => sum + inv.overdue_days, 0) / totalOverdueCount)
       : 0;
 
-    const sortedByOverdue = [...overdueInvoices].sort((a: any, b: any) => parseInt(b.overdue_days || 0, 10) - parseInt(a.overdue_days || 0, 10));
+    const sortedByOverdue = [...overdueInvoices].sort((a: any, b: any) => b.overdue_days - a.overdue_days);
     const oldestInvoice = sortedByOverdue[0] || null;
 
     const uniqueCustomers = Array.from(new Set(overdueInvoices.map((inv: any) => inv.contact_name).filter(Boolean)));
@@ -92,8 +182,8 @@ export async function GET(req: NextRequest) {
     };
 
     overdueInvoices.forEach((inv: any) => {
-      const dueAmt = parseFloat(inv.amount_due || 0);
-      const days = parseInt(inv.overdue_days || 0, 10);
+      const dueAmt = inv.amount_due;
+      const days = inv.overdue_days;
       if (days <= 30) {
         agingBuckets.b0_30.amount += dueAmt;
         agingBuckets.b0_30.count += 1;
@@ -115,7 +205,7 @@ export async function GET(req: NextRequest) {
     const customerTotals: Record<string, number> = {};
     overdueInvoices.forEach((inv: any) => {
       const cName = inv.contact_name || 'Unknown Customer';
-      customerTotals[cName] = (customerTotals[cName] || 0) + parseFloat(inv.amount_due || 0);
+      customerTotals[cName] = (customerTotals[cName] || 0) + inv.amount_due;
     });
 
     const topCustomers = Object.entries(customerTotals)
@@ -143,7 +233,7 @@ export async function GET(req: NextRequest) {
 
     if (overdueBucket) {
       filteredTable = filteredTable.filter((inv: any) => {
-        const d = parseInt(inv.overdue_days || 0, 10);
+        const d = inv.overdue_days;
         if (overdueBucket === '0_30') return d <= 30;
         if (overdueBucket === '31_60') return d > 30 && d <= 60;
         if (overdueBucket === '61_90') return d > 60 && d <= 90;
@@ -153,7 +243,7 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    filteredTable.sort((a: any, b: any) => parseInt(b.overdue_days || 0, 10) - parseInt(a.overdue_days || 0, 10));
+    filteredTable.sort((a: any, b: any) => b.overdue_days - a.overdue_days);
 
     const totalFilteredCount = filteredTable.length;
     const startIndex = (page - 1) * limit;
@@ -166,7 +256,7 @@ export async function GET(req: NextRequest) {
         avgOverdueDays,
         oldestInvoice: oldestInvoice ? {
           invoiceNumber: oldestInvoice.invoice_number,
-          overdueDays: parseInt(oldestInvoice.overdue_days || 0, 10),
+          overdueDays: oldestInvoice.overdue_days,
           customerName: oldestInvoice.contact_name
         } : null,
         uniqueCustomersCount: uniqueCustomers.length,
@@ -182,17 +272,23 @@ export async function GET(req: NextRequest) {
         totalPages: Math.ceil(totalFilteredCount / limit) || 1
       },
       invoices: paginatedInvoices.map((inv: any) => ({
-        id: inv.id,
+        id: inv.id || inv.invoice_number,
         invoiceNumber: inv.invoice_number,
         customerName: inv.contact_name || 'N/A',
-        issueDate: inv.invoice_date ? new Date(inv.invoice_date).toISOString().slice(0, 10) : 'N/A',
-        dueDate: inv.due_date ? new Date(inv.due_date).toISOString().slice(0, 10) : 'N/A',
-        totalAmount: parseFloat(inv.total || 0),
-        amountPaid: parseFloat(inv.amount_paid || 0),
-        amountDue: parseFloat(inv.amount_due || 0),
-        overdueDays: parseInt(inv.overdue_days || 0, 10) > 0 ? parseInt(inv.overdue_days, 10) : 0,
-        status: parseInt(inv.overdue_days || 0, 10) > 0 && parseFloat(inv.amount_due || 0) > 0 ? 'OVERDUE' : (inv.status || 'PAID'),
-        currency: inv.currency || 'GBP'
+        contactName: inv.contact_name || 'N/A',
+        issueDate: inv.invoice_date ? (parseXeroDate(inv.invoice_date)?.toISOString().slice(0, 10) || 'N/A') : 'N/A',
+        dueDate: inv.due_date ? (parseXeroDate(inv.due_date)?.toISOString().slice(0, 10) || 'N/A') : 'N/A',
+        totalAmount: inv.total,
+        amountPaid: inv.amount_paid,
+        amountDue: inv.amount_due,
+        subTotal: inv.sub_total,
+        totalTax: inv.total_tax,
+        overdueDays: inv.overdue_days,
+        status: inv.overdue_days > 0 && inv.amount_due > 0 ? 'OVERDUE' : (inv.status || 'PAID'),
+        rawStatus: inv.status || 'AUTHORISED',
+        currency: inv.currency || 'GBP',
+        lineItems: inv.line_items || [],
+        attachments: inv.attachments || []
       }))
     });
   } catch (err: any) {
@@ -200,3 +296,4 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: err.message || 'Internal Server Error' }, { status: 500 });
   }
 }
+

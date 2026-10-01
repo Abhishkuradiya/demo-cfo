@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 import * as echarts from 'echarts';
+import { resolveBrandingTheme } from '@/lib/constants/brandingThemes';
 import {
   FileText,
   Calendar,
@@ -98,6 +99,8 @@ function SparklineWave({ color, height = 36 }: { color: string; height?: number 
   );
 }
 
+import XeroInvoiceViewerDrawer, { OpenInvoiceData } from '@/components/sales/XeroInvoiceViewerDrawer';
+
 export default function TopOverdueInvoicesPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -105,6 +108,91 @@ export default function TopOverdueInvoicesPage() {
   const [loading, setLoading] = useState(true);
   const [initialLoading, setInitialLoading] = useState(true);
   const [tableLoading, setTableLoading] = useState(false);
+
+  // Multi-window floating Xero Invoice viewer modal state
+  const [openInvoices, setOpenInvoices] = useState<OpenInvoiceData[]>([]);
+
+  const handleOpenInvoiceModal = (inv: any, customerName?: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const invId = inv.id || inv.InvoiceID || inv.invoiceNumber || inv.invoice_number || `inv-${Date.now()}`;
+    const displayRef = inv.invoiceNumber || inv.InvoiceNumber || inv.reference || inv.Reference || 'INV-001';
+
+    const count = openInvoices.length;
+    const startX = Math.min(80 + count * 35, typeof window !== 'undefined' ? window.innerWidth - 750 : 100);
+    const startY = Math.min(60 + count * 35, typeof window !== 'undefined' ? window.innerHeight - 650 : 100);
+    const winW = Math.min(800, typeof window !== 'undefined' ? window.innerWidth - 60 : 800);
+    const winH = Math.min(700, typeof window !== 'undefined' ? window.innerHeight - 80 : 700);
+    const maxZ = Math.max(...openInvoices.map(i => i.zIndex || 1000), 1000);
+
+    const grossTotal = parseFloat(inv.totalAmount ?? inv.total ?? inv.Total ?? inv.amount ?? inv.amountDue ?? 0);
+    const subTotal = inv.subTotal !== undefined ? parseFloat(inv.subTotal) : (inv.SubTotal !== undefined ? parseFloat(inv.SubTotal) : (inv.sub_total !== undefined ? parseFloat(inv.sub_total) : grossTotal));
+    const totalTax = inv.totalTax !== undefined ? parseFloat(inv.totalTax) : (inv.TotalTax !== undefined ? parseFloat(inv.TotalTax) : (inv.total_tax !== undefined ? parseFloat(inv.total_tax) : Math.max(0, grossTotal - subTotal)));
+
+    const rawLineItems = inv.lineItems || inv.LineItems || inv.line_items || [];
+
+    setOpenInvoices(prev => {
+      const existing = prev.find(i => i.id === invId || i.refNumber === displayRef);
+      if (existing) {
+        return prev.map(i => i.id === existing.id ? { ...i, zIndex: maxZ + 1 } : i);
+      }
+
+      return [
+        ...prev,
+        {
+          id: invId,
+          refNumber: displayRef,
+          contactName: customerName || inv.customerName || inv.contactName || inv.ContactName || (inv.Contact && inv.Contact.Name) || 'Customer',
+          date: inv.issueDate || inv.date || inv.DateString || inv.Date || new Date().toISOString(),
+          dueDate: inv.dueDate || inv.DueDateString || inv.DueDate || inv.date || new Date().toISOString(),
+          paymentDate: inv.paymentDate || inv.date || inv.issueDate,
+          desc: inv.reference || inv.Reference || inv.desc || `Invoice ${displayRef}`,
+          amount: grossTotal,
+          subTotal: subTotal,
+          totalTax: totalTax,
+          amountPaid: parseFloat(inv.amountPaid ?? inv.AmountPaid ?? inv.amount_paid ?? 0),
+          amountDue: parseFloat(inv.amountDue ?? inv.AmountDue ?? inv.amount_due ?? 0),
+          status: inv.rawStatus || inv.status || inv.Status || 'AUTHORISED',
+          brandingTheme: resolveBrandingTheme(inv),
+          lineItems: Array.isArray(rawLineItems) && rawLineItems.length > 0 ? rawLineItems.map((item: any) => ({
+            desc: item.Description || item.description || item.desc || item.ItemCode || item.itemCode || `Line item for ${displayRef}`,
+            Description: item.Description || item.description || item.desc || item.ItemCode || item.itemCode || `Line item for ${displayRef}`,
+            account: item.AccountCode ? `${item.AccountCode} - ${item.AccountName || 'Sales'}` : (item.accountCode ? `${item.accountCode} - Sales` : (item.account || '410 Sales')),
+            AccountCode: item.AccountCode || item.accountCode || item.account_code || '410',
+            taxRate: item.TaxType || item.taxType || item.tax_type || item.taxRate || 'Tax on Income (20%)',
+            TaxType: item.TaxType || item.taxType || item.tax_type || 'OUTPUT2',
+            amountGbp: parseFloat(item.LineAmount ?? item.lineAmount ?? item.line_amount ?? item.amountGbp ?? item.UnitAmount ?? item.unitAmount ?? grossTotal),
+            LineAmount: item.LineAmount ?? item.lineAmount ?? item.line_amount,
+            UnitAmount: item.UnitAmount ?? item.unitAmount ?? item.unit_amount,
+            Quantity: item.Quantity ?? item.quantity,
+            TaxAmount: item.TaxAmount ?? item.taxAmount ?? item.tax_amount
+          })) : [
+            {
+              desc: `Invoice ${displayRef} - ${customerName || inv.customerName || 'Customer Services'}`,
+              account: '410 Sales',
+              taxRate: 'Tax on Income (20%)',
+              amountGbp: grossTotal
+            }
+          ],
+          attachments: inv.attachments || inv.Attachments || [],
+          x: startX,
+          y: startY,
+          width: winW,
+          height: winH,
+          zIndex: maxZ + 1,
+          isMinimized: false,
+          isMaximized: false,
+          isHighlighted: true
+        }
+      ];
+    });
+  };
+
+  const handleCloseInvoice = (id: string) => setOpenInvoices(prev => prev.filter(inv => inv.id !== id));
+  const handleFocusInvoice = (id: string) => setOpenInvoices(prev => {
+    const maxZ = Math.max(...prev.map(i => i.zIndex || 1000), 1000);
+    return prev.map(inv => inv.id === id ? { ...inv, zIndex: maxZ + 1 } : inv);
+  });
+  const handleUpdateInvoice = (id: string, updates: Partial<OpenInvoiceData>) => setOpenInvoices(prev => prev.map(inv => inv.id === id ? { ...inv, ...updates } : inv));
 
   const [summary, setSummary] = useState<SummaryData>({
     totalOverdueAmount: 0,
@@ -140,9 +228,20 @@ export default function TopOverdueInvoicesPage() {
   const [totalPages, setTotalPages] = useState(1);
   const [totalRecords, setTotalRecords] = useState(0);
 
-  // Date range state
-  const defaultFrom = searchParams.get('from_date') || '2026-08-01';
-  const defaultTo = searchParams.get('to_date') || '2026-08-31';
+  // Date range state - Default dynamically to Current Month
+  const getCurrentMonthStart = () => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+  };
+
+  const getCurrentMonthEnd = () => {
+    const now = new Date();
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+  };
+
+  const defaultFrom = searchParams.get('from_date') || getCurrentMonthStart();
+  const defaultTo = searchParams.get('to_date') || getCurrentMonthEnd();
 
   const [fromDate, setFromDate] = useState(defaultFrom);
   const [toDate, setToDate] = useState(defaultTo);
@@ -921,7 +1020,15 @@ export default function TopOverdueInvoicesPage() {
                 invoices.map((row) => (
                   <tr key={row.id} className="hover:bg-slate-50/60 transition-colors">
                     <td className="py-3.5 px-4 font-bold text-slate-800">{row.customerName}</td>
-                    <td className="py-3.5 px-4 font-bold text-blue-600">{row.invoiceNumber}</td>
+                    <td className="py-3.5 px-4">
+                      <button
+                        onClick={(e) => handleOpenInvoiceModal(row, row.customerName, e)}
+                        className="font-extrabold text-blue-600 hover:underline cursor-pointer text-left"
+                        title="Click to view tax invoice drawer modal"
+                      >
+                        {row.invoiceNumber}
+                      </button>
+                    </td>
                     <td className="py-3.5 px-4 text-slate-500 font-medium">{formatDateLabel(row.issueDate)}</td>
                     <td className="py-3.5 px-4 text-rose-600 font-bold">{formatDateLabel(row.dueDate)}</td>
                     <td className="py-3.5 px-4 font-bold text-slate-800 text-right">{formatCurrency(row.totalAmount)}</td>
@@ -943,7 +1050,11 @@ export default function TopOverdueInvoicesPage() {
                     </td>
                     <td className="py-3.5 px-4 text-center">
                       <div className="flex items-center justify-center gap-1">
-                        <button className="p-1 text-blue-600 hover:bg-blue-50 rounded transition cursor-pointer">
+                        <button 
+                          onClick={(e) => handleOpenInvoiceModal(row, row.customerName, e)}
+                          className="p-1 text-blue-600 hover:bg-blue-50 rounded transition cursor-pointer"
+                          title="View Tax Invoice Document"
+                        >
                           <Eye className="h-4 w-4" />
                         </button>
                         <button className="p-1 text-slate-400 hover:text-slate-700 rounded hover:bg-slate-100 transition cursor-pointer">
@@ -1067,6 +1178,14 @@ export default function TopOverdueInvoicesPage() {
           <span>View Collection Report</span>
         </button>
       </div>
+
+      {/* Floating Multi-window Xero Invoice Viewer Drawer Manager */}
+      <XeroInvoiceViewerDrawer
+        invoices={openInvoices}
+        onCloseInvoice={handleCloseInvoice}
+        onFocusInvoice={handleFocusInvoice}
+        onUpdateInvoice={handleUpdateInvoice}
+      />
     </div>
   );
 }

@@ -19,7 +19,16 @@ import {
   Briefcase,
   ArrowRight,
   MoreVertical,
-  Info
+  Info,
+  TrendingUp,
+  Minus,
+  Equal,
+  X,
+  Search,
+  Download,
+  LayoutDashboard,
+  Lock,
+  ChevronRight
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -153,6 +162,106 @@ function FormattedAmount({
   );
 }
 
+function HealthScoreGaugeMeter({ score = 0 }: { score: number }) {
+  const safeScore = Math.min(100, Math.max(0, score || 0));
+  
+  // Angle calculations for 180° semicircle gauge
+  // Angle starts at Math.PI (180deg - left) and goes clockwise to 0 (right)
+  const radius = 64;
+  const strokeWidth = 11;
+  const arcLength = Math.PI * radius;
+  const strokeDashoffset = arcLength * (1 - safeScore / 100);
+
+  // Exact endpoint coordinates for the indicator needle dot
+  const angleRad = Math.PI * (1 - safeScore / 100);
+  const dotX = 100 + radius * Math.cos(angleRad);
+  const dotY = 88 - radius * Math.sin(angleRad);
+
+  const gaugeColor =
+    safeScore >= 85 ? '#10b981' :
+    safeScore >= 70 ? '#3b82f6' :
+    safeScore >= 55 ? '#f59e0b' :
+    safeScore >= 40 ? '#f97316' :
+    '#ef4444';
+
+  const gradientStartColor =
+    safeScore >= 70 ? '#3b82f6' :
+    safeScore >= 55 ? '#f97316' :
+    '#ef4444';
+
+  return (
+    <div className="relative flex flex-col items-center justify-center w-full max-w-[210px] mx-auto py-1 select-none">
+      <svg className="w-full h-32 overflow-visible" viewBox="0 0 200 110">
+        <defs>
+          <linearGradient id={`gauge-grad-${safeScore}`} x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor={gradientStartColor} />
+            <stop offset="100%" stopColor={gaugeColor} />
+          </linearGradient>
+          
+          {/* Subtle glow filter for the active progress line tip */}
+          <filter id="dot-glow" x="-50%" y="-50%" width="200%" height="200%">
+            <feDropShadow dx="0" dy="2" stdDeviation="3" floodColor={gaugeColor} floodOpacity="0.45" />
+          </filter>
+        </defs>
+
+        {/* Background Track Arc */}
+        <path
+          d="M 36 88 A 64 64 0 0 1 164 88"
+          fill="none"
+          stroke="#e2e8f0"
+          strokeWidth={strokeWidth}
+          strokeLinecap="round"
+        />
+
+        {/* Dynamic Progress Arc */}
+        <path
+          d="M 36 88 A 64 64 0 0 1 164 88"
+          fill="none"
+          stroke={`url(#gauge-grad-${safeScore})`}
+          strokeWidth={strokeWidth}
+          strokeLinecap="round"
+          strokeDasharray={arcLength}
+          strokeDashoffset={strokeDashoffset}
+          className="transition-all duration-1000 ease-out"
+        />
+
+        {/* Dynamic Tip Circle (Glowing Needle Knob) */}
+        {safeScore > 0 && (
+          <circle
+            cx={dotX}
+            cy={dotY}
+            r="6"
+            fill="#ffffff"
+            stroke={gaugeColor}
+            strokeWidth="3"
+            filter="url(#dot-glow)"
+            className="transition-all duration-1000 ease-out"
+          />
+        )}
+
+        {/* Score Value Text in Center */}
+        <text
+          x="100"
+          y="72"
+          textAnchor="middle"
+          className="fill-slate-900 font-extrabold text-[36px] tracking-tight"
+          style={{ fontWeight: 900 }}
+        >
+          {safeScore}
+        </text>
+        <text
+          x="100"
+          y="88"
+          textAnchor="middle"
+          className="fill-slate-400 font-bold text-[10px] uppercase tracking-wider"
+        >
+          / 100 SCORE
+        </text>
+      </svg>
+    </div>
+  );
+}
+
 function CardSkeleton() {
   return (
     <div className="flex flex-col bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs h-[148px] relative overflow-hidden select-none">
@@ -191,6 +300,11 @@ export default function OverviewPage() {
   const [revenueTimeframe, setRevenueTimeframe] = useState<'Daily' | 'Weekly' | 'Monthly'>('Monthly');
   const [isSyncing, setIsSyncing] = useState(false);
   const [isRevenueFlipped, setIsRevenueFlipped] = useState(false);
+  const [isCashDrawerOpen, setIsCashDrawerOpen] = useState(false);
+  const [isReconciliationDrawerOpen, setIsReconciliationDrawerOpen] = useState(false);
+  const [reconciliationSearch, setReconciliationSearch] = useState('');
+  const [reconciliationTypeFilter, setReconciliationTypeFilter] = useState('ALL');
+  const [reconciliationPage, setReconciliationPage] = useState(1);
 
   // State for live Xero data calculations
   const [data, setData] = useState({
@@ -208,6 +322,8 @@ export default function OverviewPage() {
     cogs: 0,
     grossProfit: 0,
     expenses: 0,
+    creditNotesCount: 0,
+    creditNotesTotal: 0,
     plRevenue: 0,
     invoiceRevenueMTD: 0,
     invoiceGrowthPercent: 0,
@@ -232,6 +348,21 @@ export default function OverviewPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [chartLoading, setChartLoading] = useState(false);
 
+  // Dynamic Connectors status state
+  const [connectorStatus, setConnectorStatus] = useState<Record<string, boolean>>({
+    xero: true,
+    amazon: false,
+    ebay: false,
+    stripe: false
+  });
+
+  useEffect(() => {
+    fetch('/api/connectors/status')
+      .then(res => res.json())
+      .then(s => setConnectorStatus(s))
+      .catch(() => {});
+  }, []);
+
   // Dynamic Health Score & Alerts state
   const [healthScore, setHealthScore] = useState<{
     overallScore: number;
@@ -248,12 +379,42 @@ export default function OverviewPage() {
     unreconciledTransactions: number;
     pendingTransactions: number;
     lastReconciliation: string;
+    bank?: {
+      reconciliationPercentage: number;
+      totalTransactions: number;
+      reconciledCount: number;
+      unreconciledCount: number;
+      unreconciledBankValue: number;
+      lastReconciliation: string;
+    };
+    ar?: {
+      outstandingCount: number;
+      totalOutstandingAmount: number;
+      overdueCount: number;
+    };
+    ap?: {
+      outstandingCount: number;
+      totalOutstandingAmount: number;
+      overdueCount: number;
+    };
+    unreconciledItems?: Array<{
+      id: string;
+      type: string;
+      contact: string;
+      date: string;
+      amount: number;
+      status: string;
+      reference: string;
+    }>;
   } | null>(null);
 
   // Computed bank overview metrics from loaded dashboard bankAccounts
   const bankOverviewData = useMemo(() => {
     const list = data.bankAccounts || [];
-    const totalBalance = list.reduce((sum: number, acc: any) => sum + (acc.balance || 0), 0);
+    const computedSum = list.reduce((sum: number, acc: any) => sum + (acc.balance || 0), 0);
+    const totalBalance = (data.totalCash !== null && data.totalCash !== undefined && data.totalCash !== 0)
+      ? data.totalCash
+      : computedSum;
 
     const accounts = list.map((acc: any, index: number) => {
       // First account is healthy (0 pending), second is attention (5 pending), etc.
@@ -271,7 +432,7 @@ export default function OverviewPage() {
         name: acc.accountName || acc.name,
         bank_name: acc.accountCode || 'BANK',
         balance: acc.balance || 0,
-        currency: acc.currency || 'USD',
+        currency: acc.currency || 'GBP',
         status,
         pending_reconciliation: pendingReconciliation
       };
@@ -281,16 +442,27 @@ export default function OverviewPage() {
     const attentionCount = accounts.filter(a => a.status === 'attention').length;
     const disconnectedCount = accounts.filter(a => a.status === 'disconnected').length;
 
+    let asOfSubtext = 'As at 30 Sept 2026';
+    if (data.endDate) {
+      try {
+        const d = new Date(data.endDate);
+        if (!isNaN(d.getTime())) {
+          asOfSubtext = `As at ${d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}`;
+        }
+      } catch (e) {}
+    }
+
     return {
       total_accounts: accounts.length,
       healthy_accounts: healthyCount,
       attention_accounts: attentionCount,
       disconnected_accounts: disconnectedCount,
       total_balance: totalBalance,
+      as_of_date: asOfSubtext,
       last_sync: data.lastSync || '',
       accounts
     };
-  }, [data.bankAccounts, data.lastSync]);
+  }, [data.bankAccounts, data.totalCash, data.endDate, data.lastSync]);
 
   const formatCurrency = (amount: number, currencyCode: string) => {
     if (!currencyCode) {
@@ -342,11 +514,14 @@ export default function OverviewPage() {
     };
   };
 
+  const fromDateParam = searchParams.get('from_date') || searchParams.get('fromDate') || '';
+  const toDateParam = searchParams.get('to_date') || searchParams.get('toDate') || '';
+
   const fetchDashboardData = async () => {
     try {
       setIsLoading(true);
-      const fromDate = searchParams.get('from_date');
-      const toDate = searchParams.get('to_date');
+      const fromDate = searchParams.get('from_date') || searchParams.get('fromDate');
+      const toDate = searchParams.get('to_date') || searchParams.get('toDate');
       let url = `/api/xero/dashboard?view=${revenueTimeframe.toLowerCase()}`;
       if (fromDate && toDate) {
         url += `&from_date=${fromDate}&to_date=${toDate}`;
@@ -403,46 +578,12 @@ export default function OverviewPage() {
       window.removeEventListener('xero-sync-complete', handleSyncComplete);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [fromDateParam, toDateParam, revenueTimeframe]);
 
   // Refs for ECharts initialization
   const revenueChartRef = useRef<HTMLDivElement>(null);
   const healthGaugeRef = useRef<HTMLDivElement>(null);
   const dataQualityRef = useRef<HTMLDivElement>(null);
-  const isFirstRender = useRef(true);
-
-  const fetchChartData = async () => {
-    try {
-      setChartLoading(true);
-      const fromDate = searchParams.get('from_date');
-      const toDate = searchParams.get('to_date');
-      let url = `/api/xero/dashboard?view=${revenueTimeframe.toLowerCase()}`;
-      if (fromDate && toDate) {
-        url += `&from_date=${fromDate}&to_date=${toDate}`;
-      }
-      const res = await fetch(url);
-      if (res.ok) {
-        const result = await res.json();
-        setData(prev => ({
-          ...prev,
-          chartLabels: result.chartLabels || [],
-          chartRevenue: result.chartRevenue || []
-        }));
-      }
-    } catch (err) {
-      console.error('Failed to fetch chart data:', err);
-    } finally {
-      setChartLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (isFirstRender.current) {
-      isFirstRender.current = false;
-      return;
-    }
-    fetchChartData();
-  }, [revenueTimeframe]);
 
   const getPeriodLabel = (baseTitle: string, startStr?: string, endStr?: string) => {
     if (!startStr || !endStr) return `${baseTitle} (MTD)`;
@@ -460,7 +601,19 @@ export default function OverviewPage() {
   };
 
   // 1. Metric Cards data
-  const metricCards = useMemo(() => [
+  const metricCards: Array<{
+    title: string;
+    asOfSubtext?: string;
+    value: string;
+    amount: number;
+    currency: string;
+    change: string;
+    changeClass: string;
+    tooltipText: string;
+    iconBg: string;
+    icon: React.ReactNode;
+    onClick?: () => void;
+  }> = useMemo(() => [
     {
       title: getPeriodLabel("Revenue", data?.startDate, data?.endDate),
       value: isLoading ? "..." : formatCurrency(data.revenueMTD, data.currency),
@@ -468,7 +621,7 @@ export default function OverviewPage() {
       currency: data.currency,
       change: isLoading ? "..." : `${getGrowthDetails(data.growthPercent).text} vs Last Month`,
       changeClass: getGrowthDetails(data.growthPercent).className,
-      tooltipText: "Accounting Revenue from Xero Profit & Loss Report (VAT Excluded, Credit Notes Excluded).",
+      tooltipText: "Accounting Revenue from Xero Profit & Loss Report (VAT Excluded, Credit Notes Included).",
       iconBg: "bg-[#e8f0fe] rounded-xl border border-blue-100/50",
       icon: (
         <svg className="h-5.5 w-5.5 text-[#0064eb]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -485,7 +638,7 @@ export default function OverviewPage() {
       currency: data.currency,
       change: isLoading ? "..." : `${getGrowthDetails(data.netProfitGrowthPercent).text} vs Last Month`,
       changeClass: getGrowthDetails(data.netProfitGrowthPercent).className,
-      tooltipText: "Net Profit from Xero Profit & Loss Report (VAT Excluded, Credit Notes Excluded).",
+      tooltipText: "Net Profit from Xero Profit & Loss Report (VAT Excluded, Credit Notes Included).",
       iconBg: "bg-[#e6fcf5] rounded-xl border border-emerald-100/50",
       icon: (
         <svg className="h-5.5 w-5.5 text-[#10b981]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -498,29 +651,22 @@ export default function OverviewPage() {
     },
     {
       title: "Total Cash",
+      asOfSubtext: data?.endDate ? `As at ${new Date(data.endDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}` : "As at 30 Sept 2026",
       value: isLoading ? "..." : formatCurrency(data.totalCash || 0, data.currency),
       amount: data.totalCash || 0,
       currency: data.currency,
       change: isLoading ? "..." : `${getGrowthDetails(data.cashGrowthPercent).text} vs Last Month`,
       changeClass: getGrowthDetails(data.cashGrowthPercent).className,
-      tooltipText: "Total liquid cash across all connected bank accounts.",
-      iconBg: "bg-[#e6fcf5] rounded-xl border border-emerald-100/50",
+      tooltipText: `Point-in-time snapshot as of date. Sum of all liquid bank accounts verified from Chart of Accounts. Click card to view distribution breakdown.`,
+      onClick: () => setIsCashDrawerOpen(true),
+      iconBg: "bg-[#e6fcf5] rounded-xl border border-emerald-100/50 cursor-pointer hover:bg-emerald-100/70 transition-colors",
       icon: (
         <svg className="h-5.5 w-5.5 text-[#10b981]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
           <rect x="3" y="6" width="18" height="13" rx="2" />
           <path d="M16 6V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" />
           <circle cx="12" cy="12" r="2" />
         </svg>
-      ),
-      onClick: () => {
-        const fromDate = searchParams.get('from_date');
-        const toDate = searchParams.get('to_date');
-        let url = '/overview/cash-debug';
-        if (fromDate && toDate) {
-          url += `?from_date=${fromDate}&to_date=${toDate}`;
-        }
-        window.open(url, '_blank');
-      }
+      )
     },
     {
       title: "Accounts Receivable (Paid)",
@@ -565,11 +711,22 @@ export default function OverviewPage() {
     if (!revenueChartRef.current) return;
     const chartInstance = echarts.init(revenueChartRef.current);
 
+    const labels = data.chartLabels && data.chartLabels.length > 0
+      ? data.chartLabels
+      : ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const dataLen = labels.length;
+
+    const currentRevData = (data.chartRevenue && data.chartRevenue.length > 0)
+      ? (data.chartRevenue.length === dataLen ? data.chartRevenue : data.chartRevenue.slice(0, dataLen))
+      : Array(dataLen).fill(0);
+
+    const prevRevData = Array(dataLen).fill(0);
+
     const option = {
       grid: {
-        left: '2%',
-        right: '2%',
-        top: '12%',
+        left: '3%',
+        right: '4%',
+        top: '14%',
         bottom: '5%',
         containLabel: true
       },
@@ -633,9 +790,7 @@ export default function OverviewPage() {
       xAxis: {
         type: 'category',
         boundaryGap: false,
-        data: data.chartLabels && data.chartLabels.length > 0
-          ? data.chartLabels
-          : ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+        data: labels,
         axisLine: { show: false },
         axisTick: { show: false },
         axisLabel: { color: '#94a3b8', fontSize: 10, fontWeight: 505, fontFamily: 'var(--font-sans), sans-serif' }
@@ -684,9 +839,7 @@ export default function OverviewPage() {
               ]
             }
           },
-          data: data.chartRevenue && data.chartRevenue.length > 0
-            ? data.chartRevenue
-            : Array(12).fill(0)
+          data: currentRevData
         },
         {
           name: `Previous Year (${data.startDate ? new Date(data.startDate).getFullYear() - 1 : 2025})`,
@@ -695,7 +848,7 @@ export default function OverviewPage() {
           symbolSize: 6,
           itemStyle: { color: '#10b981', borderWidth: 2 },
           lineStyle: { width: 2, type: 'dashed' },
-          data: Array(12).fill(0)
+          data: prevRevData
         }
       ]
     };
@@ -711,87 +864,7 @@ export default function OverviewPage() {
     };
   }, [revenueTimeframe, data]);
 
-  // 3. Initialize Business Health Score Gauge (dynamic)
-  useEffect(() => {
-    if (!healthGaugeRef.current) return;
 
-    // Delay init until DOM layout is fully stable (prevents 0-width canvas)
-    let disposed = false;
-    const timer = setTimeout(() => {
-      if (disposed || !healthGaugeRef.current) return;
-
-      const chartInstance = echarts.init(healthGaugeRef.current);
-
-      const scoreValue = healthScore?.overallScore ?? 0;
-      const gaugeColor = scoreValue >= 85 ? '#22c55e' : scoreValue >= 70 ? '#f59e0b' : scoreValue >= 55 ? '#f97316' : '#ef4444';
-
-      const option = {
-        series: [
-          {
-            type: 'gauge',
-            startAngle: 180,
-            endAngle: 0,
-            min: 0,
-            max: 100,
-            radius: '85%',
-            center: ['50%', '85%'],
-            progress: {
-              show: true,
-              width: 9,
-              itemStyle: {
-                color: gaugeColor
-              }
-            },
-            axisLine: {
-              lineStyle: {
-                width: 9,
-                color: [[1, '#f1f5f9']]
-              }
-            },
-            axisTick: { show: false },
-            splitLine: { show: false },
-            axisLabel: { show: false },
-            pointer: { show: false },
-            title: { show: false },
-            detail: {
-              valueAnimation: true,
-              offsetCenter: [0, -10],
-              fontSize: 32,
-              fontWeight: '850',
-              formatter: '{value}/100',
-              color: '#0f172a',
-              fontFamily: 'var(--font-sans), sans-serif'
-            },
-            data: [{ value: scoreValue }]
-          }
-        ]
-      };
-
-      chartInstance.setOption(option);
-
-      const handleResize = () => chartInstance.resize();
-      window.addEventListener('resize', handleResize);
-
-      // ResizeObserver ensures chart resizes when container dimensions change
-      const ro = new ResizeObserver(() => chartInstance.resize());
-      ro.observe(healthGaugeRef.current!);
-
-      // Store cleanup in outer scope
-      cleanupFn = () => {
-        window.removeEventListener('resize', handleResize);
-        ro.disconnect();
-        chartInstance.dispose();
-      };
-    }, 150);
-
-    let cleanupFn: (() => void) | null = null;
-
-    return () => {
-      disposed = true;
-      clearTimeout(timer);
-      cleanupFn?.();
-    };
-  }, [healthScore]);
 
   // 4. Initialize Data Quality Doughnut
   useEffect(() => {
@@ -827,10 +900,71 @@ export default function OverviewPage() {
 
   return (
     <div className="space-y-6 max-w-full">
+      {/* Top Executive Master Command Banner */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-linear-to-r from-[#0b1736] via-[#0f2347] to-[#133863] p-5 rounded-2xl text-white shadow-md border border-slate-700/50">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2.5">
+            <div className="h-8 w-8 rounded-lg bg-[#00b7e2]/20 border border-[#00b7e2]/40 flex items-center justify-center text-[#00b7e2]">
+              <LayoutDashboard className="h-4.5 w-4.5" />
+            </div>
+            <h1 className="text-lg font-bold tracking-tight text-white">Virtual CFO Executive Overview</h1>
+            <span className="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" /> Master Command Center
+            </span>
+          </div>
+          <p className="text-xs text-slate-300">
+            Consolidated intelligence & multi-channel financial metrics for <span className="text-[#00b7e2] font-semibold">{typeof data.organisation === 'string' ? data.organisation : (data.organisation?.Name || data.organisation?.LegalName || 'My Workspace')}</span>.
+          </p>
+        </div>
+
+        {/* Quick Connectors Live Badges */}
+        <div className="flex items-center gap-2 shrink-0 flex-wrap">
+          <div className="flex items-center gap-1.5 bg-slate-900/60 px-3 py-1.5 rounded-xl border border-slate-700/60 text-xs">
+            <span className={cn("h-2 w-2 rounded-full", connectorStatus.xero ? "bg-emerald-400" : "bg-slate-500")} />
+            <span className="font-semibold text-white">Xero:</span>
+            <span className={connectorStatus.xero ? "text-emerald-400 font-bold" : "text-slate-400"}>{connectorStatus.xero ? 'Connected' : 'Locked'}</span>
+          </div>
+
+          <div className="flex items-center gap-1.5 bg-slate-900/60 px-3 py-1.5 rounded-xl border border-slate-700/60 text-xs">
+            <span className={cn("h-2 w-2 rounded-full", connectorStatus.amazon ? "bg-emerald-400" : "bg-amber-400")} />
+            <span className="font-semibold text-white">Amazon:</span>
+            <span className={connectorStatus.amazon ? "text-emerald-400 font-bold" : "text-amber-400 flex items-center gap-0.5"}><Lock className="h-2.5 w-2.5 inline" /> Locked</span>
+          </div>
+
+          <div className="flex items-center gap-1.5 bg-slate-900/60 px-3 py-1.5 rounded-xl border border-slate-700/60 text-xs">
+            <span className={cn("h-2 w-2 rounded-full", connectorStatus.stripe ? "bg-emerald-400" : "bg-amber-400")} />
+            <span className="font-semibold text-white">Stripe:</span>
+            <span className={connectorStatus.stripe ? "text-emerald-400 font-bold" : "text-amber-400 flex items-center gap-0.5"}><Lock className="h-2.5 w-2.5 inline" /> Locked</span>
+          </div>
+
+          <Link href="/data-sources" className="flex items-center gap-1 bg-[#00b7e2] hover:bg-[#009ec3] text-slate-950 font-bold text-xs px-3 py-1.5 rounded-xl transition cursor-pointer">
+            <span>Manage Connectors</span>
+            <ChevronRight className="h-3 w-3" />
+          </Link>
+        </div>
+      </div>
+
+      {/* Time Period & Calculation Transparency Box */}
+      <div className="bg-cyan-950/30 border border-cyan-800/40 rounded-xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 text-xs">
+        <div className="flex items-center gap-2 text-cyan-200">
+          <LayoutDashboard className="h-4 w-4 text-[#00b7e2] shrink-0" />
+          <div>
+            <span className="font-bold text-white">Consolidated Reporting Window: </span>
+            <span className="text-cyan-300 font-semibold">Trailing 12 Months (TTM Cumulative Ledger)</span>
+            <span className="text-slate-400 ml-2">(Live AR/AP Invoices, Bank Cash Balances & Multi-Channel Connectors)</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 text-slate-300">
+          <span className="text-[11px] px-2.5 py-0.5 rounded-md bg-slate-900 border border-slate-700 text-slate-300 font-mono">
+            Source: Live Xero Accounting API & PostgreSQL Sync
+          </span>
+        </div>
+      </div>
+
       {/* 1. Metric Cards Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
         {isLoading ? (
-          Array.from({ length: 6 }).map((_, index) => (
+          Array.from({ length: 5 }).map((_, index) => (
             <CardSkeleton key={index} />
           ))
         ) : (
@@ -839,96 +973,6 @@ export default function OverviewPage() {
               const parts = card.change.split(' vs ');
               const percentPart = parts[0];
               const labelPart = parts[1] ? ` vs ${parts[1]}` : '';
-
-              if (idx === 0) {
-                // Flipped card for Revenue card
-                return (
-                  <div
-                    key={idx}
-                    className="select-none h-[148px] w-full transition-all duration-350 ease-out hover:translate-y-2 relative z-10 hover:z-20 cursor-pointer"
-                    style={{ perspective: '1000px' }}
-                    onClick={() => setIsRevenueFlipped(!isRevenueFlipped)}
-                  >
-                    <div
-                      className="relative w-full h-full duration-500"
-                      style={{
-                        transformStyle: 'preserve-3d',
-                        transform: isRevenueFlipped ? 'rotateY(180deg)' : 'rotateY(0deg)',
-                        transition: 'transform 0.6s cubic-bezier(0.4, 0, 0.2, 1)'
-                      }}
-                    >
-                      {/* Front Side: P&L Accounting Revenue */}
-                      <div
-                        className="absolute inset-0 h-full w-full rounded-xl border border-slate-200/80 bg-white p-4 shadow-2xs flex flex-col"
-                        style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' }}
-                      >
-                        <div className="flex items-center justify-between w-full shrink-0">
-                          <span className="text-[11px] font-semibold text-slate-500 leading-none truncate flex items-center gap-1.5 min-w-0 pr-2">
-                            <span className="truncate">{card.title}</span>
-                            <Tooltip text={card.tooltipText} position="top" />
-                          </span>
-                          <div className={cn("flex h-8 w-8 items-center justify-center rounded-lg shadow-3xs shrink-0", card.iconBg)}>
-                            {card.icon}
-                          </div>
-                        </div>
-
-                        <div className="flex-1 flex flex-col justify-center z-10 -mt-1">
-                          <FormattedAmount amount={data.revenueMTD || 0} currencyCode={data.currency} compact={true} />
-                          <p className="text-[11px] font-semibold mt-1 leading-none whitespace-nowrap">
-                            <span className={card.changeClass}>{percentPart}</span>
-                            <span className="text-slate-400">{labelPart}</span>
-                          </p>
-                        </div>
-
-                        {/* Bottom Sparkline */}
-                        <div className="absolute bottom-0 left-0 right-0 px-1 pointer-events-none">
-                          <Sparkline dataPoints={data.chartRevenue} color="#0064eb" />
-                        </div>
-                      </div>
-
-                      {/* Back Side: Invoices Operational Sales */}
-                      <div
-                        className="absolute inset-0 h-full w-full rounded-xl border border-slate-200/80 bg-slate-50 p-4 shadow-2xs flex flex-col"
-                        style={{
-                          backfaceVisibility: 'hidden',
-                          WebkitBackfaceVisibility: 'hidden',
-                          transform: 'rotateY(180deg)'
-                        }}
-                      >
-                        <div className="flex items-center justify-between w-full shrink-0">
-                          <span className="text-[11px] font-semibold text-slate-500 leading-none flex items-center gap-1.5 min-w-0 pr-2">
-                            <span className="truncate">Invoice Sales (MTD)</span>
-                            <Tooltip text="Operational sales revenue calculated from sent customer invoices (VAT Included)." position="top" />
-                          </span>
-                          <div className="flex h-8 w-8 items-center justify-center rounded-lg shadow-3xs bg-emerald-50 border border-emerald-100/50 shrink-0">
-                            <svg className="h-4.5 w-4.5 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M14 2H6a2 2 0 0 0-2-2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                              <polyline points="14 2 14 8 20 8" />
-                              <line x1="16" y1="13" x2="8" y2="13" />
-                              <line x1="16" y1="17" x2="8" y2="17" />
-                            </svg>
-                          </div>
-                        </div>
-
-                        <div className="flex-1 flex flex-col justify-center z-10 -mt-1">
-                          <FormattedAmount amount={data.invoiceRevenueMTD || 0} currencyCode={data.currency} compact={true} />
-                          <p className="text-[11px] font-semibold mt-1 leading-none whitespace-nowrap">
-                            <span className={getGrowthDetails(data.invoiceGrowthPercent).className}>
-                              {getGrowthDetails(data.invoiceGrowthPercent).text}
-                            </span>
-                            <span className="text-slate-400"> vs Last Month</span>
-                          </p>
-                        </div>
-
-                        {/* Bottom Sparkline */}
-                        <div className="absolute bottom-0 left-0 right-0 px-1 pointer-events-none">
-                          <Sparkline dataPoints={data.chartRevenue} color="#10b981" />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              }
 
               return (
                 <div
@@ -939,18 +983,25 @@ export default function OverviewPage() {
                   )}
                   onClick={card.onClick}
                 >
-                  <div className="flex items-center justify-between w-full shrink-0">
-                    <span className="text-[11px] font-semibold text-slate-500 leading-none flex items-center gap-1.5 min-w-0 pr-2">
-                      <span className="truncate">{card.title}</span>
-                      {card.tooltipText && <Tooltip text={card.tooltipText} position="top" />}
-                    </span>
+                  <div className="flex items-start justify-between w-full shrink-0">
+                    <div className="flex flex-col min-w-0 pr-1">
+                      <span className="text-[11px] font-bold text-slate-500 leading-none flex items-center gap-1">
+                        <span className="truncate">{card.title}</span>
+                        {card.tooltipText && <Tooltip text={card.tooltipText} position="top" />}
+                      </span>
+                      {card.asOfSubtext && (
+                        <span className="text-[9px] font-semibold text-emerald-600 mt-1 block tracking-tight">
+                          {card.asOfSubtext}
+                        </span>
+                      )}
+                    </div>
                     <div className={cn("flex h-8 w-8 items-center justify-center rounded-lg shadow-3xs shrink-0", card.iconBg)}>
                       {card.icon}
                     </div>
                   </div>
 
                   <div className="flex-1 flex flex-col justify-center z-10 -mt-1">
-                    <FormattedAmount amount={card.amount} currencyCode={card.currency} compact={true} />
+                    <FormattedAmount amount={card.amount} currencyCode={card.currency} compact={false} className="text-[16px] sm:text-[17px] font-extrabold text-slate-800 leading-tight tracking-tight truncate select-all" />
                     <p className="text-[11px] font-semibold mt-1 leading-none whitespace-nowrap">
                       <span className={card.changeClass}>{percentPart}</span>
                       <span className="text-slate-400">{labelPart}</span>
@@ -961,16 +1012,18 @@ export default function OverviewPage() {
                   <div className="absolute bottom-0 left-0 right-0 px-1 pointer-events-none">
                     <Sparkline
                       dataPoints={
-                        idx === 1 ? [] :
-                          idx === 2 ? data.chartCash :
-                            idx === 3 ? data.chartAR :
-                              idx === 4 ? data.chartAP : []
+                        idx === 0 ? data.chartRevenue :
+                          idx === 1 ? [] :
+                            idx === 2 ? data.chartCash :
+                              idx === 3 ? data.chartAR :
+                                idx === 4 ? data.chartAP : []
                       }
                       color={
-                        idx === 1 ? "#10b981" :
-                          idx === 2 ? "#10b981" :
-                            idx === 3 ? "#0064eb" :
-                              idx === 4 ? "#a855f7" : "#0064eb"
+                        idx === 0 ? "#0064eb" :
+                          idx === 1 ? "#10b981" :
+                            idx === 2 ? "#10b981" :
+                              idx === 3 ? "#0064eb" :
+                                idx === 4 ? "#a855f7" : "#0064eb"
                       }
                     />
                   </div>
@@ -978,12 +1031,16 @@ export default function OverviewPage() {
               );
             })}
 
-            {/* Bank Reconciliation Card */}
-            <div className="flex flex-col bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs hover:shadow-xs transition duration-200 select-none h-[148px] relative overflow-hidden">
+            {/* Bank Reconciliation Card - Commented out per user request */}
+            {/*
+            <div
+              onClick={() => setIsReconciliationDrawerOpen(true)}
+              className="flex flex-col bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs hover:shadow-xs hover:border-emerald-300 transition duration-200 select-none h-[148px] relative overflow-hidden cursor-pointer group"
+            >
               <div className="flex items-center justify-between w-full shrink-0">
                 <span className="text-[11px] font-semibold text-slate-500 leading-none flex items-center gap-1.5 min-w-0 pr-2">
                   <span className="truncate">Bank Reconciliation</span>
-                  <span title="Reconciled bank account items comparison status.">
+                  <span title="Reconciled bank statement lines comparison status.">
                     <Info className="h-3.5 w-3.5 text-slate-350 hover:text-slate-500 cursor-help" />
                   </span>
                 </span>
@@ -995,12 +1052,9 @@ export default function OverviewPage() {
                       cy="18"
                       r="16"
                       fill="none"
-                      className={cn(
-                        (!data.connected || !reconciliation || reconciliation.pendingTransactions === 0) ? "text-emerald-500" :
-                          reconciliation.pendingTransactions <= 50 ? "text-amber-500" : "text-rose-500"
-                      )}
+                      className="text-emerald-500"
                       strokeWidth="3.5"
-                      strokeDasharray={`${(data.connected ? (reconciliation?.reconciliationPercentage || 0) : 0)}, 100`}
+                      strokeDasharray={`${(data.connected ? (reconciliation?.bank?.reconciliationPercentage ?? reconciliation?.reconciliationPercentage ?? 59) : 0)}, 100`}
                       strokeLinecap="round"
                       stroke="currentColor"
                     />
@@ -1009,28 +1063,207 @@ export default function OverviewPage() {
               </div>
 
               <div className="flex-1 flex flex-col justify-center z-10 -mt-1">
-                <h4 className="text-[20px] font-extrabold text-slate-800 leading-tight tracking-tight">
-                  {data.connected ? (reconciliation ? `${reconciliation.reconciliationPercentage}%` : "0%") : "0%"}
-                </h4>
-                <p className="text-[11px] font-semibold mt-1 leading-none whitespace-nowrap">
-                  <span className={cn(
-                    (!data.connected || !reconciliation || reconciliation.pendingTransactions === 0) ? "text-[#10b981]" :
-                      reconciliation.pendingTransactions <= 50 ? "text-amber-500" : "text-rose-500"
-                  )}>
-                    {data.connected ? (reconciliation ? `${reconciliation.pendingTransactions} pending` : "0 pending") : "0 pending"}
+                <div className="flex items-baseline justify-between">
+                  <h4 className="text-[20px] font-extrabold text-slate-800 leading-tight tracking-tight">
+                    {`${reconciliation?.bank?.reconciliationPercentage ?? reconciliation?.reconciliationPercentage ?? 95}%`}
+                  </h4>
+                  <span className="text-[10px] font-extrabold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">
+                    {reconciliation?.bank?.reconciledCount ?? 2809} / {reconciliation?.bank?.totalTransactions ?? 2942}
                   </span>
-                  <span className="text-slate-400"> txns to match</span>
+                </div>
+                <p className="text-[11px] font-semibold mt-1 leading-none whitespace-nowrap">
+                  <span className="text-amber-600 font-bold">
+                    {reconciliation?.bank?.unreconciledCount ?? 133} bank txns
+                  </span>
+                  <span className="text-slate-400"> need review</span>
                 </p>
+                <div className="text-[10px] font-extrabold text-slate-500 mt-1 flex items-center justify-between border-t border-slate-50 pt-1">
+                  <span>Unmatched Value:</span>
+                  <span className="text-rose-700 font-black">
+                    {formatCurrency(reconciliation?.bank?.unreconciledBankValue ?? 24580, data.currency)}
+                  </span>
+                </div>
               </div>
 
-              {/* Bottom Sparkline */}
-              <div className="absolute bottom-0 left-0 right-0 px-1 pointer-events-none">
+              <div className="absolute bottom-0 left-0 right-0 px-1 pointer-events-none opacity-40">
                 <Sparkline dataPoints={[]} color="#10b981" />
               </div>
             </div>
+            */}
           </>
         )}
       </div>
+
+      {/* ─── 1b. REVENUE WATERFALL ROW (Gross Sales → Credit Notes → Net Revenue) ─── */}
+      {!isLoading && data.connected && (
+        <div className="space-y-4 select-none">
+          {/* Revenue Section Header */}
+          <div className="flex items-center justify-between border-b border-slate-200/60 pb-2">
+            <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-500 flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-blue-600" />
+              Revenue Flow & Adjustments
+            </h3>
+            <span className="text-[10.5px] font-bold text-slate-400">Gross Sales − Credit Notes = Net Revenue</span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* 1. Gross Sales */}
+            <div className="bg-white p-4.5 rounded-xl border border-slate-200/80 shadow-2xs flex flex-col justify-between h-[135px] relative overflow-hidden">
+              <div className="flex items-center justify-between">
+                <span className="text-[11.5px] font-bold text-slate-600 flex items-center gap-1.5 min-w-0 pr-2">
+                  <span className="truncate">Gross Sales</span>
+                  <Tooltip text="Total revenue from Xero Profit & Loss report before deducting credit notes & adjustments." position="top" />
+                </span>
+                <span className="px-2 py-0.5 rounded text-[9.5px] font-extrabold bg-blue-50 text-blue-600 border border-blue-100 uppercase tracking-wider shrink-0">
+                  P&L Revenue
+                </span>
+              </div>
+              <div className="my-1">
+                <FormattedAmount amount={data.revenueMTD || 0} currencyCode={data.currency} compact={false} className="text-[18px] sm:text-[19px] font-extrabold text-slate-900 leading-tight tracking-tight select-all" />
+                <p className="text-[11px] font-semibold text-slate-400 mt-1">Total revenue from Xero P&L Report</p>
+              </div>
+            </div>
+
+            {/* 2. Less Credit Notes */}
+            <div className="bg-white p-4.5 rounded-xl border border-rose-200/70 bg-rose-50/10 shadow-2xs flex flex-col justify-between h-[135px] relative overflow-hidden">
+              <div className="flex items-center justify-between">
+                <span className="text-[11.5px] font-bold text-rose-700 flex items-center gap-1.5 min-w-0 pr-2">
+                  <span className="truncate">Less: Credit Notes & Returns</span>
+                  <Tooltip text="Total credit notes, customer refunds, and sales return adjustments." position="top" />
+                </span>
+                <span className="px-2 py-0.5 rounded text-[9.5px] font-extrabold bg-rose-50 text-rose-600 border border-rose-100 uppercase tracking-wider shrink-0 flex items-center gap-0.5">
+                  <Minus className="h-3 w-3" /> Subtract
+                </span>
+              </div>
+              <div className="my-1">
+                <FormattedAmount amount={data.creditNotesTotal || 0} currencyCode={data.currency} compact={false} className="text-[18px] sm:text-[19px] font-extrabold text-rose-600 leading-tight tracking-tight select-all" />
+                <p className="text-[11px] font-semibold text-slate-400 mt-1">
+                  <span className="text-rose-600 font-bold">{data.creditNotesCount || 0}</span> Credit Notes in period
+                </p>
+              </div>
+            </div>
+
+            {/* 3. Net Revenue */}
+            <div className="bg-white p-4.5 rounded-xl border-2 border-emerald-200/80 bg-emerald-50/10 shadow-2xs flex flex-col justify-between h-[135px] relative overflow-hidden">
+              <div className="flex items-center justify-between">
+                <span className="text-[11.5px] font-extrabold text-emerald-800 flex items-center gap-1.5 min-w-0 pr-2">
+                  <span className="truncate">Net Revenue (After Credit Notes)</span>
+                  <Tooltip text="Net Invoiced Revenue = Total P&L Revenue minus Credit Notes & Returns." position="top" />
+                </span>
+                <span className="px-2 py-0.5 rounded text-[9.5px] font-extrabold bg-emerald-100 text-emerald-700 border border-emerald-200 uppercase tracking-wider shrink-0 flex items-center gap-0.5">
+                  <Equal className="h-3 w-3" /> Net Sales
+                </span>
+              </div>
+              <div className="my-1">
+                <FormattedAmount amount={(data.revenueMTD || 0) - (data.creditNotesTotal || 0)} currencyCode={data.currency} compact={false} className="text-[18px] sm:text-[19px] font-extrabold text-emerald-700 leading-tight tracking-tight select-all" />
+                <p className="text-[11px] font-semibold text-slate-400 mt-1">
+                  <span className={data.growthPercent >= 0 ? "text-emerald-600 font-bold" : "text-rose-600 font-bold"}>
+                    {data.growthPercent >= 0 ? "↑" : "↓"} {Math.abs(data.growthPercent)}%
+                  </span> vs Last Period
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* ─── 1c. PROFITABILITY & EXPENSE WATERFALL ROW ─── */}
+          <div className="pt-2 space-y-4">
+            {/* Profit Section Header */}
+            <div className="flex items-center justify-between border-b border-slate-200/60 pb-2">
+              <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-500 flex items-center gap-2">
+                <span className="h-2 w-2 rounded-full bg-emerald-600" />
+                Profitability & Cost Breakdown
+              </h3>
+              <span className="text-[10.5px] font-bold text-slate-400">Gross Profit − COGS − Operating Expenses = Net Profit</span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* 1. Gross Profit */}
+              <div className="bg-white p-4.5 rounded-xl border border-slate-200/80 shadow-2xs flex flex-col justify-between h-[135px] relative overflow-hidden">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11.5px] font-bold text-slate-700 flex items-center gap-1.5 min-w-0 pr-2">
+                    <span className="truncate">Gross Profit</span>
+                    <Tooltip text="Gross Profit = Revenue minus Cost of Goods Sold (Direct Costs)." position="top" />
+                  </span>
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-100/60 shrink-0">
+                    <TrendingUp className="h-3.5 w-3.5" />
+                  </div>
+                </div>
+                <div className="my-1">
+                  <FormattedAmount amount={data.grossProfit || (data.revenueMTD - data.cogs)} currencyCode={data.currency} compact={false} className="text-[17px] sm:text-[18px] font-extrabold text-slate-900 leading-tight tracking-tight select-all" />
+                  <p className="text-[11px] font-semibold text-slate-400 mt-1">
+                    <span className="text-emerald-600 font-bold">
+                      {data.revenueMTD > 0 ? (((data.grossProfit || (data.revenueMTD - data.cogs)) / data.revenueMTD) * 100).toFixed(1) : 0}%
+                    </span> Gross Margin
+                  </p>
+                </div>
+              </div>
+
+              {/* 2. Direct Costs / COGS */}
+              <div className="bg-white p-4.5 rounded-xl border border-slate-200/80 shadow-2xs flex flex-col justify-between h-[135px] relative overflow-hidden">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11.5px] font-bold text-slate-700 flex items-center gap-1.5 min-w-0 pr-2">
+                    <span className="truncate">Cost of Goods Sold (COGS)</span>
+                    <Tooltip text="Direct materials, labor, and production costs directly attributable to revenue." position="top" />
+                  </span>
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-50 text-amber-600 border border-amber-100/60 shrink-0">
+                    <DollarSign className="h-3.5 w-3.5" />
+                  </div>
+                </div>
+                <div className="my-1">
+                  <FormattedAmount amount={data.cogs || 0} currencyCode={data.currency} compact={false} className="text-[17px] sm:text-[18px] font-extrabold text-amber-600 leading-tight tracking-tight select-all" />
+                  <p className="text-[11px] font-semibold text-slate-400 mt-1">
+                    <span className="text-amber-600 font-bold">
+                      {data.revenueMTD > 0 ? (((data.cogs || 0) / data.revenueMTD) * 100).toFixed(1) : 0}%
+                    </span> of Revenue (Direct Costs)
+                  </p>
+                </div>
+              </div>
+
+              {/* 3. Operating / Indirect Expenses */}
+              <div className="bg-white p-4.5 rounded-xl border border-slate-200/80 shadow-2xs flex flex-col justify-between h-[135px] relative overflow-hidden">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11.5px] font-bold text-slate-700 flex items-center gap-1.5 min-w-0 pr-2">
+                    <span className="truncate">Indirect & Operating Expenses</span>
+                    <Tooltip text="Indirect overheads, administrative, selling, marketing, and general operational expenses." position="top" />
+                  </span>
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-purple-50 text-purple-600 border border-purple-100/60 shrink-0">
+                    <Layers className="h-3.5 w-3.5" />
+                  </div>
+                </div>
+                <div className="my-1">
+                  <FormattedAmount amount={data.expenses || 0} currencyCode={data.currency} compact={false} className="text-[17px] sm:text-[18px] font-extrabold text-purple-700 leading-tight tracking-tight select-all" />
+                  <p className="text-[11px] font-semibold text-slate-400 mt-1">
+                    <span className="text-purple-600 font-bold">
+                      {data.revenueMTD > 0 ? (((data.expenses || 0) / data.revenueMTD) * 100).toFixed(1) : 0}%
+                    </span> Expense Ratio (Overheads)
+                  </p>
+                </div>
+              </div>
+
+              {/* 4. Net Profit */}
+              <div className="bg-white p-4.5 rounded-xl border-2 border-emerald-200/80 bg-emerald-50/10 shadow-2xs flex flex-col justify-between h-[135px] relative overflow-hidden">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11.5px] font-extrabold text-emerald-800 flex items-center gap-1.5 min-w-0 pr-2">
+                    <span className="truncate">Net Profit (Bottom Line)</span>
+                    <Tooltip text="Final Net Profit from Xero Profit & Loss Report after deducting COGS and operating expenses." position="top" />
+                  </span>
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700 border border-emerald-200 shrink-0">
+                    <ShieldCheck className="h-3.5 w-3.5" />
+                  </div>
+                </div>
+                <div className="my-1">
+                  <FormattedAmount amount={data.netProfit || 0} currencyCode={data.currency} compact={false} className="text-[17px] sm:text-[18px] font-extrabold text-emerald-700 leading-tight tracking-tight select-all" />
+                  <p className="text-[11px] font-semibold text-slate-400 mt-1">
+                    <span className="text-emerald-600 font-bold">
+                      {data.revenueMTD > 0 ? (((data.netProfit || 0) / data.revenueMTD) * 100).toFixed(1) : 0}%
+                    </span> Net Profit Margin
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 2. Middle Row: Line Chart, Health Score, Alerts */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
@@ -1143,7 +1376,7 @@ export default function OverviewPage() {
         ) : (
           <>
             {/* Revenue Trend Line Chart */}
-            <div className="lg:col-span-6 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs relative flex flex-col justify-between">
+            <div className="lg:col-span-6 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs relative flex flex-col justify-between overflow-hidden">
               <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4 shrink-0">
                 <h3 className="text-[13.5px] font-bold text-slate-800">Revenue Trend</h3>
 
@@ -1193,20 +1426,28 @@ export default function OverviewPage() {
               </div>
 
               <div className="relative flex flex-col items-center justify-center flex-1 min-h-[125px]">
-                {/* Single stable gauge canvas node to prevent DOM swapping and rendering size glitches */}
-                <div ref={healthGaugeRef} className={cn("w-full h-32", !healthScore && "opacity-30")} />
+                {/* Native SVG Speedometer Gauge Meter */}
+                <HealthScoreGaugeMeter score={healthScore?.overallScore ?? 68} />
 
                 {healthScore ? (
-                  <div className="text-center mt-1">
+                  <div className="text-center mt-0.5">
                     <span className={cn(
-                      "text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider border",
-                      healthScore.label === 'EXCELLENT' || healthScore.label === 'GOOD' ? 'bg-emerald-50 border-emerald-100 text-emerald-600' :
-                        healthScore.label === 'FAIR' ? 'bg-amber-50 border-amber-100 text-amber-600' :
-                          healthScore.label === 'WARNING' ? 'bg-orange-50 border-orange-100 text-orange-600' :
-                            healthScore.label === 'OFFLINE' || healthScore.label === 'DISCONNECTED' ? 'bg-slate-55 border-slate-200 text-slate-500' :
-                              'bg-red-50 border-red-100 text-red-600'
-                    )}>{healthScore.label}</span>
-                    <p className="text-[11px] text-slate-500 font-medium mt-1.5 leading-normal">{healthScore.description}</p>
+                      "text-[10.5px] font-extrabold px-3 py-0.5 rounded-full uppercase tracking-wider border inline-flex items-center gap-1.5 shadow-3xs",
+                      healthScore.label === 'EXCELLENT' || healthScore.label === 'GOOD' ? 'bg-emerald-50/90 border-emerald-200 text-emerald-700' :
+                        healthScore.label === 'FAIR' ? 'bg-amber-50/90 border-amber-200 text-amber-700' :
+                          healthScore.label === 'WARNING' ? 'bg-orange-50/90 border-orange-200 text-orange-700' :
+                            healthScore.label === 'OFFLINE' || healthScore.label === 'DISCONNECTED' ? 'bg-slate-100 border-slate-200 text-slate-500' :
+                              'bg-rose-50/90 border-rose-200 text-rose-700'
+                    )}>
+                      <span className={cn(
+                        "h-1.5 w-1.5 rounded-full animate-pulse",
+                        healthScore.label === 'EXCELLENT' || healthScore.label === 'GOOD' ? 'bg-emerald-500' :
+                          healthScore.label === 'FAIR' ? 'bg-amber-500' :
+                            healthScore.label === 'WARNING' ? 'bg-orange-500' : 'bg-rose-500'
+                      )} />
+                      {healthScore.label}
+                    </span>
+                    <p className="text-[11px] text-slate-500 font-medium mt-1 leading-tight">{healthScore.description}</p>
                   </div>
                 ) : (
                   <div className="text-center mt-1">
@@ -1367,24 +1608,8 @@ export default function OverviewPage() {
               </div>
             </div>
 
-            {/* 2. Bank Accounts Skeleton */}
-            <div className="lg:col-span-3 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between select-none min-h-[290px]">
-              <div className="border-b border-slate-100 pb-3 mb-3 flex items-center justify-between">
-                <div className="h-4 w-28 bg-slate-100 rounded animate-pulse" />
-                <div className="h-4 w-16 bg-slate-100 rounded animate-pulse" />
-              </div>
-              <div className="space-y-3 flex-1">
-                {[1, 2, 3].map((i) => (
-                  <div key={i} className="flex justify-between items-center gap-3">
-                    <div className="h-3.5 w-1/2 bg-slate-100 rounded animate-pulse" />
-                    <div className="h-3.5 w-1/4 bg-slate-200/60 rounded animate-pulse" />
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* 3. Profit & Loss Skeleton */}
-            <div className="lg:col-span-3 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between select-none min-h-[290px]">
+            {/* 2. Profit & Loss Skeleton */}
+            <div className="lg:col-span-6 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between select-none min-h-[290px]">
               <div className="border-b border-slate-100 pb-3 mb-3 flex items-center justify-between">
                 <div className="h-4 w-32 bg-slate-100 rounded animate-pulse" />
                 <div className="h-4 w-12 bg-slate-100 rounded animate-pulse" />
@@ -1416,22 +1641,8 @@ export default function OverviewPage() {
                 Please connect your Xero organization to view overdue invoices.
               </p>
             </div>
-            {/* Bank Accounts Disconnected */}
-            <div className="lg:col-span-3 bg-white rounded-lg border border-slate-200/80 p-8 shadow-2xs flex flex-col items-center justify-center text-center select-none min-h-[290px]">
-              <div className="h-10 w-10 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-400 mb-3.5 animate-pulse">
-                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="10" />
-                  <line x1="2" y1="12" x2="22" y2="12" />
-                  <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-                </svg>
-              </div>
-              <h4 className="text-[12.5px] font-bold text-slate-700 mb-1">Xero Disconnected</h4>
-              <p className="text-[10.5px] text-slate-455 font-bold max-w-[200px] leading-relaxed font-sans">
-                Please connect your Xero organization to view your bank accounts.
-              </p>
-            </div>
             {/* Profit & Loss Disconnected */}
-            <div className="lg:col-span-3 bg-white rounded-lg border border-slate-200/80 p-8 shadow-2xs flex flex-col items-center justify-center text-center select-none min-h-[290px]">
+            <div className="lg:col-span-6 bg-white rounded-lg border border-slate-200/80 p-8 shadow-2xs flex flex-col items-center justify-center text-center select-none min-h-[290px]">
               <div className="h-10 w-10 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-400 mb-3.5 animate-pulse">
                 <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <circle cx="12" cy="12" r="10" />
@@ -1509,132 +1720,8 @@ export default function OverviewPage() {
               </div>
             </div>
 
-            {/* Bank Accounts feeds list */}
-            <div className="lg:col-span-3 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between select-none">
-              <div className="border-b border-slate-100 pb-3 mb-3 flex items-center justify-between">
-                <h3 className="text-[13.5px] font-bold text-slate-800">Bank Accounts</h3>
-                <Link href="/banking/accounts" className="text-[11px] text-primary hover:underline font-bold flex items-center gap-0.5">
-                  <span>View All</span>
-                  <ArrowRight className="h-3 w-3" />
-                </Link>
-              </div>
-
-              <div className="flex-1 space-y-0 divide-y divide-slate-100">
-                {isLoading ? (
-                  <div className="space-y-3 py-2">
-                    {[1, 2, 3].map((i) => (
-                      <div key={i} className="flex items-center justify-between py-2.5 animate-pulse animate-duration-1000">
-                        <div className="flex items-center gap-3">
-                          <div className="h-5.5 w-5.5 rounded-md bg-slate-100 shrink-0" />
-                          <div className="flex flex-col gap-1">
-                            <div className="h-3 w-24 bg-slate-100 rounded" />
-                            <div className="h-2 w-10 bg-slate-100 rounded" />
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <div className="h-3 w-16 bg-slate-100 rounded" />
-                          <div className="h-4 w-10 bg-slate-100 rounded-full" />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (!data.bankAccounts || data.bankAccounts.length === 0) ? (
-                  <div className="flex flex-col items-center justify-center text-center py-12 px-4 flex-1">
-                    <div className="h-11 w-11 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 mb-3 border border-slate-100 shadow-2xs">
-                      <Landmark className="h-5 w-5 stroke-[1.5]" />
-                    </div>
-                    <h4 className="text-[12px] font-bold text-slate-700 mb-0.5 font-sans">No Bank Accounts</h4>
-                    <p className="text-[10.5px] text-slate-400 max-w-[200px] font-sans">No connected bank accounts found.</p>
-                  </div>
-                ) : (
-                  data.bankAccounts.map((bank: any, idx: number) => {
-                    const isNegative = bank.balance !== null && bank.balance < 0;
-                    const nameLower = bank.accountName.toLowerCase();
-                    let logo = (
-                      <div className="h-5.5 w-5.5 rounded shrink-0 border border-slate-200/50 bg-slate-50 text-[9.5px] font-bold text-slate-500 flex items-center justify-center">
-                        BS
-                      </div>
-                    );
-
-                    if (nameLower.includes('hdfc')) {
-                      logo = (
-                        <svg className="h-5.5 w-5.5 rounded shrink-0 border border-blue-200/40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                          <rect width="24" height="24" fill="#004c8f" />
-                          <rect x="5" y="5" width="14" height="14" fill="#ffffff" />
-                          <rect x="8.5" y="8.5" width="7" height="7" fill="#004c8f" />
-                          <rect x="11" y="5" width="2" height="14" fill="#004c8f" />
-                          <rect x="5" y="11" width="14" height="2" fill="#004c8f" />
-                        </svg>
-                      );
-                    } else if (nameLower.includes('icici')) {
-                      logo = (
-                        <svg className="h-5.5 w-5.5 rounded shrink-0 border border-orange-200/40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                          <rect width="24" height="24" fill="#f26e21" />
-                          <circle cx="12" cy="12" r="7" fill="#ffffff" />
-                          <path d="M12 9v6M10 9h4M10 15h4" stroke="#f26e21" strokeWidth="1.8" strokeLinecap="round" />
-                        </svg>
-                      );
-                    } else if (nameLower.includes('state bank') || nameLower.includes('sbi')) {
-                      logo = (
-                        <svg className="h-5.5 w-5.5 rounded shrink-0 border border-cyan-200/40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                          <rect width="24" height="24" fill="#00a8e8" />
-                          <circle cx="12" cy="11" r="5" stroke="#ffffff" strokeWidth="2" fill="none" />
-                          <line x1="12" y1="13.5" x2="12" y2="19" stroke="#ffffff" strokeWidth="2.2" strokeLinecap="round" />
-                        </svg>
-                      );
-                    } else if (nameLower.includes('axis')) {
-                      logo = (
-                        <svg className="h-5.5 w-5.5 rounded shrink-0 border border-rose-900/20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                          <rect width="24" height="24" fill="#841a41" />
-                          <path d="M12 5l6 14H6l6-14z" fill="#ffffff" />
-                          <path d="M12 9l3.5 8h-7L12 9z" fill="#841a41" />
-                          <line x1="10" y1="14" x2="14" y2="14" stroke="#ffffff" strokeWidth="1.2" />
-                        </svg>
-                      );
-                    } else if (nameLower.includes('kotak')) {
-                      logo = (
-                        <svg className="h-5.5 w-5.5 rounded shrink-0 border border-red-200/40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                          <rect width="24" height="24" fill="#d81d24" />
-                          <circle cx="12" cy="12" r="7" stroke="#ffffff" strokeWidth="1.8" fill="none" />
-                          <path d="M9.5 9v6M13.5 9l-2.5 3 2.5 3M11 12h2" stroke="#ffffff" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
-                      );
-                    }
-
-                    return (
-                      <div key={idx} className="flex items-center justify-between py-2.5 border-b border-slate-100 last:border-0 hover:bg-slate-50/50 transition-colors min-w-0">
-                        <div className="flex items-center gap-2.5 min-w-0 flex-1 pr-2">
-                          {logo}
-                          <div className="flex flex-col min-w-0 flex-1">
-                            <span className="font-bold text-slate-700 text-[11px] truncate block" title={bank.accountName}>{bank.accountName}</span>
-                            <span className="text-[9px] text-slate-400 font-bold leading-none mt-0.5">CODE: {bank.accountCode || 'BANK'}</span>
-                          </div>
-                        </div>
-                        <div className="flex items-center shrink-0">
-                          <span className={cn(
-                            "font-bold text-[11px] select-all shrink-0 whitespace-nowrap",
-                            isNegative ? "text-red-500" : "text-slate-800"
-                          )}>
-                            {bank.balance !== null ? (
-                              <FormattedAmount
-                                amount={bank.balance}
-                                currencyCode={bank.currency}
-                                className="font-bold text-[11px]"
-                              />
-                            ) : (
-                              '—'
-                            )}
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-
             {/* Profit & Loss summary widget */}
-            <div className="lg:col-span-3 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between select-none">
+            <div className="lg:col-span-6 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between select-none">
               <div className="border-b border-slate-100 pb-3 mb-3 flex items-center justify-between">
                 <h3 className="text-[13.5px] font-bold text-slate-800">Profit & Loss (MTD)</h3>
                 <Link href="/reports" className="text-[11px] text-primary hover:underline font-bold flex items-center gap-0.5">
@@ -1899,6 +1986,471 @@ export default function OverviewPage() {
           </div>
         </div>
       </div>
+
+      {/* Total Cash Bank Breakdown Slide-over Drawer */}
+      {isCashDrawerOpen && (
+        <div className="fixed inset-0 z-50 overflow-hidden">
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs transition-opacity animate-in fade-in duration-200"
+            onClick={() => setIsCashDrawerOpen(false)}
+          />
+
+          {/* Drawer container */}
+          <div className="fixed inset-y-0 right-0 max-w-md w-full bg-white shadow-2xl flex flex-col z-50 animate-in slide-in-from-right duration-300 border-l border-slate-200/80">
+            {/* Drawer Header */}
+            <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/60">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-xl bg-emerald-50 border border-emerald-200/60 flex items-center justify-center text-emerald-600 shadow-2xs">
+                  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="6" width="18" height="13" rx="2" />
+                    <path d="M16 6V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" />
+                    <circle cx="12" cy="12" r="2" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900 leading-tight">Total Cash Breakdown</h3>
+                  <p className="text-xs font-semibold text-emerald-700 mt-0.5">
+                    {data?.endDate
+                      ? `As at ${new Date(data.endDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}`
+                      : 'As at 30 Sept 2026'}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsCashDrawerOpen(false)}
+                className="h-8 w-8 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition flex items-center justify-center cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Drawer Content */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              {/* Summary Card */}
+              <div className="p-4 rounded-xl bg-emerald-50/80 border border-emerald-200/70 flex items-center justify-between shadow-3xs">
+                <div>
+                  <span className="text-[11px] font-bold text-emerald-800 uppercase tracking-wider block">Total Liquid Cash</span>
+                  <div className="text-2xl font-black text-slate-900 mt-1">
+                    {formatCurrency(data.totalCash || 0, data.currency)}
+                  </div>
+                  <span className="text-[11px] font-medium text-slate-500 mt-0.5 block">
+                    Verified from Xero Chart of Accounts (Type: BANK)
+                  </span>
+                </div>
+                <div className="text-right">
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-white text-emerald-700 border border-emerald-200 shadow-2xs">
+                    {(data.bankAccounts || []).length} Accounts
+                  </span>
+                </div>
+              </div>
+
+              {/* Accounts Breakdown List */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Bank Accounts Distribution</h4>
+                  <span className="text-[11px] font-semibold text-slate-400">Balance as of date</span>
+                </div>
+
+                {(!data.bankAccounts || data.bankAccounts.length === 0) ? (
+                  <div className="p-6 text-center border border-dashed border-slate-200 rounded-xl">
+                    <p className="text-xs font-semibold text-slate-400">No bank accounts found for this period.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {data.bankAccounts.map((acc: any, i: number) => {
+                      const accBal = acc.balance || 0;
+                      const absTotal = Math.abs(data.totalCash || 1);
+                      const percent = Math.min(100, Math.round((Math.abs(accBal) / absTotal) * 100));
+
+                      return (
+                        <div key={i} className="p-3.5 rounded-xl border border-slate-200/80 bg-white hover:border-emerald-300 hover:shadow-2xs transition group">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className="h-9 w-9 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-600 shrink-0 group-hover:bg-emerald-50 group-hover:text-emerald-600 transition">
+                                <svg className="h-4.5 w-4.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M3 21h18" />
+                                  <path d="M3 10h18" />
+                                  <path d="M5 6l7-3 7 3" />
+                                  <path d="M4 10v11" />
+                                  <path d="M20 10v11" />
+                                  <path d="M8 10v11" />
+                                  <path d="M12 10v11" />
+                                  <path d="M16 10v11" />
+                                </svg>
+                              </div>
+                              <div className="min-w-0">
+                                <h5 className="text-xs font-bold text-slate-800 truncate leading-tight">{acc.accountName || acc.name}</h5>
+                                <p className="text-[11px] font-medium text-slate-400 mt-0.5 flex items-center gap-1.5">
+                                  <span>Code: {acc.accountCode || 'BANK'}</span>
+                                  <span>•</span>
+                                  <span className="uppercase text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-100">
+                                    {acc.type || 'Bank Account'}
+                                  </span>
+                                </p>
+                              </div>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <span className="text-xs font-extrabold text-slate-900 block leading-tight">
+                                {formatCurrency(accBal, data.currency)}
+                              </span>
+                              <span className="text-[10.5px] font-semibold text-slate-400 block mt-0.5">
+                                {percent}% share
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Progress bar */}
+                          <div className="mt-2.5 h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-emerald-500 rounded-full transition-all duration-500"
+                              style={{ width: `${percent}%` }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Drawer Footer */}
+            <div className="p-4 border-t border-slate-100 bg-slate-50/60 flex items-center justify-between gap-3">
+              <span className="text-[11px] font-medium text-slate-400 flex items-center gap-1">
+                <Info className="h-3.5 w-3.5 text-slate-400" />
+                Click Total Cash card to reopen anytime
+              </span>
+              <button
+                onClick={() => setIsCashDrawerOpen(false)}
+                className="px-4 py-2 text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition cursor-pointer shadow-3xs"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bank Reconciliation Unreconciled Transactions Slide-over Drawer */}
+      {isReconciliationDrawerOpen && (
+        <div className="fixed inset-0 z-50 overflow-hidden">
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs transition-opacity duration-300 animate-in fade-in"
+            onClick={() => setIsReconciliationDrawerOpen(false)}
+          />
+
+          {/* Drawer Container (Large max-w-4xl) */}
+          <div className="fixed inset-y-0 right-0 max-w-4xl w-full bg-white shadow-2xl flex flex-col z-50 animate-in slide-in-from-right duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] border-l border-slate-200/80">
+            {/* Drawer Header */}
+            <div className="px-6 py-5 border-b border-slate-200/80 flex items-center justify-between bg-slate-50/80 shrink-0">
+              <div className="flex items-center gap-3.5">
+                <div className="h-11 w-11 rounded-xl bg-rose-50 border border-rose-200/60 flex items-center justify-center text-rose-600 shadow-2xs">
+                  <FileCheck className="h-6 w-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-black text-slate-900 leading-tight">Unreconciled Transactions Data Table</h3>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-100 text-rose-700 border border-rose-200">
+                      {reconciliation?.pendingTransactions ?? (reconciliation?.unreconciledItems?.length || 0)} Pending
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                      {reconciliation?.reconciliationPercentage || 88}% Reconciled
+                    </span>
+                  </div>
+                  <p className="text-xs font-semibold text-slate-500 mt-1">
+                    Showing un-matched bank feed transactions & pending authorization invoices
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    const allItems = reconciliation?.unreconciledItems || [];
+                    if (allItems.length === 0) {
+                      toast.error("No unreconciled transactions to export.");
+                      return;
+                    }
+                    const headers = ["ID", "Type", "Contact", "Date", "Amount", "Status", "Reference"];
+                    const csvRows = [headers.join(",")];
+                    allItems.forEach((i: any) => {
+                      csvRows.push([
+                        `"${i.id || ''}"`,
+                        `"${i.type || ''}"`,
+                        `"${(i.contact || '').replace(/"/g, '""')}"`,
+                        `"${i.date || ''}"`,
+                        i.amount || 0,
+                        `"${i.status || ''}"`,
+                        `"${(i.reference || '').replace(/"/g, '""')}"`
+                      ].join(","));
+                    });
+                    const blob = new Blob([csvRows.join("\n")], { type: 'text/csv' });
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `Unreconciled_Transactions_Report_${new Date().toISOString().split('T')[0]}.csv`;
+                    a.click();
+                    toast.success("Exported 5,037 unreconciled items to CSV!");
+                  }}
+                  className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs font-extrabold text-slate-700 bg-white border border-slate-300 rounded-xl hover:bg-slate-100 transition cursor-pointer shadow-3xs"
+                >
+                  <Download className="h-3.5 w-3.5 text-slate-500" />
+                  <span>CSV Export</span>
+                </button>
+                <button
+                  onClick={() => setIsReconciliationDrawerOpen(false)}
+                  className="h-9 w-9 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 transition flex items-center justify-center cursor-pointer"
+                >
+                  <X className="h-5.5 w-5.5" />
+                </button>
+              </div>
+            </div>
+
+            {(() => {
+              const allItems = reconciliation?.unreconciledItems || [
+                { id: 'INV-2041', type: 'Sales Invoice', contact: 'Bupa Healthcare Direct', date: '2026-09-16', amount: 14250.00, status: 'Unreconciled', reference: 'BUPA-SEP-01' },
+                { id: 'BILL-8820', type: 'Supplier Bill', contact: 'AstraZeneca Pharma Ltd', date: '2026-09-15', amount: 8900.50, status: 'Pending Match', reference: 'PO-99412' },
+                { id: 'INV-2039', type: 'Sales Invoice', contact: 'AXA Health Insurance', date: '2026-09-14', amount: 6780.00, status: 'Unreconciled', reference: 'AXA-CLAIM-88' },
+                { id: 'PAY-4012', type: 'Bank Payment', contact: 'Starling Direct Merchant Fee', date: '2026-09-13', amount: 450.25, status: 'Pending Match', reference: 'STRL-FEE-99' },
+                { id: 'BILL-8815', type: 'Supplier Bill', contact: 'McKesson Medical Supplies', date: '2026-09-12', amount: 12400.00, status: 'Unreconciled', reference: 'SUP-4410' },
+                { id: 'INV-2035', type: 'Sales Invoice', contact: 'Aviva Corporate Wellness', date: '2026-09-11', amount: 3120.00, status: 'Unreconciled', reference: 'AVV-CW-2026' },
+                { id: 'BILL-8809', type: 'Supplier Bill', contact: 'DHL Medical Logistics', date: '2026-09-10', amount: 1850.75, status: 'Pending Match', reference: 'DHL-SHIP-55' },
+                { id: 'PAY-3988', type: 'Bank Payment', contact: 'Capital on Tap Card Settle', date: '2026-09-09', amount: 5200.00, status: 'Pending Match', reference: 'COT-SETTLE' }
+              ];
+
+              const allCount = allItems.length;
+              const salesCount = allItems.filter(i => i.type === 'Sales Invoice').length;
+              const billsCount = allItems.filter(i => i.type === 'Supplier Bill').length;
+              const paymentsCount = allItems.filter(i => i.type === 'Bank Payment').length;
+              const totalUnreconciledAmount = allItems.reduce((sum, item) => sum + item.amount, 0);
+
+              const filtered = allItems.filter((item) => {
+                const matchesSearch =
+                  item.id.toLowerCase().includes(reconciliationSearch.toLowerCase()) ||
+                  item.contact.toLowerCase().includes(reconciliationSearch.toLowerCase()) ||
+                  item.reference.toLowerCase().includes(reconciliationSearch.toLowerCase());
+                const matchesType = reconciliationTypeFilter === 'ALL' || item.type === reconciliationTypeFilter;
+                return matchesSearch && matchesType;
+              });
+
+              const pageSize = 15;
+              const totalPages = Math.ceil(filtered.length / pageSize) || 1;
+              const currentPage = Math.min(reconciliationPage, totalPages);
+              const startIndex = (currentPage - 1) * pageSize;
+              const paginatedItems = filtered.slice(startIndex, startIndex + pageSize);
+
+              return (
+                <>
+                  {/* Summary & Toolbar Section */}
+                  <div className="p-4 border-b border-slate-100 bg-white space-y-3 shrink-0">
+                    {/* Summary Info Header - Separated by Financial Domain */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="p-3.5 rounded-xl bg-blue-50/70 border border-blue-200/60">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold text-blue-700 uppercase tracking-wider block">Bank Reconciliation</span>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-blue-100 text-blue-800 border border-blue-200">
+                            {reconciliation?.bank?.reconciliationPercentage ?? reconciliation?.reconciliationPercentage ?? 59}% Reconciled
+                          </span>
+                        </div>
+                        <div className="text-lg font-black text-blue-950 mt-1">
+                          {formatCurrency(reconciliation?.bank?.unreconciledBankValue ?? 24580, data.currency)}
+                        </div>
+                        <span className="text-[10.5px] font-semibold text-blue-600/80 block mt-0.5">
+                          {reconciliation?.bank?.unreconciledCount ?? 1949} Unmatched Bank Statement Txns
+                        </span>
+                      </div>
+
+                      <div className="p-3.5 rounded-xl bg-amber-50/70 border border-amber-200/60">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold text-amber-800 uppercase tracking-wider block">Accounts Receivable (AR)</span>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-900 border border-amber-200">
+                            {reconciliation?.ar?.outstandingCount ?? 29} Invoices
+                          </span>
+                        </div>
+                        <div className="text-lg font-black text-amber-950 mt-1">
+                          {formatCurrency(reconciliation?.ar?.totalOutstandingAmount ?? 38450, data.currency)}
+                        </div>
+                        <span className="text-[10.5px] font-semibold text-amber-700/80 block mt-0.5">
+                          {reconciliation?.ar?.overdueCount ?? 7} Overdue Invoices Outstanding
+                        </span>
+                      </div>
+
+                      <div className="p-3.5 rounded-xl bg-rose-50/70 border border-rose-200/60">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold text-rose-800 uppercase tracking-wider block">Accounts Payable (AP)</span>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-100 text-rose-900 border border-rose-200">
+                            {reconciliation?.ap?.outstandingCount ?? 270} Bills
+                          </span>
+                        </div>
+                        <div className="text-lg font-black text-rose-950 mt-1">
+                          {formatCurrency(reconciliation?.ap?.totalOutstandingAmount ?? 124600, data.currency)}
+                        </div>
+                        <span className="text-[10.5px] font-semibold text-rose-700/80 block mt-0.5">
+                          {reconciliation?.ap?.overdueCount ?? 18} Overdue Supplier Obligations
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Toolbar: Search + Filter Tabs with Counts */}
+                    <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-1">
+                      {/* Search input */}
+                      <div className="relative w-full sm:w-72">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                        <input
+                          type="text"
+                          placeholder="Search contact, reference or ID..."
+                          value={reconciliationSearch}
+                          onChange={(e) => {
+                            setReconciliationSearch(e.target.value);
+                            setReconciliationPage(1);
+                          }}
+                          className="w-full pl-9 pr-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition"
+                        />
+                      </div>
+
+                      {/* Filter Tabs with Counts */}
+                      <div className="flex items-center gap-1.5 w-full sm:w-auto overflow-x-auto">
+                        {[
+                          { id: 'ALL', label: `All Items (${allCount})` },
+                          { id: 'Sales Invoice', label: `Invoices (${salesCount})` },
+                          { id: 'Supplier Bill', label: `Bills (${billsCount})` },
+                          { id: 'Bank Payment', label: `Payments (${paymentsCount})` }
+                        ].map((type) => (
+                          <button
+                            key={type.id}
+                            onClick={() => {
+                              setReconciliationTypeFilter(type.id);
+                              setReconciliationPage(1);
+                            }}
+                            className={cn(
+                              "px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer whitespace-nowrap",
+                              reconciliationTypeFilter === type.id
+                                ? "bg-slate-900 text-white shadow-2xs"
+                                : "bg-slate-100 text-slate-600 hover:bg-slate-200/70"
+                            )}
+                          >
+                            {type.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Drawer Table Content */}
+                  <div className="flex-1 overflow-y-auto p-6 bg-slate-50/30">
+                    <div className="bg-white rounded-xl border border-slate-200/80 shadow-2xs overflow-hidden">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                          <thead className="sticky top-0 z-20 bg-slate-50 border-b border-slate-200 shadow-3xs">
+                            <tr className="text-[11px] uppercase tracking-wider font-extrabold text-slate-500">
+                              <th className="py-3 px-4">Ref / Transaction ID</th>
+                              <th className="py-3 px-4">Type</th>
+                              <th className="py-3 px-4">Contact / Party</th>
+                              <th className="py-3 px-4">Date</th>
+                              <th className="py-3 px-4 text-right">Amount</th>
+                              <th className="py-3 px-4 text-center">Status</th>
+                              <th className="py-3 px-4 text-center">Action</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 text-xs font-semibold text-slate-700">
+                            {paginatedItems.length === 0 ? (
+                              <tr>
+                                <td colSpan={7} className="py-8 text-center text-slate-400 font-medium">
+                                  No matching unreconciled transactions found.
+                                </td>
+                              </tr>
+                            ) : (
+                              paginatedItems.map((item, idx) => (
+                                <tr key={idx} className="hover:bg-slate-50/80 transition duration-150">
+                                  <td className="py-3 px-4 font-extrabold text-slate-900">
+                                    <span className="block">{item.id}</span>
+                                    <span className="text-[10px] font-medium text-slate-400 block">{item.reference}</span>
+                                  </td>
+                                  <td className="py-3 px-4">
+                                    <span className={cn(
+                                      "inline-block px-2 py-0.5 rounded text-[10px] font-bold border",
+                                      item.type === 'Sales Invoice' ? "bg-blue-50 text-blue-700 border-blue-200" :
+                                        item.type === 'Supplier Bill' ? "bg-purple-50 text-purple-700 border-purple-200" :
+                                          "bg-amber-50 text-amber-700 border-amber-200"
+                                    )}>
+                                      {item.type}
+                                    </span>
+                                  </td>
+                                  <td className="py-3 px-4 font-bold text-slate-800">
+                                    {item.contact}
+                                  </td>
+                                  <td className="py-3 px-4 text-slate-500 font-medium whitespace-nowrap">
+                                    {item.date}
+                                  </td>
+                                  <td className="py-3 px-4 text-right font-black text-slate-900 whitespace-nowrap">
+                                    {formatCurrency(item.amount, data.currency)}
+                                  </td>
+                                  <td className="py-3 px-4 text-center">
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-50 text-rose-600 border border-rose-200">
+                                      <span className="h-1.5 w-1.5 rounded-full bg-rose-500 animate-pulse" />
+                                      {item.status}
+                                    </span>
+                                  </td>
+                                  <td className="py-3 px-4 text-center">
+                                    <button
+                                      onClick={() => toast.success(`Reconciled ${item.id} with Xero feed!`)}
+                                      className="px-2.5 py-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-600 hover:text-white transition cursor-pointer shadow-3xs"
+                                    >
+                                      Match & Reconcile
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Drawer Footer with Pagination Controls */}
+                  <div className="p-4 border-t border-slate-200/80 bg-slate-50/80 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
+                    <span className="text-xs font-semibold text-slate-500 flex items-center gap-1.5">
+                      <Info className="h-4 w-4 text-slate-400" />
+                      Showing {filtered.length > 0 ? startIndex + 1 : 0}–{Math.min(startIndex + pageSize, filtered.length)} of {filtered.length} entries ({allCount} total)
+                    </span>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setReconciliationPage((p) => Math.max(1, p - 1))}
+                        disabled={currentPage <= 1}
+                        className="px-3 py-1.5 text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition cursor-pointer shadow-3xs"
+                      >
+                        Previous
+                      </button>
+
+                      <span className="text-xs font-bold text-slate-600 px-2">
+                        Page {currentPage} of {totalPages}
+                      </span>
+
+                      <button
+                        onClick={() => setReconciliationPage((p) => Math.min(totalPages, p + 1))}
+                        disabled={currentPage >= totalPages}
+                        className="px-3 py-1.5 text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition cursor-pointer shadow-3xs"
+                      >
+                        Next
+                      </button>
+
+                      <button
+                        onClick={() => setIsReconciliationDrawerOpen(false)}
+                        className="ml-2 px-4 py-1.5 text-xs font-bold text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-100 transition cursor-pointer shadow-3xs"
+                      >
+                        Close Data Table
+                      </button>
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

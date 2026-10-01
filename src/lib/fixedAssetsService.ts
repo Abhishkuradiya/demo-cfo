@@ -27,11 +27,8 @@ export const XeroFixedAssetsService = {
       }
     });
 
-    if (res.status === 429 && retriesLeft > 0) {
-      const retryAfter = parseInt(res.headers.get('Retry-After') || '2') * 1000;
-      console.warn(`[Xero Assets API] Rate limit (429) hit. Waiting ${retryAfter}ms before retry...`);
-      await new Promise(resolve => setTimeout(resolve, retryAfter));
-      return XeroFixedAssetsService.fetchXeroAssets(accessToken, xeroTenantId, status, page, pageSize, retriesLeft - 1);
+    if (res.status === 429) {
+      throw new Error(`Xero Assets API Rate Limit (429) Exceeded`);
     }
 
     if (!res.ok) {

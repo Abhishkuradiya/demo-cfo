@@ -1,13 +1,28 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { fetchXeroResource } from '@/lib/xero';
+import { AccountMappingService } from '@/lib/services/AccountMappingService';
  
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const code = searchParams.get('code');
-  const state = searchParams.get('state') || '1';
-  const tenantId = parseInt(state);
+  const state = searchParams.get('state');
+  if (!state) {
+    return new Response('Error: Missing state parameter in OAuth callback.', { status: 400 });
+  }
+  const tenantId = parseInt(state, 10);
+  if (isNaN(tenantId)) {
+    return new Response('Error: Invalid tenant ID state in OAuth callback.', { status: 400 });
+  }
  
+  const errorParam = searchParams.get('error');
+  const errorDesc = searchParams.get('error_description');
+
+  if (errorParam) {
+    console.warn(`[Xero OAuth Callback] Authorization denied or error returned for tenant ${tenantId}: ${errorParam} (${errorDesc || ''})`);
+    return new Response(`Xero Authorization Denied: ${errorDesc || errorParam}. Existing connection preserved.`, { status: 400 });
+  }
+
   if (!code) {
     return new Response('Error: Missing authorization code from Xero server.', { status: 400 });
   }
@@ -68,7 +83,7 @@ export async function GET(req: NextRequest) {
     }
  
     const xeroTenantId = orgConnection.tenantId; // Connection UUID
-    const orgName = orgConnection.tenantName || 'Demo Company (India)';
+    const orgName = orgConnection.tenantName || 'Xero Organisation';
  
     // 3. Save connection details in the database
     await db.saveCredentials(tenantId, 'xero', {
@@ -112,10 +127,13 @@ export async function GET(req: NextRequest) {
           console.error('[BackgroundSync] Payments sync failed:', e.message);
         }
 
-        // Accounts
+        // Accounts & Tenant Account Mappings Seeding (Phase 2 Integration)
         try {
           const accounts = await fetchXeroResource(tokenData.access_token, xeroTenantId, 'Accounts');
           await db.saveCachedRecords(tenantId, 'accounts', accounts || []);
+          if (Array.isArray(accounts) && accounts.length > 0) {
+            await AccountMappingService.seedMappingsForTenant(tenantId, accounts);
+          }
         } catch (e: any) {
           console.error('[BackgroundSync] Accounts sync failed:', e.message);
         }

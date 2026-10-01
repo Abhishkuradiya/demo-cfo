@@ -98,9 +98,20 @@ export default function BankAccountsPage() {
   const [totalPages, setTotalPages] = useState(1);
   const [totalRecords, setTotalRecords] = useState(0);
 
-  // Date range state - Default to Current Month (01 Aug 2026 - 31 Aug 2026)
-  const defaultFrom = searchParams.get('from_date') || '2026-08-01';
-  const defaultTo = searchParams.get('to_date') || '2026-08-31';
+  // Date range state - Default dynamically to Current Month
+  const getCurrentMonthStart = () => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+  };
+
+  const getCurrentMonthEnd = () => {
+    const now = new Date();
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+  };
+
+  const defaultFrom = searchParams.get('from_date') || getCurrentMonthStart();
+  const defaultTo = searchParams.get('to_date') || getCurrentMonthEnd();
 
   const [fromDate, setFromDate] = useState(defaultFrom);
   const [toDate, setToDate] = useState(defaultTo);
@@ -337,24 +348,34 @@ export default function BankAccountsPage() {
   }, []);
 
   const applyPreset = (preset: 'this_month' | 'last_month' | 'last_3_months' | 'this_year' | 'today') => {
-    let from = '2026-08-01';
-    let to = '2026-08-31';
+    const now = new Date();
+    let from = '';
+    let to = '';
+
+    const formatYMD = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
     if (preset === 'today') {
-      from = '2026-08-03';
-      to = '2026-08-03';
+      from = formatYMD(now);
+      to = formatYMD(now);
     } else if (preset === 'this_month') {
-      from = '2026-08-01';
-      to = '2026-08-31';
+      const start = new Date(now.getFullYear(), now.getMonth(), 1);
+      const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      from = formatYMD(start);
+      to = formatYMD(end);
     } else if (preset === 'last_month') {
-      from = '2026-07-01';
-      to = '2026-07-31';
+      const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const end = new Date(now.getFullYear(), now.getMonth(), 0);
+      from = formatYMD(start);
+      to = formatYMD(end);
     } else if (preset === 'last_3_months') {
-      from = '2026-06-01';
-      to = '2026-08-31';
+      const start = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+      const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      from = formatYMD(start);
+      to = formatYMD(end);
     } else if (preset === 'this_year') {
-      from = '2026-01-01';
-      to = '2026-12-31';
+      from = `${now.getFullYear()}-01-01`;
+      to = `${now.getFullYear()}-12-31`;
     }
 
     setFromDate(from);

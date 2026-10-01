@@ -12,6 +12,8 @@ export interface InvoiceItem {
   customer: string;
   date: string;
   dueDate: string;
+  subTotal?: number;
+  totalTax?: number;
   amount: number;
   amountDue: number;
   amountPaid: number;
@@ -82,9 +84,17 @@ export default function InvoicesBreakdownPanel({
         {
           id: `${inv.number}-${Date.now()}`,
           refNumber: inv.number,
+          contactName: inv.customer,
           date: inv.date,
+          dueDate: inv.dueDate,
           desc: `${inv.customer} - ${inv.reference || 'Sales Invoice'}`,
           amount: inv.amount,
+          subTotal: inv.subTotal !== undefined ? inv.subTotal : Math.round((inv.amount / 1.2) * 100) / 100,
+          totalTax: inv.totalTax !== undefined ? inv.totalTax : Math.round((inv.amount - (inv.amount / 1.2)) * 100) / 100,
+          amountPaid: inv.amountPaid !== undefined ? inv.amountPaid : inv.amount,
+          amountDue: inv.amountDue !== undefined ? inv.amountDue : 0,
+          status: inv.status || 'Authorised',
+          lineItems: (inv as any).lineItems,
           x: startX,
           y: startY,
           width: winW,
@@ -111,6 +121,46 @@ export default function InvoicesBreakdownPanel({
 
   const handleUpdateInvoice = (id: string, updates: Partial<OpenInvoiceData>) => {
     setOpenInvoices(prev => prev.map(inv => inv.id === id ? { ...inv, ...updates } : inv));
+  };
+
+  const handleOpenPaymentDoc = (doc: Partial<OpenInvoiceData>) => {
+    setOpenInvoices(prev => {
+      const maxZ = Math.max(...prev.map(i => i.zIndex), 1000);
+      const winW = typeof window !== 'undefined' ? Math.min(820, window.innerWidth - 60) : 820;
+      const winH = typeof window !== 'undefined' ? Math.min(520, window.innerHeight - 180) : 520;
+      const offset = (prev.length % 5) * 35;
+      const startX = typeof window !== 'undefined' ? Math.max(30, Math.round((window.innerWidth - winW) / 2) + offset) : 90;
+      const startY = typeof window !== 'undefined' ? Math.max(30, Math.round((window.innerHeight - winH) / 2 - 30) + offset) : 50;
+
+      return [
+        ...prev,
+        {
+          id: doc.id || `pay-${Date.now()}`,
+          refNumber: doc.refNumber || 'Receive Money',
+          contactName: doc.contactName || 'Client',
+          date: doc.date || '01 Apr 2026',
+          dueDate: doc.dueDate || doc.date || '01 Apr 2026',
+          paymentDate: doc.paymentDate || doc.date || '01 Apr 2026',
+          desc: doc.desc || 'Payment Document',
+          amount: doc.amount || 0,
+          subTotal: doc.subTotal || doc.amount || 0,
+          totalTax: 0,
+          amountPaid: doc.amount || 0,
+          amountDue: 0,
+          status: doc.status || 'Reconciled',
+          accountName: doc.accountName || '100 - Starling Business Account',
+          lineItems: doc.lineItems || [],
+          x: startX,
+          y: startY,
+          width: winW,
+          height: winH,
+          zIndex: maxZ + 1,
+          isMinimized: false,
+          isMaximized: false,
+          isHighlighted: true
+        }
+      ];
+    });
   };
 
   // Calculate Metrics Summary
@@ -204,18 +254,24 @@ export default function InvoicesBreakdownPanel({
       return;
     }
 
-    const headers = ["Invoice Number", "Customer Name", "Invoice Date", "Due Date", "Xero Status", "Total Amount", "Amount Due", "Amount Paid", "Reference"];
-    const rows = filteredInvoices.map(inv => [
-      `"${inv.number}"`,
-      `"${inv.customer}"`,
-      `"${inv.date}"`,
-      `"${inv.dueDate}"`,
-      `"${inv.status}"`,
-      inv.amount.toFixed(2),
-      inv.amountDue.toFixed(2),
-      inv.amountPaid.toFixed(2),
-      `"${inv.reference || ''}"`
-    ]);
+    const headers = ["Invoice Number", "Customer Name", "Invoice Date", "Due Date", "Xero Status", "Net Amount (Excl Tax)", "Tax Amount (VAT)", "Total Amount (Incl Tax)", "Amount Due", "Amount Paid", "Reference"];
+    const rows = filteredInvoices.map(inv => {
+      const sub = inv.subTotal ?? (inv.amount / 1.2);
+      const tax = inv.totalTax ?? (inv.amount - sub);
+      return [
+        `"${inv.number}"`,
+        `"${inv.customer}"`,
+        `"${inv.date}"`,
+        `"${inv.dueDate}"`,
+        `"${inv.status}"`,
+        sub.toFixed(2),
+        tax.toFixed(2),
+        inv.amount.toFixed(2),
+        inv.amountDue.toFixed(2),
+        inv.amountPaid.toFixed(2),
+        `"${inv.reference || ''}"`
+      ];
+    });
 
     const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -275,7 +331,7 @@ export default function InvoicesBreakdownPanel({
                     </span>
                   </div>
                   <p className="text-xs font-medium text-slate-500 mt-0.5 flex items-center gap-1">
-                    <span className="font-semibold text-slate-700">MI Health Ltd</span>
+                    <span className="font-semibold text-slate-700">Organization</span>
                     <span>|</span>
                     <span>{formattedPeriodSub}</span>
                   </p>
@@ -544,139 +600,171 @@ export default function InvoicesBreakdownPanel({
                 <div className="overflow-x-auto custom-slim-scrollbar">
                   <table className="w-full text-left border-collapse">
                     <thead>
-                      <tr className="bg-slate-50/80 border-b border-slate-200 text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">
-                        <th className="py-3.5 px-4 font-extrabold">
+                      <tr className="bg-slate-50/80 border-b border-slate-200 text-[10.5px] font-extrabold text-slate-500 uppercase tracking-wider">
+                        <th className="py-3.5 px-3 font-extrabold">
                           <div className="flex items-center gap-1">
                             <span>INVOICE #</span>
                             <ChevronDown className="h-3 w-3 text-slate-400" />
                           </div>
                         </th>
-                        <th className="py-3.5 px-4 font-extrabold">
+                        <th className="py-3.5 px-3 font-extrabold">
                           <div className="flex items-center gap-1">
                             <span>CUSTOMER NAME</span>
                             <ChevronDown className="h-3 w-3 text-slate-400" />
                           </div>
                         </th>
-                        <th className="py-3.5 px-4 font-extrabold">
+                        <th className="py-3.5 px-3 font-extrabold">
                           <div className="flex items-center gap-1">
                             <span>DATE</span>
                             <ChevronDown className="h-3 w-3 text-slate-400" />
                           </div>
                         </th>
-                        <th className="py-3.5 px-4 font-extrabold">
+                        <th className="py-3.5 px-3 font-extrabold">
                           <div className="flex items-center gap-1">
                             <span>DUE DATE</span>
                             <ChevronDown className="h-3 w-3 text-slate-400" />
                           </div>
                         </th>
-                        <th className="py-3.5 px-4 font-extrabold">
+                        <th className="py-3.5 px-3 font-extrabold">
                           <div className="flex items-center gap-1">
                             <span>STATUS</span>
                             <ChevronDown className="h-3 w-3 text-slate-400" />
                           </div>
                         </th>
-                        <th className="py-3.5 px-4 text-right font-extrabold">
+                        <th className="py-3.5 px-3 text-right font-extrabold">
                           <div className="flex items-center justify-end gap-1">
-                            <span>TOTAL AMOUNT</span>
+                            <span>NET (EXCL. TAX)</span>
                             <ChevronDown className="h-3 w-3 text-slate-400" />
                           </div>
                         </th>
-                        <th className="py-3.5 px-4 text-right font-extrabold">
+                        <th className="py-3.5 px-3 text-right font-extrabold">
+                          <div className="flex items-center justify-end gap-1">
+                            <span>TAX (VAT)</span>
+                            <ChevronDown className="h-3 w-3 text-slate-400" />
+                          </div>
+                        </th>
+                        <th className="py-3.5 px-3 text-right font-extrabold">
+                          <div className="flex items-center justify-end gap-1">
+                            <span>TOTAL (INCL. TAX)</span>
+                            <ChevronDown className="h-3 w-3 text-slate-400" />
+                          </div>
+                        </th>
+                        <th className="py-3.5 px-3 text-right font-extrabold">
                           <div className="flex items-center justify-end gap-1">
                             <span>AMOUNT DUE</span>
                             <ChevronDown className="h-3 w-3 text-slate-400" />
                           </div>
                         </th>
-                        <th className="py-3.5 px-4 text-center font-extrabold">ACTION</th>
+                        <th className="py-3.5 px-3 text-center font-extrabold">ACTION</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
                       {filteredInvoices.length === 0 ? (
                         <tr>
-                          <td colSpan={8} className="py-14 text-center text-slate-400">
+                          <td colSpan={10} className="py-14 text-center text-slate-400">
                             <FileText className="h-9 w-9 mx-auto mb-2 text-slate-300" />
                             <p className="font-bold text-slate-700 text-sm">No Invoices Match Filter</p>
                             <p className="text-xs text-slate-400 mt-0.5">Try adjusting your search query or status filter.</p>
                           </td>
                         </tr>
                       ) : (
-                        filteredInvoices.map((inv, idx) => (
-                          <tr
-                            key={inv.id || idx}
-                            onClick={() => handleOpenLevel3Invoice(inv)}
-                            className="hover:bg-blue-50/30 transition-colors cursor-pointer group"
-                          >
-                            {/* Invoice Number - Blue Link Styling matching Xero */}
-                            <td className="py-3.5 px-4">
-                              <span className="font-extrabold text-blue-600 group-hover:underline flex items-center gap-1">
-                                {inv.number}
-                              </span>
-                              {inv.reference && (
-                                <span className="block text-[10px] text-slate-400 font-normal truncate max-w-[130px]">
-                                  Ref: {inv.reference}
+                        filteredInvoices.map((inv, idx) => {
+                          const netVal = inv.subTotal ?? (inv.amount / 1.2);
+                          const taxVal = inv.totalTax ?? (inv.amount - netVal);
+                          return (
+                            <tr
+                              key={inv.id || idx}
+                              onClick={() => handleOpenLevel3Invoice(inv)}
+                              className="hover:bg-blue-50/30 transition-colors cursor-pointer group"
+                            >
+                              {/* Invoice Number - Blue Link Styling matching Xero */}
+                              <td className="py-3.5 px-3">
+                                <span className="font-extrabold text-blue-600 group-hover:underline flex items-center gap-1">
+                                  {inv.number}
                                 </span>
-                              )}
-                            </td>
+                                {inv.reference && (
+                                  <span className="block text-[10px] text-slate-400 font-normal truncate max-w-[130px]">
+                                    Ref: {inv.reference}
+                                  </span>
+                                )}
+                              </td>
 
-                            {/* Customer Name */}
-                            <td className="py-3.5 px-4 font-bold text-slate-800">
-                              <span className="truncate max-w-[210px] block">{inv.customer}</span>
-                            </td>
+                              {/* Customer Name */}
+                              <td className="py-3.5 px-3 font-bold text-slate-800">
+                                <span className="truncate max-w-[180px] block">{inv.customer}</span>
+                              </td>
 
-                            {/* Dates */}
-                            <td className="py-3.5 px-4 text-slate-600 font-medium">{inv.date}</td>
-                            <td className="py-3.5 px-4 text-slate-500 font-medium">{inv.dueDate}</td>
+                              {/* Dates */}
+                              <td className="py-3.5 px-3 text-slate-600 font-medium whitespace-nowrap">{inv.date}</td>
+                              <td className="py-3.5 px-3 text-slate-500 font-medium whitespace-nowrap">{inv.dueDate}</td>
 
-                            {/* Status Badge */}
-                            <td className="py-3.5 px-4">
-                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10.5px] font-bold border ${inv.statusColor}`}>
-                                {inv.status === 'Paid' && <CheckCircle2 className="h-3 w-3 mr-1" />}
-                                {inv.status === 'Overdue' && <AlertTriangle className="h-3 w-3 mr-1" />}
-                                {(inv.status === 'Authorised' || inv.status === 'Unpaid') && <Clock className="h-3 w-3 mr-1" />}
-                                {inv.status}
-                              </span>
-                            </td>
-
-                            {/* Total Amount */}
-                            <td className="py-3.5 px-4 text-right font-extrabold text-slate-900">
-                              {formatMoney(inv.amount)}
-                            </td>
-
-                            {/* Amount Due */}
-                            <td className="py-3.5 px-4 text-right font-extrabold">
-                              {inv.amountDue > 0 ? (
-                                <span className={inv.status === 'Overdue' ? 'text-rose-600' : 'text-amber-600'}>
-                                  {formatMoney(inv.amountDue)}
+                              {/* Status Badge */}
+                              <td className="py-3.5 px-3 whitespace-nowrap">
+                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10.5px] font-bold border ${inv.statusColor}`}>
+                                  {inv.status === 'Paid' && <CheckCircle2 className="h-3 w-3 mr-1" />}
+                                  {inv.status === 'Overdue' && <AlertTriangle className="h-3 w-3 mr-1" />}
+                                  {(inv.status === 'Authorised' || inv.status === 'Unpaid') && <Clock className="h-3 w-3 mr-1" />}
+                                  {inv.status}
                                 </span>
-                              ) : (
-                                <span className="text-slate-400 font-normal">£0.00</span>
-                              )}
-                            </td>
+                              </td>
 
-                            {/* Action Button */}
-                            <td className="py-3.5 px-4 text-center" onClick={(e) => e.stopPropagation()}>
-                              <button
-                                onClick={() => handleOpenLevel3Invoice(inv)}
-                                className="inline-flex items-center gap-1 px-3 py-1 text-[11px] font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200/80 rounded-md transition-colors cursor-pointer shadow-3xs"
-                              >
-                                <Eye className="h-3.5 w-3.5" />
-                                <span>View</span>
-                              </button>
-                            </td>
-                          </tr>
-                        ))
+                              {/* Net Subtotal */}
+                              <td className="py-3.5 px-3 text-right font-bold text-slate-700 font-sans whitespace-nowrap">
+                                {formatMoney(netVal)}
+                              </td>
+
+                              {/* Tax Amount */}
+                              <td className="py-3.5 px-3 text-right font-semibold text-slate-500 font-sans whitespace-nowrap">
+                                {formatMoney(taxVal)}
+                              </td>
+
+                              {/* Total Amount (Incl Tax) */}
+                              <td className="py-3.5 px-3 text-right font-extrabold text-slate-900 font-sans whitespace-nowrap">
+                                {formatMoney(inv.amount)}
+                              </td>
+
+                              {/* Amount Due */}
+                              <td className="py-3.5 px-3 text-right font-extrabold font-sans whitespace-nowrap">
+                                {inv.amountDue > 0 ? (
+                                  <span className={inv.status === 'Overdue' ? 'text-rose-600' : 'text-amber-600'}>
+                                    {formatMoney(inv.amountDue)}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400 font-normal">£0.00</span>
+                                )}
+                              </td>
+
+                              {/* Action Button */}
+                              <td className="py-3.5 px-4 text-center" onClick={(e) => e.stopPropagation()}>
+                                <button
+                                  onClick={() => handleOpenLevel3Invoice(inv)}
+                                  className="inline-flex items-center gap-1 px-3 py-1 text-[11px] font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200/80 rounded-md transition-colors cursor-pointer shadow-3xs"
+                                >
+                                  <Eye className="h-3.5 w-3.5" />
+                                  <span>View</span>
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })
                       )}
 
                       {/* SUMMARY TOTAL ROW */}
                       {filteredInvoices.length > 0 && (
                         <tr className="bg-slate-50/90 font-black text-slate-900 border-t-2 border-slate-200">
-                          <td colSpan={5} className="py-3.5 px-4 text-slate-800 uppercase tracking-wider text-xs">
+                          <td colSpan={5} className="py-3.5 px-3 text-slate-800 uppercase tracking-wider text-xs">
                             TOTAL SALES INVOICES ({filteredInvoices.length} ITEMS)
                           </td>
-                          <td className="py-3.5 px-4 text-right font-extrabold text-sm text-slate-900">
+                          <td className="py-3.5 px-3 text-right font-extrabold text-xs text-slate-800 font-sans">
+                            {formatMoney(filteredInvoices.reduce((acc, i) => acc + (i.subTotal ?? (i.amount / 1.2)), 0))}
+                          </td>
+                          <td className="py-3.5 px-3 text-right font-extrabold text-xs text-slate-700 font-sans">
+                            {formatMoney(filteredInvoices.reduce((acc, i) => acc + (i.totalTax ?? (i.amount - (i.subTotal ?? (i.amount / 1.2)))), 0))}
+                          </td>
+                          <td className="py-3.5 px-3 text-right font-extrabold text-xs text-slate-900 font-sans">
                             {formatMoney(filteredInvoices.reduce((acc, i) => acc + i.amount, 0))}
                           </td>
-                          <td className="py-3.5 px-4 text-right font-extrabold text-sm text-amber-600">
+                          <td className="py-3.5 px-3 text-right font-extrabold text-xs text-amber-600 font-sans">
                             {formatMoney(filteredInvoices.reduce((acc, i) => acc + i.amountDue, 0))}
                           </td>
                           <td></td>
@@ -704,6 +792,7 @@ export default function InvoicesBreakdownPanel({
         onCloseInvoice={handleCloseInvoice}
         onFocusInvoice={handleFocusInvoice}
         onUpdateInvoice={handleUpdateInvoice}
+        onOpenPayment={handleOpenPaymentDoc}
       />
     </AnimatePresence>
   );

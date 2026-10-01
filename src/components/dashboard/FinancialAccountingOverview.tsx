@@ -111,15 +111,15 @@ export function FinancialAccountingOverview({ data, loading }: FinancialAccounti
     },
     {
       title: "Profit & Loss",
-      description: "Detailed income statement with revenue and expense breakdown.",
+      description: "Detailed income statement with gross profit, COGS & net profit.",
       icon: TrendingUp,
       iconBg: "bg-emerald-50 border border-emerald-100/50 text-emerald-600",
       action: "View Profit & Loss",
       url: "/reports/profit-and-loss",
       metrics: [
-        { label: "Revenue (YTD)", value: formatVal(plRevenue) },
-        { label: "Expenses (YTD)", value: formatVal(plExpenses) },
-        { label: "Net Profit (YTD)", value: formatVal(plNetProfit), valueClass: "text-emerald-600" }
+        { label: "Gross Profit", value: formatVal(data?.grossProfit !== undefined ? data.grossProfit : (plRevenue - (data?.cogs || 0))), valueClass: "text-emerald-600 font-bold" },
+        { label: "Cost of Sales (COGS)", value: formatVal(data?.cogs || 0) },
+        { label: "Net Profit", value: formatVal(plNetProfit), valueClass: "text-emerald-600 font-bold" }
       ]
     },
     {

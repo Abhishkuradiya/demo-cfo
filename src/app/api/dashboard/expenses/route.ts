@@ -34,6 +34,7 @@ export async function GET(req: NextRequest) {
       }
     }
     const currency = orgReport?.raw_data?.BaseCurrency || orgReport?.BaseCurrency || orgReport?.CurrencyCode || 'GBP';
+    const orgName = orgReport?.Name || orgReport?.LegalName || orgReport?.raw_data?.Name || orgReport?.raw_data?.LegalName || 'Connected Organisation';
 
     // 2. Fetch ACCPAY Invoices (Bills) from Xero API or PostgreSQL Database
     let rawBillsList: any[] = [];
@@ -344,6 +345,7 @@ const parseXeroDate = (rawDate: any): { dateObj: Date; dateStr: string } => {
     return NextResponse.json({
       connected: isConnected,
       currency,
+      orgName,
       dateRange: {
         fromDate: fromDateStr || null,
         toDate: toDateStr || null,

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { 
@@ -9,35 +9,253 @@ import {
   ArrowRight, 
   Eye, 
   EyeOff, 
-  TrendingUp, 
+  BarChart3, 
+  Zap, 
+  Shield, 
+  Link2, 
+  Sun, 
+  Moon, 
+  Globe, 
+  Search, 
+  Sparkles, 
+  ArrowUpRight, 
+  Check, 
   ShieldCheck, 
-  PieChart, 
-  ChevronDown, 
-  Activity,
-  ArrowUpRight
+  ChevronDown,
+  Building2,
+  TrendingUp,
+  CreditCard,
+  CheckCircle2
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/providers/auth-provider';
 
+// Translations Dictionary for 5 Languages
+const translations: Record<string, {
+  headline: string;
+  smarter: string;
+  and: string;
+  faster: string;
+  subtitle: string;
+  goodMorning: string;
+  overviewSub: string;
+  revenue: string;
+  profit: string;
+  cash: string;
+  ar: string;
+  revenueTrend: string;
+  aiInsightTitle: string;
+  aiInsightBody: string;
+  viewAnalysis: string;
+  welcomeBack: string;
+  signinSub: string;
+  emailTab: string;
+  ssoTab: string;
+  emailLabel: string;
+  emailPlaceholder: string;
+  passwordLabel: string;
+  passwordPlaceholder: string;
+  rememberMe: string;
+  forgotPassword: string;
+  signInBtn: string;
+  orContinue: string;
+  ssoDesc: string;
+  ssoBtn: string;
+}> = {
+  English: {
+    headline: "From Data to Decisions,",
+    smarter: "Smarter",
+    and: " and ",
+    faster: "Faster.",
+    subtitle: "Automated financial insights, real-time Xero/QB integration, and AI-powered cash flow analytics for growing teams.",
+    goodMorning: "Good morning, Alex",
+    overviewSub: "Here's your live financial overview",
+    revenue: "Total Revenue",
+    profit: "Net Profit",
+    cash: "Total Cash",
+    ar: "AR Balance",
+    revenueTrend: "Revenue Trend",
+    aiInsightTitle: "AI CFO Insight",
+    aiInsightBody: "Revenue increased by 55.9%, driven by strong core product sales.",
+    viewAnalysis: "View Full Analysis",
+    welcomeBack: "Welcome Back",
+    signinSub: "Sign in to your account to continue",
+    emailTab: "Email Login",
+    ssoTab: "Single Sign-On",
+    emailLabel: "Email Address",
+    emailPlaceholder: "you@company.com",
+    passwordLabel: "Password",
+    passwordPlaceholder: "Enter your password",
+    rememberMe: "Remember me",
+    forgotPassword: "Forgot password?",
+    signInBtn: "Sign In",
+    orContinue: "or continue with",
+    ssoDesc: "Enter your corporate email domain for SAML / SSO:",
+    ssoBtn: "Continue with SSO",
+  },
+  Español: {
+    headline: "De Datos a Decisiones,",
+    smarter: "Más Inteligente",
+    and: " y ",
+    faster: "Más Rápido.",
+    subtitle: "Informes financieros automatizados, integración con Xero/QB y análisis de flujo de caja impulsados por IA.",
+    goodMorning: "Buenos días, Alex",
+    overviewSub: "Aquí está su resumen financiero en vivo",
+    revenue: "Ingresos Totales",
+    profit: "Beneficio Neto",
+    cash: "Efectivo Total",
+    ar: "Saldo por Cobrar",
+    revenueTrend: "Tendencia de Ingresos",
+    aiInsightTitle: "Análisis IA del CFO",
+    aiInsightBody: "Los ingresos aumentaron un 55,9% impulsados por fuertes ventas principales.",
+    viewAnalysis: "Ver Análisis Completo",
+    welcomeBack: "Bienvenido de Nuevo",
+    signinSub: "Inicie sesión en su cuenta para continuar",
+    emailTab: "Acceso con Email",
+    ssoTab: "Inicio de Sesión Único (SSO)",
+    emailLabel: "Correo Electrónico",
+    emailPlaceholder: "tu@empresa.com",
+    passwordLabel: "Contraseña",
+    passwordPlaceholder: "Ingrese su contraseña",
+    rememberMe: "Recordarme",
+    forgotPassword: "¿Olvidó su contraseña?",
+    signInBtn: "Iniciar Sesión",
+    orContinue: "o continuar con",
+    ssoDesc: "Ingrese el dominio de su empresa para autenticación SSO:",
+    ssoBtn: "Continuar con SSO",
+  },
+  Deutsch: {
+    headline: "Von Daten zu Entscheidungen,",
+    smarter: "Intelligenter",
+    and: " und ",
+    faster: "Schneller.",
+    subtitle: "Automatisierte Einblicke, Echtzeit-Xero/QB-Integration und KI-gestützte Cashflow-Analysen.",
+    goodMorning: "Guten Morgen, Alex",
+    overviewSub: "Hier ist Ihre aktuelle Finanzübersicht",
+    revenue: "Gesamtertrag",
+    profit: "Nettogewinn",
+    cash: "Gesamtes Bargeld",
+    ar: "Offene Forderungen",
+    revenueTrend: "Umsatztrend",
+    aiInsightTitle: "KI-CFO-Einblick",
+    aiInsightBody: "Der Umsatz stieg um 55,9 %, getrieben durch stärkere Verkäufe.",
+    viewAnalysis: "Vollständige Analyse anzeigen",
+    welcomeBack: "Willkommen zurück",
+    signinSub: "Melden Sie sich an, um fortzufahren",
+    emailTab: "E-Mail-Anmeldung",
+    ssoTab: "Single Sign-On (SSO)",
+    emailLabel: "E-Mail-Adresse",
+    emailPlaceholder: "sie@firma.de",
+    passwordLabel: "Passwort",
+    passwordPlaceholder: "Passwort eingeben",
+    rememberMe: "Angemeldet bleiben",
+    forgotPassword: "Passwort vergessen?",
+    signInBtn: "Anmelden",
+    orContinue: "oder fortfahren mit",
+    ssoDesc: "Geben Sie Ihre Unternehmens-Domain für SSO ein:",
+    ssoBtn: "Mit SSO fortfahren",
+  },
+  Français: {
+    headline: "Des Données aux Décisions,",
+    smarter: "Plus Intelligent",
+    and: " et ",
+    faster: "Plus Rapide.",
+    subtitle: "Analyses financières automatisées, intégration Xero/QB en temps réel et prévisions de trésorerie IA.",
+    goodMorning: "Bonjour, Alex",
+    overviewSub: "Voici votre aperçu financier en direct",
+    revenue: "Chiffre d'Affaires",
+    profit: "Bénéfice Net",
+    cash: "Trésorerie Totale",
+    ar: "Créances Clients",
+    revenueTrend: "Tendance des Revenus",
+    aiInsightTitle: "Analyse CFO par IA",
+    aiInsightBody: "Revenus en hausse de 55,9% grâce aux ventes de produits phares.",
+    viewAnalysis: "Voir l'Analyse Complète",
+    welcomeBack: "Bon Retour",
+    signinSub: "Connectez-vous à votre compte pour continuer",
+    emailTab: "Connexion E-mail",
+    ssoTab: "Connexion Unique (SSO)",
+    emailLabel: "Adresse E-mail",
+    emailPlaceholder: "vous@entreprise.com",
+    passwordLabel: "Mot de Passe",
+    passwordPlaceholder: "Entrez votre mot de passe",
+    rememberMe: "Se souvenir de moi",
+    forgotPassword: "Mot de passe oublié ?",
+    signInBtn: "Se Connecter",
+    orContinue: "ou continuer avec",
+    ssoDesc: "Entrez votre domaine d'entreprise pour le SSO :",
+    ssoBtn: "Continuer avec SSO",
+  },
+  Hindi: {
+    headline: "डेटा से निर्णयों तक,",
+    smarter: "अधिक स्मार्ट",
+    and: " और ",
+    faster: "अधिक तेज़।",
+    subtitle: "स्वचालित वित्तीय विश्लेषण, रीयल-टाइम Xero/QB एकीकरण, और AI-संचालित कैश फ़्लो अंतर्दृष्टि।",
+    goodMorning: "शुभ प्रभात, एलेक्स",
+    overviewSub: "यह आपका लाइव वित्तीय अवलोकन है",
+    revenue: "कुल राजस्व (Revenue)",
+    profit: "शुद्ध लाभ (Net Profit)",
+    cash: "कुल नकद (Cash)",
+    ar: "प्राप्य राशियाँ (AR Balance)",
+    revenueTrend: "राजस्व रुझान (Revenue Trend)",
+    aiInsightTitle: "AI CFO अंतर्दृष्टि",
+    aiInsightBody: "मुख्य उत्पाद बिक्री में वृद्धि से राजस्व में 55.9% की वृद्धि हुई।",
+    viewAnalysis: "पूरा विश्लेषण देखें",
+    welcomeBack: "वापसी पर स्वागत है",
+    signinSub: "जारी रखने के लिए अपने खाते में साइन इन करें",
+    emailTab: "ईमेल लॉगिन",
+    ssoTab: "सिंगल साइन-ऑन (SSO)",
+    emailLabel: "ईमेल पता",
+    emailPlaceholder: "you@company.com",
+    passwordLabel: "पासवर्ड",
+    passwordPlaceholder: "अपना पासवर्ड दर्ज करें",
+    rememberMe: "मुझे याद रखें",
+    forgotPassword: "पासवर्ड भूल गए?",
+    signInBtn: "साइन इन करें",
+    orContinue: "या इसके साथ जारी रखें",
+    ssoDesc: "SAML/SSO के लिए अपना कॉर्पोरेट ईमेल डोमेन दर्ज करें:",
+    ssoBtn: "SSO के साथ जारी रखें",
+  }
+};
+
 export default function LoginPage() {
   const router = useRouter();
   const { login } = useAuth();
+  
+  // Form State
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe] = useState(false);
-  const [dbStatus, setDbStatus] = useState<'checking' | 'postgres' | 'json'>('checking');
+  const [rememberMe, setRememberMe] = useState(true);
+  const [activeTab, setActiveTab] = useState<'email' | 'sso'>('email');
+  
+  // Theme & Language State
+  const [isDarkMode, setIsDarkMode] = useState(false);
+  const [selectedLang, setSelectedLang] = useState('English');
+  const [showLangDropdown, setShowLangDropdown] = useState(false);
+  const langDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Active Translated Texts
+  const t = translations[selectedLang] || translations.English;
 
   useEffect(() => {
-    fetch(`/api/db-status?t=${Date.now()}`)
-      .then(res => res.json())
-      .then(data => {
-        if (data.success) {
-          setDbStatus(data.isPostgres ? 'postgres' : 'json');
-        }
-      })
-      .catch(() => setDbStatus('json'));
+    const handleClickOutside = (e: MouseEvent) => {
+      if (langDropdownRef.current && !langDropdownRef.current.contains(e.target as Node)) {
+        setShowLangDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const emailParam = params.get('email');
+      if (emailParam) setEmail(emailParam);
+    }
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -66,9 +284,15 @@ export default function LoginPage() {
           role: 'owner',
           permissions: ['*']
         });
+
+        const params = new URLSearchParams(window.location.search);
+        const nextUrl = params.get('next');
         
-        // Redirect to dashboard
-        window.location.href = '/overview';
+        if (data.user.isOnboarded === false || nextUrl === '/onboarding') {
+          window.location.href = '/onboarding';
+        } else {
+          window.location.href = '/overview';
+        }
       } else {
         toast.error(data.message || 'Login failed. Please check credentials.');
       }
@@ -80,382 +304,495 @@ export default function LoginPage() {
   };
 
   const handleSocialSignIn = (provider: string) => {
-    toast.info(`${provider} integration is not configured for this workspace yet.`);
+    toast.info(`${provider} sign-in is coming soon for your organization.`);
   };
 
+  const languages = [
+    { code: 'EN', name: 'English' },
+    { code: 'ES', name: 'Español' },
+    { code: 'DE', name: 'Deutsch' },
+    { code: 'FR', name: 'Français' },
+    { code: 'HI', name: 'Hindi' },
+  ];
+
   return (
-    <div className="min-h-screen w-full flex bg-[#f8fafc] font-sans overflow-x-hidden selection:bg-blue-500 selection:text-white">
+    <div className={`min-h-screen w-full font-sans transition-colors duration-300 select-none flex flex-col justify-between relative overflow-x-hidden ${
+      isDarkMode 
+        ? 'bg-[#060c18] text-slate-100 selection:bg-cyan-500 selection:text-black' 
+        : 'bg-gradient-to-br from-[#f8fafc] via-[#edf4ff] to-[#f1f5f9] text-slate-800 selection:bg-blue-600 selection:text-white'
+    }`}>
       
-      {/* Left Pane: Interactive Financial Dashboard Showcase (lg only) */}
-      <div className="hidden lg:flex lg:w-1/2 relative flex-col justify-between p-12 bg-gradient-to-br from-[#091529] via-[#0E1E38] to-[#040A15] text-white overflow-hidden">
-        {/* Glow effect background */}
-        <div className="absolute top-1/4 left-1/4 w-[400px] h-[400px] rounded-full bg-blue-500/10 blur-[120px] pointer-events-none animate-pulse" style={{ animationDuration: '6s' }} />
-        <div className="absolute bottom-1/4 right-1/4 w-[350px] h-[350px] rounded-full bg-indigo-500/10 blur-[100px] pointer-events-none animate-pulse" style={{ animationDuration: '8s' }} />
+      {/* Background Decorative Gradients */}
+      <div className="absolute top-0 left-0 w-full h-full pointer-events-none overflow-hidden z-0">
+        {isDarkMode ? (
+          <>
+            <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] rounded-full bg-cyan-500/10 blur-[130px]" />
+            <div className="absolute bottom-[-10%] right-[-10%] w-[600px] h-[600px] rounded-full bg-blue-600/10 blur-[150px]" />
+          </>
+        ) : (
+          <>
+            <div className="absolute top-[-5%] left-[-5%] w-[500px] h-[500px] rounded-full bg-blue-400/15 blur-[120px]" />
+            <div className="absolute bottom-[-5%] right-[-5%] w-[600px] h-[600px] rounded-full bg-cyan-400/15 blur-[140px]" />
+          </>
+        )}
+      </div>
+
+      {/* SLEEK INTEGRATED TOP HEADER */}
+      <header className="relative z-20 w-full max-w-7xl mx-auto px-6 sm:px-10 py-6 flex items-center justify-between">
         
-        {/* Top Header Branding */}
-        <div className="relative z-10 flex items-center gap-3">
-          <div className="h-10 w-10 rounded-xl bg-blue-600 flex items-center justify-center text-white font-black shadow-lg shadow-blue-500/20 text-sm tracking-tighter">
-            vCFO
+        {/* Brand Logo */}
+        <Link href="/" className="flex items-center gap-3 group cursor-pointer">
+          <div className="flex items-end gap-1.5 h-8 flex-shrink-0">
+            <span className="w-2.5 h-4 bg-[#2563eb] rounded-full transition-transform group-hover:scale-110"></span>
+            <span className="w-2.5 h-6 bg-[#3b82f6] rounded-full transition-transform group-hover:scale-110 delay-75"></span>
+            <span className="w-2.5 h-8 bg-[#00b7e2] rounded-full transition-transform group-hover:scale-110 delay-150"></span>
           </div>
-          <div>
-            <h2 className="font-extrabold text-base tracking-tight leading-none text-slate-100">Virtual CFO</h2>
-            <p className="text-[10px] text-slate-400 font-semibold tracking-wider uppercase mt-0.5">Intelligence Platform</p>
+          <div className="flex flex-col">
+            <span className={`font-black text-xl tracking-tight leading-none ${isDarkMode ? 'text-white' : 'text-[#0f172a]'}`}>
+              Virtual CFO
+            </span>
+            <span className={`text-[10.5px] font-medium leading-none mt-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+              Your Financial Intelligence Partner
+            </span>
           </div>
+        </Link>
+
+        {/* Center Header Nav Links */}
+        <nav className={`hidden md:flex items-center gap-7 text-xs font-semibold ${
+          isDarkMode ? 'text-slate-400' : 'text-slate-600'
+        }`}>
+          <Link href="#privacy" onClick={(e) => { e.preventDefault(); toast.info("Privacy Policy document"); }} className="hover:text-blue-500 dark:hover:text-cyan-400 transition">Privacy Policy</Link>
+          <Link href="#terms" onClick={(e) => { e.preventDefault(); toast.info("Terms of Service document"); }} className="hover:text-blue-500 dark:hover:text-cyan-400 transition">Terms of Service</Link>
+          <Link href="#security" onClick={(e) => { e.preventDefault(); toast.info("Security & Compliance portal"); }} className="hover:text-blue-500 dark:hover:text-cyan-400 transition">Security</Link>
+          <Link href="#support" onClick={(e) => { e.preventDefault(); toast.info("Contact CFO Support"); }} className="hover:text-blue-500 dark:hover:text-cyan-400 transition">Help Center</Link>
+        </nav>
+
+        {/* Top Right Utilities: Minimal Icon Buttons */}
+        <div className="flex items-center gap-3 text-xs font-medium">
+          
+          {/* Theme Toggle minimal icon button */}
+          <button
+            onClick={() => {
+              setIsDarkMode(!isDarkMode);
+              toast.success(isDarkMode ? 'Switched to Light Mode' : 'Switched to Dark Mode');
+            }}
+            className={`p-2.5 rounded-full transition-all duration-200 cursor-pointer ${
+              isDarkMode 
+                ? 'text-amber-400 hover:bg-slate-800/80' 
+                : 'text-slate-600 hover:bg-slate-200/60'
+            }`}
+            title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+          >
+            {isDarkMode ? <Sun className="h-4.5 w-4.5" /> : <Moon className="h-4.5 w-4.5" />}
+          </button>
+
+          {/* Language Selector minimal dropdown button */}
+          <div className="relative" ref={langDropdownRef}>
+            <button
+              onClick={() => setShowLangDropdown(!showLangDropdown)}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl font-semibold transition-all duration-200 cursor-pointer ${
+                isDarkMode 
+                  ? 'text-slate-200 hover:bg-slate-800/80' 
+                  : 'text-slate-700 hover:bg-slate-200/60'
+              }`}
+            >
+              <Globe className="h-4 w-4 text-[#00b7e2]" />
+              <span>{selectedLang}</span>
+              <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-200 ${showLangDropdown ? 'rotate-180' : ''}`} />
+            </button>
+
+            {/* Language Menu Dropdown Box */}
+            {showLangDropdown && (
+              <div className={`absolute right-0 mt-2 w-40 rounded-2xl border shadow-2xl p-1.5 z-50 animate-in fade-in slide-in-from-top-2 duration-200 ${
+                isDarkMode ? 'bg-[#0f172a] border-slate-800 text-slate-200' : 'bg-white border-slate-200 text-slate-800'
+              }`}>
+                {languages.map((l) => (
+                  <button
+                    key={l.code}
+                    onClick={() => {
+                      setSelectedLang(l.name);
+                      setShowLangDropdown(false);
+                      toast.success(`Language set to ${l.name}`);
+                    }}
+                    className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium transition cursor-pointer ${
+                      selectedLang === l.name 
+                        ? (isDarkMode ? 'bg-blue-600/30 text-cyan-400 font-bold' : 'bg-blue-50 text-blue-600 font-bold')
+                        : (isDarkMode ? 'hover:bg-slate-800' : 'hover:bg-slate-50')
+                    }`}
+                  >
+                    <span className="flex items-center gap-2">
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-200/60 dark:bg-slate-700 font-mono text-slate-700 dark:text-slate-200">{l.code}</span>
+                      <span>{l.name}</span>
+                    </span>
+                    {selectedLang === l.name && <Check className="h-3.5 w-3.5" />}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+        </div>
+      </header>
+
+      {/* MAIN CONTENT GRID */}
+      <main className="relative z-10 w-full max-w-7xl mx-auto px-6 sm:px-10 py-2 lg:py-6 flex-1 grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
+        
+        {/* LEFT COLUMN: CFO PRODUCT SHOWCASE */}
+        <div className="lg:col-span-7 space-y-6">
+          
+          <div className="space-y-3">
+            <h1 className={`text-4xl sm:text-5xl lg:text-[48px] font-black tracking-tight leading-[1.15] ${
+              isDarkMode ? 'text-white' : 'text-slate-900'
+            }`}>
+              {t.headline}<br />
+              <span className="text-[#2563eb]">{t.smarter}</span>{t.and}<span className="text-[#00b7e2]">{t.faster}</span>
+            </h1>
+            <p className={`text-sm sm:text-base max-w-xl leading-relaxed font-normal ${
+              isDarkMode ? 'text-slate-400' : 'text-slate-600'
+            }`}>
+              {t.subtitle}
+            </p>
+          </div>
+
+          {/* INTERACTIVE COMPACT DASHBOARD MOCKUP */}
+          <div className={`rounded-3xl p-5 border shadow-2xl transition duration-300 ${
+            isDarkMode 
+              ? 'bg-slate-900/80 border-slate-800 shadow-cyan-950/20' 
+              : 'bg-white/90 border-slate-200/90 shadow-slate-200/50'
+          }`}>
+            
+            {/* Mock Header */}
+            <div className={`flex items-center justify-between border-b pb-3 ${
+              isDarkMode ? 'border-slate-800' : 'border-slate-100'
+            }`}>
+              <div className="flex items-center gap-2">
+                <div className="flex items-end gap-1 h-5">
+                  <span className="w-1.5 h-2.5 bg-[#2563eb] rounded-full"></span>
+                  <span className="w-1.5 h-3.5 bg-[#3b82f6] rounded-full"></span>
+                  <span className="w-1.5 h-5 bg-[#00b7e2] rounded-full"></span>
+                </div>
+                <span className={`text-xs font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Virtual CFO</span>
+              </div>
+
+              <div className={`hidden sm:flex items-center gap-2 px-3 py-1 rounded-xl text-[11px] w-44 ${
+                isDarkMode ? 'bg-slate-800/80 text-slate-400' : 'bg-slate-100/80 text-slate-400'
+              }`}>
+                <Search className="h-3 w-3" />
+                <span>Search metrics...</span>
+              </div>
+
+              <div className="flex items-center gap-2 text-[11px]">
+                <div className={`px-2.5 py-1 rounded-lg font-semibold flex items-center gap-1 ${
+                  isDarkMode ? 'bg-slate-800 text-slate-200' : 'bg-slate-100 text-slate-700'
+                }`}>
+                  Acme Ltd. <ChevronDown className="h-3 w-3 text-slate-400" />
+                </div>
+                <div className="h-6 w-6 rounded-full bg-[#00b7e2] text-white font-bold text-[10px] flex items-center justify-center">
+                  A
+                </div>
+              </div>
+            </div>
+
+            {/* Mock Subheader */}
+            <div className="flex items-center justify-between py-2.5">
+              <div>
+                <h3 className={`text-xs font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                  {t.goodMorning}
+                </h3>
+                <p className={`text-[10.5px] ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>{t.overviewSub}</p>
+              </div>
+
+              <div className={`text-[10px] font-semibold px-2.5 py-1 rounded-lg ${
+                isDarkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-600'
+              }`}>
+                01 Apr - 30 Sep
+              </div>
+            </div>
+
+            {/* 4 Metric Cards Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+              
+              <div className={`p-2.5 rounded-2xl border space-y-0.5 ${
+                isDarkMode ? 'bg-slate-800/50 border-slate-800' : 'bg-slate-50/80 border-slate-100'
+              }`}>
+                <div className="flex items-center justify-between text-[10px]">
+                  <span className={isDarkMode ? 'text-slate-400' : 'text-slate-500'}>{t.revenue}</span>
+                  <BarChart3 className="h-3 w-3 text-blue-500" />
+                </div>
+                <div className={`text-xs font-black tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>£3,998,930</div>
+                <div className="text-[8.5px] font-bold text-emerald-500">↑ 55.9%</div>
+              </div>
+
+              <div className={`p-2.5 rounded-2xl border space-y-0.5 ${
+                isDarkMode ? 'bg-slate-800/50 border-slate-800' : 'bg-slate-50/80 border-slate-100'
+              }`}>
+                <div className="flex items-center justify-between text-[10px]">
+                  <span className={isDarkMode ? 'text-slate-400' : 'text-slate-500'}>{t.profit}</span>
+                  <TrendingUp className="h-3 w-3 text-rose-500" />
+                </div>
+                <div className={`text-xs font-black tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>-£7,740</div>
+                <div className="text-[8.5px] font-bold text-rose-400">↑ 87.1%</div>
+              </div>
+
+              <div className={`p-2.5 rounded-2xl border space-y-0.5 ${
+                isDarkMode ? 'bg-slate-800/50 border-slate-800' : 'bg-slate-50/80 border-slate-100'
+              }`}>
+                <div className="flex items-center justify-between text-[10px]">
+                  <span className={isDarkMode ? 'text-slate-400' : 'text-slate-500'}>{t.cash}</span>
+                  <Zap className="h-3 w-3 text-emerald-500" />
+                </div>
+                <div className={`text-xs font-black tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>£144,417</div>
+                <div className="text-[8.5px] font-bold text-emerald-500">↑ 83.7%</div>
+              </div>
+
+              <div className={`p-2.5 rounded-2xl border space-y-0.5 ${
+                isDarkMode ? 'bg-slate-800/50 border-slate-800' : 'bg-slate-50/80 border-slate-100'
+              }`}>
+                <div className="flex items-center justify-between text-[10px]">
+                  <span className={isDarkMode ? 'text-slate-400' : 'text-slate-500'}>{t.ar}</span>
+                  <Building2 className="h-3 w-3 text-purple-500" />
+                </div>
+                <div className={`text-xs font-black tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>£3,704,165</div>
+                <div className="text-[8.5px] font-bold text-emerald-500">↑ 52.4%</div>
+              </div>
+
+            </div>
+
+            {/* Revenue Trend Line & AI Box */}
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 pt-3">
+              <div className={`sm:col-span-7 p-2.5 rounded-2xl border ${
+                isDarkMode ? 'bg-slate-800/40 border-slate-800' : 'bg-slate-50/60 border-slate-100'
+              }`}>
+                <div className="flex items-center justify-between text-[10px] font-bold mb-1">
+                  <span className={isDarkMode ? 'text-slate-200' : 'text-slate-800'}>{t.revenueTrend}</span>
+                  <span className="text-blue-500">Current Year</span>
+                </div>
+                <div className="h-16 w-full">
+                  <svg className="w-full h-full" viewBox="0 0 300 60" preserveAspectRatio="none">
+                    <path d="M 10,50 C 50,45 80,30 120,25 C 160,20 200,10 290,5" fill="none" stroke="#2563eb" strokeWidth="2.5" />
+                    <path d="M 10,55 C 50,50 80,48 120,40 C 160,35 200,30 290,25" fill="none" stroke="#00b7e2" strokeWidth="1.5" strokeDasharray="3 2" />
+                  </svg>
+                </div>
+              </div>
+
+              <div className={`sm:col-span-5 p-3 rounded-2xl border flex flex-col justify-between ${
+                isDarkMode ? 'bg-blue-950/30 border-blue-800/50' : 'bg-blue-50/80 border-blue-100'
+              }`}>
+                <div className="flex items-center gap-1.5 text-[11px] font-extrabold text-blue-500">
+                  <Sparkles className="h-3.5 w-3.5" />
+                  <span>{t.aiInsightTitle}</span>
+                </div>
+                <p className={`text-[10px] leading-relaxed ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>
+                  {t.aiInsightBody}
+                </p>
+              </div>
+            </div>
+
+          </div>
+
+          {/* Testimonial Quote Footer */}
+          <div className="flex items-center gap-3 pt-1">
+            <div className="h-7 w-7 rounded-full bg-blue-600 text-white font-bold text-[10px] flex items-center justify-center flex-shrink-0">
+              TS
+            </div>
+            <div>
+              <p className={`text-xs italic font-medium ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                "Virtual CFO has transformed how we understand and control our finances."
+              </p>
+              <span className={`text-[10px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>TechNova Solutions • Growing smarter with Virtual CFO</span>
+            </div>
+          </div>
+
         </div>
 
-        {/* Center Marketing Graphics */}
-        <div className="relative z-10 my-auto py-8">
-          <div className="max-w-xl space-y-8">
-            <div className="space-y-4">
-              <h1 className="text-4xl xl:text-5xl font-extrabold tracking-tight text-white leading-tight">
-                Smart Financial Insights.<br />
-                <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-indigo-300 to-emerald-400">
-                  Better Business Decisions.
-                </span>
-              </h1>
-              <p className="text-slate-400 text-sm xl:text-base leading-relaxed font-light">
-                Your all-in-one platform for real-time financial analytics, advanced reporting, cash-flow forecasting, and automated business intelligence.
+        {/* RIGHT COLUMN: ELEGANT & PERFECTLY PROPORTIONED LOGIN CARD */}
+        <div className="lg:col-span-5 flex justify-center lg:justify-end">
+          
+          <div className={`w-full max-w-md rounded-3xl p-7 sm:p-8 border shadow-2xl transition-all duration-300 ${
+            isDarkMode 
+              ? 'bg-[#0f172a]/95 border-slate-800 text-slate-100 shadow-black/50' 
+              : 'bg-white border-slate-200/80 text-slate-900 shadow-slate-200/60'
+          }`}>
+            
+            {/* Header section inside card */}
+            <div className="space-y-1 text-left mb-5">
+              <h2 className="text-2xl font-black tracking-tight">{t.welcomeBack}</h2>
+              <p className={`text-xs font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                {t.signinSub}
               </p>
             </div>
 
-            {/* Dashboard Cards Mock Visualizer */}
-            <div className="grid grid-cols-2 gap-4">
-              {/* Card 1: Revenue */}
-              <div className="bg-slate-900/45 backdrop-blur-md border border-slate-800/80 rounded-2xl p-4 shadow-xl flex flex-col justify-between hover:border-blue-500/40 transition duration-300 group">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Revenue</span>
-                  <div className="flex items-center text-[9px] text-slate-400 bg-slate-800/60 rounded px-1.5 py-0.5 gap-1">
-                    This Month <ChevronDown className="h-2 w-2" />
-                  </div>
-                </div>
-                <div className="mt-2.5 flex items-baseline gap-2">
-                  <span className="text-xl font-bold text-slate-100 tracking-tight">$98,750</span>
-                  <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
-                    <ArrowUpRight className="h-2 w-2" /> 12.5%
-                  </span>
-                </div>
-                <div className="mt-3">
-                  <svg className="w-full h-12 overflow-visible" viewBox="0 0 200 60" preserveAspectRatio="none">
-                    <defs>
-                      <linearGradient id="rev-grad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.3" />
-                        <stop offset="100%" stopColor="#3b82f6" stopOpacity="0.0" />
-                      </linearGradient>
-                    </defs>
-                    <path
-                      d="M 0,45 C 30,35 40,55 70,30 C 100,5 120,40 150,15 C 170,0 185,10 200,5"
-                      fill="none"
-                      stroke="#3b82f6"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      className="group-hover:stroke-blue-400 transition-colors"
-                    />
-                    <path
-                      d="M 0,45 C 30,35 40,55 70,30 C 100,5 120,40 150,15 C 170,0 185,10 200,5 L 200,60 L 0,60 Z"
-                      fill="url(#rev-grad)"
-                    />
-                  </svg>
-                </div>
-              </div>
-
-              {/* Card 2: Cash Flow Donut */}
-              <div className="bg-slate-900/45 backdrop-blur-md border border-slate-800/80 rounded-2xl p-4 shadow-xl flex flex-col justify-between hover:border-indigo-500/40 transition duration-300 group">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Cash Flow</span>
-                  <div className="flex items-center text-[9px] text-slate-400 bg-slate-800/60 rounded px-1.5 py-0.5 gap-1">
-                    This Month <ChevronDown className="h-2 w-2" />
-                  </div>
-                </div>
-                <div className="mt-3 flex items-center gap-4">
-                  {/* Mini Donut Chart */}
-                  <div className="relative h-14 w-14 flex-shrink-0">
-                    <svg className="h-full w-full rotate-[-90deg]" viewBox="0 0 36 36">
-                      <path
-                        className="text-slate-800"
-                        strokeWidth="3.5"
-                        stroke="currentColor"
-                        fill="none"
-                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                      />
-                      <path
-                        className="text-indigo-500"
-                        strokeWidth="3.5"
-                        strokeDasharray="72, 100"
-                        strokeLinecap="round"
-                        stroke="currentColor"
-                        fill="none"
-                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                      />
-                    </svg>
-                    <div className="absolute inset-0 flex flex-col items-center justify-center">
-                      <span className="text-[10px] font-bold text-slate-100 leading-none">72%</span>
-                      <span className="text-[6px] text-slate-400 uppercase font-semibold scale-90 mt-0.5">Healthy</span>
-                    </div>
-                  </div>
-                  {/* Legend stats */}
-                  <div className="flex flex-col gap-1.5 text-[8.5px]">
-                    <div className="flex items-center gap-1">
-                      <div className="h-1.5 w-1.5 rounded-full bg-blue-400" />
-                      <span className="text-slate-400 font-medium">In: $125k</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <div className="h-1.5 w-1.5 rounded-full bg-indigo-400" />
-                      <span className="text-slate-400 font-medium">Out: $48k</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <div className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                      <span className="text-slate-100 font-bold">Net: $77k</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Card 3: Expenses */}
-              <div className="bg-slate-900/45 backdrop-blur-md border border-slate-800/80 rounded-2xl p-4 shadow-xl flex flex-col justify-between hover:border-purple-500/40 transition duration-300 group">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Expenses</span>
-                  <div className="flex items-center text-[9px] text-slate-400 bg-slate-800/60 rounded px-1.5 py-0.5 gap-1">
-                    This Month <ChevronDown className="h-2 w-2" />
-                  </div>
-                </div>
-                <div className="mt-2.5 flex items-baseline gap-2">
-                  <span className="text-xl font-bold text-slate-100 tracking-tight">$32,680</span>
-                  <span className="text-[9px] font-bold text-rose-400 bg-rose-500/10 px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
-                    <ArrowUpRight className="h-2 w-2" /> 6.8%
-                  </span>
-                </div>
-                <div className="mt-3">
-                  <svg className="w-full h-12 overflow-visible" viewBox="0 0 200 60" preserveAspectRatio="none">
-                    <defs>
-                      <linearGradient id="exp-grad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#a855f7" stopOpacity="0.3" />
-                        <stop offset="100%" stopColor="#a855f7" stopOpacity="0.0" />
-                      </linearGradient>
-                    </defs>
-                    <path
-                      d="M 0,15 C 20,25 40,5 60,35 C 80,65 110,25 140,40 C 160,50 180,30 200,20"
-                      fill="none"
-                      stroke="#a855f7"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      className="group-hover:stroke-purple-400 transition-colors"
-                    />
-                    <path
-                      d="M 0,15 C 20,25 40,5 60,35 C 80,65 110,25 140,40 C 160,50 180,30 200,20 L 200,60 L 0,60 Z"
-                      fill="url(#exp-grad)"
-                    />
-                  </svg>
-                </div>
-              </div>
-
-              {/* Card 4: Profit Margin */}
-              <div className="bg-slate-900/45 backdrop-blur-md border border-slate-800/80 rounded-2xl p-4 shadow-xl flex flex-col justify-between hover:border-emerald-500/40 transition duration-300 group">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Profit Margin</span>
-                  <div className="flex items-center text-[9px] text-slate-400 bg-slate-800/60 rounded px-1.5 py-0.5 gap-1">
-                    This Month <ChevronDown className="h-2 w-2" />
-                  </div>
-                </div>
-                <div className="mt-2.5 flex items-baseline gap-2">
-                  <span className="text-xl font-bold text-slate-100 tracking-tight">28.4%</span>
-                  <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
-                    <ArrowUpRight className="h-2 w-2" /> 8.3%
-                  </span>
-                </div>
-                <div className="mt-3">
-                  <svg className="w-full h-12 overflow-visible" viewBox="0 0 200 60" preserveAspectRatio="none">
-                    <defs>
-                      <linearGradient id="margin-grad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#10b981" stopOpacity="0.3" />
-                        <stop offset="100%" stopColor="#10b981" stopOpacity="0.0" />
-                      </linearGradient>
-                    </defs>
-                    <path
-                      d="M 0,40 C 30,45 60,35 90,20 C 120,5 150,15 200,2"
-                      fill="none"
-                      stroke="#10b981"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      className="group-hover:stroke-emerald-400 transition-colors"
-                    />
-                    <path
-                      d="M 0,40 C 30,45 60,35 90,20 C 120,5 150,15 200,2 L 200,60 L 0,60 Z"
-                      fill="url(#margin-grad)"
-                    />
-                  </svg>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Left Footer Badges */}
-        <div className="relative z-10 grid grid-cols-3 gap-6 pt-6 border-t border-slate-800/80">
-          <div className="flex gap-2.5 items-start">
-            <span className="p-1.5 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400">
-              <Activity className="h-4 w-4" />
-            </span>
-            <div>
-              <h4 className="text-[11px] font-bold text-slate-200">Real-time Analytics</h4>
-              <p className="text-[9.5px] text-slate-400 font-light mt-0.5">Live financial insights at your fingertips</p>
-            </div>
-          </div>
-          <div className="flex gap-2.5 items-start">
-            <span className="p-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400">
-              <ShieldCheck className="h-4 w-4" />
-            </span>
-            <div>
-              <h4 className="text-[11px] font-bold text-slate-200">Secure & Reliable</h4>
-              <p className="text-[9.5px] text-slate-400 font-light mt-0.5">Enterprise-grade security for your data</p>
-            </div>
-          </div>
-          <div className="flex gap-2.5 items-start">
-            <span className="p-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
-              <PieChart className="h-4 w-4" />
-            </span>
-            <div>
-              <h4 className="text-[11px] font-bold text-slate-200">Data-Driven Decisions</h4>
-              <p className="text-[9.5px] text-slate-400 font-light mt-0.5">Powerful reports to grow your business</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Right Pane: Login Form */}
-      <div className="w-full lg:w-1/2 flex items-center justify-center p-6 md:p-12 bg-radial from-[#f1f5f9] via-[#f8fafc] to-[#e2e8f0]">
-        
-        <div className="w-full max-w-md bg-white/80 border border-slate-200/80 backdrop-blur-md rounded-3xl p-8 md:p-10 shadow-2xl shadow-slate-200/40 flex flex-col justify-between min-h-[580px]">
-          
-          <div>
-            {/* Logo / Title Block */}
-            <div className="text-center flex flex-col items-center mb-8">
-              <div className="h-11 w-11 rounded-2xl bg-blue-600 flex items-center justify-center text-white font-black shadow-lg shadow-blue-500/25 text-sm mb-3">
-                vCFO
-              </div>
-              <h1 className="text-2xl font-black text-slate-900 tracking-tight">Welcome Back!</h1>
-              <p className="text-xs text-slate-400 font-medium mt-1">Sign in to your Virtual CFO dashboard</p>
-
-              {/* Database Connection Status Badge */}
-              {dbStatus === 'postgres' && (
-                <div className="mt-3.5 flex items-center gap-1.5 justify-center bg-emerald-50 text-emerald-700 text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-full border border-emerald-200/80 shadow-sm shadow-emerald-100/50">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  PostgreSQL Connected
-                </div>
-              )}
-              {dbStatus === 'json' && (
-                <div className="mt-3.5 flex items-center gap-1.5 justify-center bg-red-50 text-red-700 text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-full border border-red-200/80 shadow-sm shadow-red-100/50">
-                  <span className="h-1.5 w-1.5 rounded-full bg-red-550 animate-pulse" />
-                  PostgreSQL Connection Failed
-                </div>
-              )}
-              {dbStatus === 'checking' && (
-                <div className="mt-3.5 flex items-center gap-1.5 justify-center bg-slate-50 text-slate-500 text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-full border border-slate-200/80">
-                  <span className="h-1.5 w-1.5 rounded-full bg-slate-400 animate-pulse" />
-                  Checking DB Status...
-                </div>
-              )}
-            </div>
-
-            {/* Login Form */}
-            <form onSubmit={handleSubmit} className="space-y-4">
-              
-              {/* Email Input */}
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Email Address</label>
-                <div className="relative flex items-center">
-                  <span className="absolute left-3 text-slate-400"><Mail className="h-4 w-4" /></span>
-                  <input
-                    type="email"
-                    placeholder="you@company.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    disabled={loading}
-                    className="w-full pl-10 pr-4 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 bg-slate-50/50 hover:bg-slate-50 transition"
-                    required
-                  />
-                </div>
-              </div>
-
-              {/* Password Input */}
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Password</label>
-                </div>
-                <div className="relative flex items-center">
-                  <span className="absolute left-3 text-slate-400"><Lock className="h-4 w-4" /></span>
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    placeholder="••••••••"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    disabled={loading}
-                    className="w-full pl-10 pr-10 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 bg-slate-50/50 hover:bg-slate-50 transition"
-                    required
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 text-slate-400 hover:text-slate-600 transition cursor-pointer"
-                  >
-                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-              </div>
-
-              {/* Extra actions: Remember Me / Forgot Password */}
-              <div className="flex items-center justify-between pt-1">
-                <label className="flex items-center gap-2 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={rememberMe}
-                    onChange={(e) => setRememberMe(e.target.checked)}
-                    className="h-4 w-4 rounded border-slate-200 text-blue-600 focus:ring-blue-500/20"
-                  />
-                  <span className="text-xs text-slate-500 font-medium hover:text-slate-700 transition">Remember me</span>
-                </label>
-                <Link href="#" onClick={(e) => { e.preventDefault(); toast.info("Password reset flow is not implemented in this demo."); }} className="text-xs text-blue-600 hover:text-blue-700 font-bold transition hover:underline">
-                  Forgot password?
-                </Link>
-              </div>
-
-              {/* Sign In Submit */}
+            {/* Email Login vs SSO Tabs */}
+            <div className={`flex border-b text-xs font-bold text-center mb-5 ${
+              isDarkMode ? 'border-slate-800' : 'border-slate-200'
+            }`}>
               <button
-                type="submit"
-                disabled={loading}
-                className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl font-bold text-xs uppercase tracking-wider shadow-lg shadow-blue-500/10 transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 mt-2"
+                type="button"
+                onClick={() => setActiveTab('email')}
+                className={`flex-1 pb-2.5 transition border-b-2 cursor-pointer ${
+                  activeTab === 'email'
+                    ? 'border-[#00b7e2] text-[#00b7e2] font-extrabold'
+                    : (isDarkMode ? 'border-transparent text-slate-400 hover:text-slate-200' : 'border-transparent text-slate-400 hover:text-slate-600')
+                }`}
               >
-                {loading ? (
-                  <span className="flex items-center gap-2">
-                    <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                    </svg>
-                    Signing In...
-                  </span>
-                ) : (
-                  <>
-                    Sign In
-                    <ArrowRight className="h-4 w-4" />
-                  </>
-                )}
+                {t.emailTab}
               </button>
-            </form>
+              <button
+                type="button"
+                onClick={() => setActiveTab('sso')}
+                className={`flex-1 pb-2.5 transition border-b-2 cursor-pointer ${
+                  activeTab === 'sso'
+                    ? 'border-[#00b7e2] text-[#00b7e2] font-extrabold'
+                    : (isDarkMode ? 'border-transparent text-slate-400 hover:text-slate-200' : 'border-transparent text-slate-400 hover:text-slate-600')
+                }`}
+              >
+                {t.ssoTab}
+              </button>
+            </div>
+
+            {/* Form */}
+            {activeTab === 'email' ? (
+              <form onSubmit={handleSubmit} className="space-y-4">
+                
+                {/* Email Input */}
+                <div className="space-y-1.5">
+                  <label className={`text-[11px] font-semibold ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>{t.emailLabel}</label>
+                  <div className="relative flex items-center">
+                    <span className={`absolute left-3.5 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                      <Mail className="h-4 w-4" />
+                    </span>
+                    <input
+                      type="email"
+                      placeholder={t.emailPlaceholder}
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      disabled={loading}
+                      className={`w-full pl-10 pr-4 py-2.5 text-xs border rounded-xl focus:outline-none transition ${
+                        isDarkMode 
+                          ? 'bg-slate-800/60 border-slate-700 text-white focus:border-[#00b7e2] focus:ring-1 focus:ring-[#00b7e2]' 
+                          : 'bg-slate-50/50 border-slate-200 text-slate-800 focus:border-blue-600 focus:ring-1 focus:ring-blue-600/20'
+                      }`}
+                      required
+                    />
+                  </div>
+                </div>
+
+                {/* Password Input */}
+                <div className="space-y-1.5">
+                  <label className={`text-[11px] font-semibold ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>{t.passwordLabel}</label>
+                  <div className="relative flex items-center">
+                    <span className={`absolute left-3.5 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                      <Lock className="h-4 w-4" />
+                    </span>
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      placeholder={t.passwordPlaceholder}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      disabled={loading}
+                      className={`w-full pl-10 pr-10 py-2.5 text-xs border rounded-xl focus:outline-none transition ${
+                        isDarkMode 
+                          ? 'bg-slate-800/60 border-slate-700 text-white focus:border-[#00b7e2] focus:ring-1 focus:ring-[#00b7e2]' 
+                          : 'bg-slate-50/50 border-slate-200 text-slate-800 focus:border-blue-600 focus:ring-1 focus:ring-blue-600/20'
+                      }`}
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className={`absolute right-3.5 transition cursor-pointer ${
+                        isDarkMode ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600'
+                      }`}
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Options Row */}
+                <div className="flex items-center justify-between pt-0.5">
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={rememberMe}
+                      onChange={(e) => setRememberMe(e.target.checked)}
+                      className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500/20"
+                    />
+                    <span className={`text-xs font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>{t.rememberMe}</span>
+                  </label>
+                  
+                  <Link
+                    href="#"
+                    onClick={(e) => { e.preventDefault(); toast.info("Password reset link sent to your email."); }}
+                    className="text-xs font-bold text-[#00b7e2] hover:underline transition"
+                  >
+                    {t.forgotPassword}
+                  </Link>
+                </div>
+
+                {/* Submit Button */}
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full py-3 bg-[#2563eb] hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl font-bold text-xs uppercase tracking-wider transition shadow-lg shadow-blue-600/25 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 mt-2"
+                >
+                  {loading ? (
+                    <span className="flex items-center gap-2">
+                      <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      Signing In...
+                    </span>
+                  ) : (
+                    <>
+                      {t.signInBtn}
+                      <ArrowRight className="h-4 w-4" />
+                    </>
+                  )}
+                </button>
+              </form>
+            ) : (
+              <div className="space-y-3 py-2 text-center">
+                <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>{t.ssoDesc}</p>
+                <input
+                  type="email"
+                  placeholder="name@company.domain"
+                  className={`w-full px-4 py-2.5 text-xs border rounded-xl focus:outline-none ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'
+                  }`}
+                />
+                <button
+                  type="button"
+                  onClick={() => toast.info("Redirecting to Corporate SSO Provider...")}
+                  className="w-full py-2.5 bg-[#2563eb] text-white rounded-xl font-bold text-xs uppercase tracking-wider shadow-md"
+                >
+                  {t.ssoBtn}
+                </button>
+              </div>
+            )}
 
             {/* Separator / Divider */}
-            <div className="relative flex py-5 items-center">
-              <div className="flex-grow border-t border-slate-100"></div>
-              <span className="flex-shrink mx-4 text-[10px] text-slate-400 font-bold uppercase tracking-wider">or continue with</span>
-              <div className="flex-grow border-t border-slate-100"></div>
+            <div className="relative flex py-3 items-center">
+              <div className={`flex-grow border-t ${isDarkMode ? 'border-slate-800' : 'border-slate-200/70'}`}></div>
+              <span className={`flex-shrink mx-3 text-[10px] font-medium ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>{t.orContinue}</span>
+              <div className={`flex-grow border-t ${isDarkMode ? 'border-slate-800' : 'border-slate-200/70'}`}></div>
             </div>
 
-            {/* Social Logins */}
-            <div className="grid grid-cols-2 gap-3">
+            {/* 3 Social Login Buttons (Google, Microsoft, Apple) */}
+            <div className="grid grid-cols-3 gap-2">
+              
+              {/* Google */}
               <button
                 type="button"
                 onClick={() => handleSocialSignIn('Google')}
-                className="flex items-center justify-center py-2.5 px-4 text-xs border border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 text-slate-600 font-semibold rounded-xl transition cursor-pointer shadow-sm shadow-slate-100"
+                className={`flex items-center justify-center py-2 px-2 border text-xs font-semibold rounded-xl transition cursor-pointer ${
+                  isDarkMode 
+                    ? 'bg-slate-800/80 border-slate-700 text-slate-200 hover:bg-slate-700' 
+                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 shadow-2xs'
+                }`}
               >
-                <svg className="w-4 h-4 mr-2" viewBox="0 0 24 24" fill="currentColor">
+                <svg className="w-3.5 h-3.5 mr-1.5" viewBox="0 0 24 24">
                   <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
                   <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
                   <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" fill="#FBBC05"/>
@@ -463,12 +800,18 @@ export default function LoginPage() {
                 </svg>
                 Google
               </button>
+
+              {/* Microsoft */}
               <button
                 type="button"
                 onClick={() => handleSocialSignIn('Microsoft')}
-                className="flex items-center justify-center py-2.5 px-4 text-xs border border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 text-slate-600 font-semibold rounded-xl transition cursor-pointer shadow-sm shadow-slate-100"
+                className={`flex items-center justify-center py-2 px-2 border text-xs font-semibold rounded-xl transition cursor-pointer ${
+                  isDarkMode 
+                    ? 'bg-slate-800/80 border-slate-700 text-slate-200 hover:bg-slate-700' 
+                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 shadow-2xs'
+                }`}
               >
-                <svg className="w-3.5 h-3.5 mr-2" viewBox="0 0 23 23" fill="currentColor">
+                <svg className="w-3.5 h-3.5 mr-1.5" viewBox="0 0 23 23">
                   <rect x="0" y="0" width="11" height="11" fill="#F25022" />
                   <rect x="12" y="0" width="11" height="11" fill="#7FBA00" />
                   <rect x="0" y="12" width="11" height="11" fill="#00A1F1" />
@@ -476,71 +819,47 @@ export default function LoginPage() {
                 </svg>
                 Microsoft
               </button>
-            </div>
-          </div>
 
-          {/* Footer Details */}
-          <div className="text-center mt-6 border-t border-slate-100 pt-6">
-            <p className="text-xs text-slate-500 font-medium">
-              Don't have an account?{' '}
-              <Link href="/register" className="text-blue-600 font-bold hover:underline">
-                Create one now
-              </Link>
-            </p>
-
-            {/* Copyright, exuberantglobal designed by, Developer Rajan Goswami Tooltip */}
-            <p className="text-[10px] text-slate-400 mt-5 leading-relaxed">
-              © 2026 Virtual CFO. All rights reserved.<br />
-              Designed by{' '}
-              <a 
-                href="https://exuberantglobal.co.uk" 
-                target="_blank" 
-                rel="noopener noreferrer" 
-                className="text-blue-500 hover:text-blue-600 font-semibold transition hover:underline"
+              {/* Apple */}
+              <button
+                type="button"
+                onClick={() => handleSocialSignIn('Apple')}
+                className={`flex items-center justify-center py-2 px-2 border text-xs font-semibold rounded-xl transition cursor-pointer ${
+                  isDarkMode 
+                    ? 'bg-slate-800/80 border-slate-700 text-slate-200 hover:bg-slate-700' 
+                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 shadow-2xs'
+                }`}
               >
-                exuberantglobal.co.uk
-              </a>{' '}
-              | Developed by{' '}
-              <span className="relative group inline-block">
-                <span className="text-blue-600 hover:text-blue-700 font-bold cursor-pointer border-b border-dashed border-blue-400 hover:border-blue-700 transition pb-0.5">
-                  Rajan Goswami
-                </span>
-                
-                {/* Premium Developer Tooltip Box */}
-                <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3.5 w-72 p-4 bg-slate-900/98 text-white rounded-2xl shadow-2xl border border-slate-800 backdrop-blur-xl opacity-0 scale-95 pointer-events-none group-hover:opacity-100 group-hover:scale-100 transition-all duration-350 ease-out z-50 flex flex-col text-left font-normal normal-case tracking-normal">
-                  
-                  {/* Header info */}
-                  <span className="flex items-center gap-3 border-b border-slate-800 pb-3 mb-2.5">
-                    <span className="h-10 w-10 rounded-full bg-gradient-to-tr from-blue-500 to-indigo-600 flex items-center justify-center text-white font-black text-sm shadow-lg shadow-blue-500/20">
-                      RG
-                    </span>
-                    <span className="flex flex-col">
-                      <span className="font-bold text-sm text-slate-100">Rajan Goswami</span>
-                      <span className="text-[9px] text-blue-400 font-bold tracking-wider uppercase">Senior Full Stack Developer</span>
-                    </span>
-                  </span>
+                <svg className="w-3.5 h-3.5 mr-1.5" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.36c.62-.75 1.04-1.8 1.04-2.86 0-.15-.01-.29-.04-.44-1.01.04-2.26.68-2.98 1.52-.57.65-.98 1.72-.98 2.78 0 .15.02.3.04.38 1.15.09 2.3-.63 2.92-1.38z" />
+                </svg>
+                Apple
+              </button>
 
-                  {/* Body text */}
-                  <span className="text-xs text-slate-300 leading-relaxed font-light">
-                    Specializing in high-performance enterprise dashboards, finance integrations, and state-of-the-art responsive UI/UX designs.
-                  </span>
+            </div>
 
-                  {/* Bottom tags */}
-                  <span className="mt-3.5 pt-2.5 border-t border-slate-800/80 flex items-center justify-between text-[9px] text-slate-400">
-                    <span className="flex items-center gap-1 font-medium">📍 Noida, India</span>
-                    <span className="text-blue-400 font-bold">exuberantglobal.co.uk</span>
-                  </span>
-
-                  {/* Tooltip Down Arrow */}
-                  <span className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-slate-900 border-r border-b border-slate-800 rotate-45"></span>
-                </span>
-              </span>
-            </p>
           </div>
 
         </div>
 
-      </div>
+      </main>
+
+      {/* ULTRA-SLEEK CLEAN FOOTER */}
+      <footer className={`relative z-20 w-full border-t py-4 px-6 sm:px-10 text-xs font-medium transition-colors ${
+        isDarkMode ? 'border-slate-800/80 bg-[#040914] text-slate-400' : 'border-slate-200/80 bg-white/70 backdrop-blur-md text-slate-600'
+      }`}>
+        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <span className={`font-extrabold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Virtual CFO</span>
+            <span>•</span>
+            <span className="text-[11px]">© 2026 Virtual CFO Inc. All rights reserved.</span>
+          </div>
+
+          <div className="text-[11px] text-slate-400 flex items-center gap-1">
+            <span>Powered by <strong className="text-blue-500">Virtual CFO Intelligence Engine</strong></span>
+          </div>
+        </div>
+      </footer>
 
     </div>
   );

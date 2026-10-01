@@ -7,6 +7,7 @@ import { useSidebarStore } from '@/store/sidebar-store';
 import { Bell, Calendar, RefreshCw, Menu, Star, Filter, ChevronDown, Trash2, Building2, Check, Loader2, Clock, Globe, DollarSign } from 'lucide-react';
 import { toast } from 'sonner';
 import { DateRangePicker } from '../ui/date-range-picker';
+import { CFOAiDrawer } from '../common/cfo-ai-drawer';
 import { cn } from '@/lib/utils';
 
 function formatTimeAgo(dateStr: string | null | undefined): string {
@@ -31,7 +32,7 @@ function formatTimeAgo(dateStr: string | null | undefined): string {
 
 export function Header() {
   const pathname = usePathname();
-  const { setOpenMobile } = useSidebarStore();
+  const { isCollapsed, toggleSidebar, setOpenMobile } = useSidebarStore();
   const [isSyncing, setIsSyncing] = useState(false);
   const [isClearingCache, setIsClearingCache] = useState(false);
   const [syncTime, setSyncTime] = useState("Never synced");
@@ -80,8 +81,20 @@ export function Header() {
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        toggleSidebar();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [toggleSidebar]);
 
   const fromDate = searchParams.get('from_date');
   const toDate = searchParams.get('to_date');
@@ -341,6 +354,46 @@ export function Header() {
           title: "Configuration Settings",
           subtitle: "Manage company configurations, tax rules, and user accesses"
         };
+      case '/cash-flow/13-week':
+        return {
+          title: "13-Week Cash Forecast",
+          subtitle: "See your expected cash position, key inflows and outflows, and AI-powered insights for the next 13 weeks."
+        };
+      case '/management-accounts':
+        return {
+          title: "Management Accounts",
+          subtitle: "Executive management report pack, P&L bridge, working capital, and core financial ratios"
+        };
+      case '/budgeting':
+        return {
+          title: "Budgeting & Variances",
+          subtitle: "Compare monthly & YTD financial targets vs actual P&L performance"
+        };
+      case '/kpi-scorecard':
+        return {
+          title: "Financial KPI Scorecard",
+          subtitle: "Comprehensive financial efficiency ratios, debtor days, working capital cycle, and liquidity metrics"
+        };
+      case '/profitability':
+        return {
+          title: "Profitability Analysis",
+          subtitle: "Customer, product, and department gross & net margin insights"
+        };
+      case '/cfo':
+        return {
+          title: "CFO Command Center",
+          subtitle: "Unified financial intelligence, burn rate, and executive overview"
+        };
+      case '/xero-dashboard':
+        return {
+          title: "Executive Overview",
+          subtitle: "High-level executive dashboard and key financial summary"
+        };
+      case '/bookkeeping-health':
+        return {
+          title: "Bookkeeping Health",
+          subtitle: "Reconciliation status, unallocated transactions, and ledger integrity checks"
+        };
       case '/amazon':
         return {
           title: "Amazon Seller Analytics",
@@ -423,11 +476,23 @@ export function Header() {
 
       <div className="w-full px-4 md:px-6 flex h-20 items-center justify-between">
         <div className="flex items-center gap-4 min-w-0">
-        {/* Mobile Hamburger menu */}
+        {/* Responsive Hamburger / Sidebar Toggle Menu Button */}
         <button
-          onClick={() => setOpenMobile(true)}
-          className="flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-300 hover:text-slate-800 dark:hover:text-white md:hidden cursor-pointer outline-none transition shrink-0"
-          aria-label="Open mobile menu"
+          onClick={() => {
+            if (typeof window !== 'undefined' && window.innerWidth < 768) {
+              setOpenMobile(true);
+            } else {
+              toggleSidebar();
+            }
+          }}
+          className={cn(
+            "flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer outline-none transition shrink-0 shadow-2xs",
+            isCollapsed
+              ? "md:flex bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100 hover:text-blue-700 dark:bg-blue-950/50 dark:text-blue-400 dark:border-blue-800"
+              : "md:hidden"
+          )}
+          aria-label="Toggle navigation menu"
+          title={isCollapsed ? "Expand Sidebar (Ctrl+B)" : "Collapse Sidebar (Ctrl+B)"}
         >
           <Menu className="h-5 w-5" />
         </button>
@@ -553,8 +618,8 @@ export function Header() {
               </div>
             )}
 
-            {/* Date Range Picker for Overview / Reports (Hidden on pages with dedicated report date pickers like Balance Sheet, P&L & Trial Balance) */}
-            {(pathname === '/overview' || isSales || (pathname.startsWith('/reports') && pathname !== '/reports/balance-sheet' && pathname !== '/reports/trial-balance' && pathname !== '/reports/profit-and-loss')) && (
+            {/* Date Range Picker for Overview / Reports (Hidden on pages with dedicated report date pickers like Balance Sheet, P&L, Trial Balance & Cash Flow) */}
+            {(pathname === '/overview' || isSales || (pathname.startsWith('/reports') && pathname !== '/reports/balance-sheet' && pathname !== '/reports/trial-balance' && pathname !== '/reports/profit-and-loss' && pathname !== '/reports/cash-flow')) && (
               <div className="relative shrink-0" ref={datePickerRef}>
                 <button
                   onClick={() => setShowDatePicker(!showDatePicker)}
@@ -712,6 +777,7 @@ export function Header() {
         </div>
       )}
       </div>
+      <CFOAiDrawer />
     </header>
   );
 }

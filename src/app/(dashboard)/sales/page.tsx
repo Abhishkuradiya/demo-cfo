@@ -11,11 +11,15 @@ import WorldMapSvg from '@/components/WorldMapSvg';
 import RevenueBreakdownPanel from '@/components/sales/RevenueBreakdownPanel';
 import TurnoverDrawerPanel from '@/components/sales/TurnoverDrawerPanel';
 import GrossProfitBreakdownPanel from '@/components/sales/GrossProfitBreakdownPanel';
+import NetProfitBreakdownPanel from '@/components/sales/NetProfitBreakdownPanel';
 import GrossMarginAnalysisPanel from '@/components/sales/GrossMarginAnalysisPanel';
 import InvoicesBreakdownPanel from '@/components/sales/InvoicesBreakdownPanel';
 import AccountReceivableBreakdownPanel from '@/components/sales/AccountReceivableBreakdownPanel';
 import CustomerConcentrationPanel from '@/components/sales/CustomerConcentrationPanel';
 import ProductBreakdownPanel from '@/components/sales/ProductBreakdownPanel';
+import CreditNotesBreakdownPanel from '@/components/sales/CreditNotesBreakdownPanel';
+import ExpensesBreakdownPanel from '@/components/sales/ExpensesBreakdownPanel';
+import CogsBreakdownPanel from '@/components/sales/CogsBreakdownPanel';
 import {
   Plus,
   ChevronDown,
@@ -35,7 +39,9 @@ import {
   TrendingDown,
   Sparkles,
   Sun,
-  Moon
+  Moon,
+  Layers,
+  ShieldCheck
 } from 'lucide-react';
 import * as echarts from 'echarts/core';
 import { LineChart, BarChart, PieChart } from 'echarts/charts';
@@ -144,13 +150,42 @@ const RevenueGraphSkeleton = () => {
 };
 
 const CardTooltip = ({ text }: { text: string }) => (
-  <div className="relative group/tooltip inline-flex items-center ml-1.5 cursor-pointer">
-    <Info className="h-3.5 w-3.5 text-slate-400 group-hover/tooltip:text-blue-600 transition" />
-    <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 hidden group-hover/tooltip:flex flex-col items-center w-64 z-50 pointer-events-none">
-      <div className="bg-slate-900 text-white text-[10.5px] font-medium leading-relaxed rounded-xl p-3 shadow-xl border border-slate-700 text-center">
+  <div className="relative group/tooltip inline-flex items-center ml-1 cursor-pointer">
+    <Info className="h-3.5 w-3.5 text-slate-400 group-hover/tooltip:text-blue-600 transition shrink-0" />
+    <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2.5 hidden group-hover/tooltip:flex flex-col items-center w-60 z-[100] pointer-events-none drop-shadow-xl animate-in fade-in-0 zoom-in-95 duration-150">
+      <div className="w-2.5 h-2.5 bg-slate-900 rotate-45 -mb-1.5 border-l border-t border-slate-700 z-10 shrink-0" />
+      <div className="bg-slate-900 text-white text-[10.5px] font-medium leading-relaxed rounded-xl p-2.5 border border-slate-700 text-center shadow-2xl">
         {text}
       </div>
-      <div className="w-2.5 h-2.5 bg-slate-900 rotate-45 -mt-1 border-r border-b border-slate-700" />
+    </div>
+  </div>
+);
+
+// Shimmer Skeleton for Single Metric KPI Card (Row 1 & Row 2)
+const KpiCardSkeleton = () => (
+  <div className="animate-pulse flex flex-col justify-between h-full py-1 select-none w-full">
+    <div className="flex justify-between items-center">
+      <div className="h-3.5 w-24 bg-slate-200/80 dark:bg-slate-700/80 rounded-md" />
+      <div className="h-5 w-16 bg-slate-200/60 dark:bg-slate-700/60 rounded-full" />
+    </div>
+    <div className="h-7 w-32 bg-slate-200/90 dark:bg-slate-600/90 rounded-lg my-2" />
+    <div className="h-3 w-28 bg-slate-200/60 dark:bg-slate-700/60 rounded-md" />
+  </div>
+);
+
+// Shimmer Skeleton for Executive & Analytics Cards
+const CardContentSkeleton = ({ height = "h-48" }: { height?: string }) => (
+  <div className={cn("w-full animate-pulse flex flex-col justify-between p-2 select-none", height)}>
+    <div className="space-y-2">
+      <div className="h-3.5 w-28 bg-slate-200/80 dark:bg-slate-700/80 rounded-md" />
+      <div className="h-3 w-44 bg-slate-100 dark:bg-slate-800 rounded-md" />
+    </div>
+    <div className="flex-1 bg-slate-100/90 dark:bg-slate-800/80 rounded-xl my-3 flex items-center justify-center relative overflow-hidden">
+      <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/40 dark:via-slate-700/40 to-transparent -translate-x-full animate-[shimmer_1.6s_infinite]" />
+    </div>
+    <div className="flex justify-between items-center pt-2 border-t border-slate-100 dark:border-slate-800">
+      <div className="h-3 w-20 bg-slate-200/70 dark:bg-slate-700/70 rounded-md" />
+      <div className="h-3 w-16 bg-slate-200/70 dark:bg-slate-700/70 rounded-md" />
     </div>
   </div>
 );
@@ -189,8 +224,8 @@ export default function SalesDashboardPage() {
   const isDark = theme === 'dark';
   const searchParams = useSearchParams();
 
-  const fromDate = searchParams.get('from_date') || '';
-  const toDate = searchParams.get('to_date') || '';
+  const fromDate = searchParams.get('from_date') || searchParams.get('fromDate') || '';
+  const toDate = searchParams.get('to_date') || searchParams.get('toDate') || '';
 
   useEffect(() => {
     // Auto-collapse sidebar by default on Sales Dashboard page
@@ -202,8 +237,12 @@ export default function SalesDashboardPage() {
   const [salesData, setSalesData] = useState<any>(null);
   const [isTurnoverDrawerOpen, setIsTurnoverDrawerOpen] = useState<boolean>(false);
   const [isGrossProfitBreakdownOpen, setIsGrossProfitBreakdownOpen] = useState<boolean>(false);
+  const [isNetProfitPanelOpen, setIsNetProfitPanelOpen] = useState<boolean>(false);
   const [isGrossMarginPanelOpen, setIsGrossMarginPanelOpen] = useState<boolean>(false);
   const [isInvoicesPanelOpen, setIsInvoicesPanelOpen] = useState<boolean>(false);
+  const [isCreditNotesPanelOpen, setIsCreditNotesPanelOpen] = useState<boolean>(false);
+  const [isCogsPanelOpen, setIsCogsPanelOpen] = useState<boolean>(false);
+  const [isExpensesPanelOpen, setIsExpensesPanelOpen] = useState<boolean>(false);
   const [isARPanelOpen, setIsARPanelOpen] = useState<boolean>(false);
   const [isCustomerConcentrationOpen, setIsCustomerConcentrationOpen] = useState<boolean>(false);
   const [isProductBreakdownOpen, setIsProductBreakdownOpen] = useState<boolean>(false);
@@ -226,6 +265,8 @@ export default function SalesDashboardPage() {
         if (fromDate && toDate) {
           query.set('from_date', fromDate);
           query.set('to_date', toDate);
+          query.set('fromDate', fromDate);
+          query.set('toDate', toDate);
         }
 
         const res = await fetch(`/api/dashboard/sales?${query.toString()}`);
@@ -333,7 +374,7 @@ export default function SalesDashboardPage() {
       change: snapshot?.invoices ? snapshot.invoices.change : '',
       isPositive: snapshot?.invoices ? snapshot.invoices.isPositive : true,
       color: "#06b6d4",
-      trendData: [20, 35, 45, 55, 68, snapshot?.invoices?.value || 78],
+      trendData: [20, 35, 45, 55, 68, snapshot?.invoices?.value ?? 0],
       iconBg: "bg-cyan-50/80 border border-cyan-100/80 text-cyan-600",
       icon: <FileText className="h-4 w-4 text-cyan-600" />
     },
@@ -406,7 +447,7 @@ export default function SalesDashboardPage() {
     const option = {
       grid: {
         left: '1%',
-        right: '2%',
+        right: '4%',
         top: '6%',
         bottom: '6%',
         containLabel: true
@@ -929,73 +970,14 @@ export default function SalesDashboardPage() {
       {/* ========================================================================= */}
       {/* ATTACHMENT 2 FILTERS TOOLBAR */}
       {/* ========================================================================= */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-        {/* Left Filter Pills */}
+      <div className="flex flex-col md:flex-row md:items-center justify-end gap-3">
+        {/* Left Filter Pills Commented Out */}
+        {/*
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <span className="text-[10.5px] font-bold text-slate-400 uppercase tracking-wider mr-1">FILTERS:</span>
-
-          <button
-            onClick={() => toast.info('Customer filter selected')}
-            className={cn(
-              "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition cursor-pointer shadow-2xs",
-              isDark ? "bg-slate-900 border-white/25 text-slate-200 hover:bg-slate-800" : "bg-white border-slate-200/90 text-slate-700 hover:bg-slate-50"
-            )}
-          >
-            <span>All Customers</span>
-            <ChevronDown className="h-3.5 w-3.5 text-slate-400" />
-          </button>
-
-          <button
-            onClick={() => toast.info('Product filter selected')}
-            className={cn(
-              "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition cursor-pointer shadow-2xs",
-              isDark ? "bg-slate-900 border-white/25 text-slate-200 hover:bg-slate-800" : "bg-white border-slate-200/90 text-slate-700 hover:bg-slate-50"
-            )}
-          >
-            <span>All Products</span>
-            <ChevronDown className="h-3.5 w-3.5 text-slate-400" />
-          </button>
-
-          <button
-            onClick={() => toast.info('Tracking filter selected')}
-            className={cn(
-              "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition cursor-pointer shadow-2xs",
-              isDark ? "bg-slate-900 border-white/25 text-slate-200 hover:bg-slate-800" : "bg-white border-slate-200/90 text-slate-700 hover:bg-slate-50"
-            )}
-          >
-            <span>All Tracking</span>
-            <ChevronDown className="h-3.5 w-3.5 text-slate-400" />
-          </button>
-
-          <button
-            onClick={() => toast.info('Region filter selected')}
-            className={cn(
-              "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition cursor-pointer shadow-2xs",
-              isDark ? "bg-slate-900 border-white/25 text-slate-200 hover:bg-slate-800" : "bg-white border-slate-200/90 text-slate-700 hover:bg-slate-50"
-            )}
-          >
-            <span>All Regions</span>
-            <ChevronDown className="h-3.5 w-3.5 text-slate-400" />
-          </button>
-
-          <button
-            onClick={() => toast.info('Sales account filter selected')}
-            className={cn(
-              "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition cursor-pointer shadow-2xs",
-              isDark ? "bg-slate-900 border-white/25 text-slate-200 hover:bg-slate-800" : "bg-white border-slate-200/90 text-slate-700 hover:bg-slate-50"
-            )}
-          >
-            <span>All Sales Accounts</span>
-            <ChevronDown className="h-3.5 w-3.5 text-slate-400" />
-          </button>
-
-          <button
-            onClick={() => toast.info('Filters cleared')}
-            className="text-xs font-bold text-blue-600 hover:text-blue-700 transition cursor-pointer ml-1"
-          >
-            Clear Filters
-          </button>
+          ...
         </div>
+        */}
 
         {/* Right Action Controls */}
         <div className="flex items-center gap-2.5 shrink-0">
@@ -1051,136 +1033,271 @@ export default function SalesDashboardPage() {
 
 
 
+
+
       {/* ========================================================================= */}
-      {/* EXECUTIVE 7 SNAPSHOT CARDS WITH DYNAMIC SPARK LINES */}
+      {/* REVENUE FLOW & ADJUSTMENTS (Gross Sales → Credit Notes → Net Revenue) */}
       {/* ========================================================================= */}
-      <div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3.5">
-          {metricCards.map((card, idx) => {
-            const isCardLoading = loading || card.value === null;
-            const parts = (card.change || '').split(' vs ');
-            const percentPart = parts[0] || '';
-            const labelPart = parts[1] ? ` vs ${parts[1]}` : '';
+      <div className="space-y-4 select-none pt-1">
+        <div className="flex items-center justify-between border-b border-slate-200/60 dark:border-white/10 pb-2">
+          <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-2">
+            <span className="h-2 w-2 rounded-full bg-blue-600" />
+            Revenue Flow & Adjustments
+          </h3>
+          <span className="text-[10.5px] font-bold text-slate-400">Gross Sales − Credit Notes = Net Revenue</span>
+        </div>
 
-            const isFarRight = idx >= 5;
-            const isCenter = idx >= 2 && idx <= 4;
-            const isTotalRevenue = card.title === "Total Revenue";
-            const isNetSales = card.title === "Net Sales";
-            const isGrossProfit = card.title === "Gross Profit";
-            const isGrossMargin = card.title === "Gross Margin";
-            const isInvoices = card.title === "Invoices";
-            const isAR = card.title === "Accounts Receivable";
-
-            return (
-              <div
-                key={idx}
-                onClick={() => {
-                  if (isTotalRevenue || isNetSales) {
-                    setIsTurnoverDrawerOpen(true);
-                  } else if (isGrossProfit) {
-                    setIsGrossProfitBreakdownOpen(true);
-                  } else if (isGrossMargin) {
-                    setIsGrossMarginPanelOpen(true);
-                  } else if (isInvoices) {
-                    setIsInvoicesPanelOpen(true);
-                  } else if (isAR) {
-                    setIsARPanelOpen(true);
-                  }
-                }}
-                className={cn(
-                  "rounded-xl border p-3.5 shadow-2xs hover:shadow-md transition-all duration-200 flex flex-col justify-between overflow-hidden relative group min-h-[165px]",
-                  isDark ? "bg-slate-900/90 border-white/25 text-slate-100" : "bg-white border-slate-200/80 text-slate-800",
-                  (isTotalRevenue || isNetSales || isGrossProfit || isGrossMargin || isInvoices || isAR)
-                    ? "cursor-pointer hover:border-blue-400"
-                    : "cursor-default hover:border-slate-300"
-                )}
-              >
-                {/* Animated Light Sweep Shimmer Overlay */}
-                <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-blue-100/40 dark:via-white/10 to-transparent animate-card-shimmer pointer-events-none" />
-
-                {/* Top Section: Title, Info Tooltip & Icon */}
-                <div>
-                  <div className="flex items-center justify-between text-slate-400">
-                    <div className="flex items-center gap-1 min-w-0 pr-1">
-                      <span className={cn("text-[10px] font-extrabold uppercase tracking-wider truncate", isDark ? "text-slate-300" : "text-slate-600")}>{card.title}</span>
-
-                      {/* Info Tooltip Icon - Floating Popover with Smart Boundary Alignment */}
-                      <div className="group/tooltip relative shrink-0 cursor-pointer" onClick={(e) => e.stopPropagation()}>
-                        <Info className="h-3.5 w-3.5 text-slate-400 hover:text-blue-600 transition-colors" />
-                        <div className={cn(
-                          "absolute top-full mt-1.5 hidden group-hover/tooltip:block w-44 p-2.5 bg-slate-900 text-white text-[10px] font-medium rounded-xl shadow-2xl z-[100] pointer-events-none leading-relaxed border border-slate-700/80 animate-in fade-in zoom-in-95 duration-150",
-                          isFarRight ? "right-0 origin-top-right" : isCenter ? "left-1/2 -translate-x-1/2 origin-top" : "left-0 origin-top-left"
-                        )}>
-                          <div className="font-bold text-blue-400 mb-0.5 uppercase tracking-wider text-[9px]">{card.title}</div>
-                          {card.infoTooltip}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className={cn(
-                      "flex h-7.5 w-7.5 shrink-0 items-center justify-center rounded-lg shadow-3xs group-hover:scale-110 group-hover:rotate-3 transition-transform duration-300",
-                      card.iconBg
-                    )}>
-                      {card.icon}
-                    </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+          {/* 1. Gross Sales */}
+          <div className="bg-white dark:bg-slate-900/90 p-4.5 rounded-2xl border border-slate-200/80 dark:border-white/20 shadow-2xs flex flex-col justify-between h-[140px] relative group hover:border-blue-300 transition duration-200 cursor-pointer" onClick={() => setIsTurnoverDrawerOpen(true)}>
+            {loading ? (
+              <KpiCardSkeleton />
+            ) : (
+              <>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11.5px] font-extrabold text-slate-600 dark:text-slate-300 flex items-center gap-1.5 min-w-0 pr-2">
+                    <span className="truncate">Gross Sales</span>
+                    <CardTooltip text="Total gross revenue from P&L report before deducting credit notes & adjustments." />
+                  </span>
+                  <span className="px-2.5 py-0.5 rounded-md text-[9.5px] font-extrabold bg-blue-50 text-blue-600 border border-blue-100 uppercase tracking-wider shrink-0">
+                    P&L REVENUE
+                  </span>
+                </div>
+                <div className="my-1">
+                  <div className="text-[20px] font-black text-slate-900 dark:text-slate-100 tracking-tight leading-none select-all">
+                    {formatAmount(snapshot?.totalRevenue?.value || 0)}
                   </div>
-
-                  {/* Middle Section: Metric Value & Advanced Trend Pill */}
-                  {isCardLoading ? (
-                    <div className="space-y-1.5 mt-3">
-                      <div className="h-5 w-20 rounded shimmer-effect" />
-                      <div className="h-3 w-24 rounded shimmer-effect" />
-                    </div>
-                  ) : (
-                    <div className="mt-1.5">
-                      <div className={cn("text-xl md:text-[21px] font-black tracking-tight leading-tight truncate font-sans", isDark ? "text-slate-100" : "text-slate-900")}>
-                        {card.value}
-                      </div>
-
-                      {/* Advanced Xero-Style Trend Pill + Comparison Subtitle */}
-                      <div className="mt-1.5 space-y-1">
-                        <div className="flex items-center gap-1.5">
-                          <span className={cn(
-                            "inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-full border shadow-3xs group-hover:scale-105 transition-transform",
-                            card.isPositive
-                              ? "bg-emerald-50/90 text-emerald-700 border-emerald-300/80"
-                              : "bg-rose-50/90 text-rose-700 border-rose-300/80"
-                          )}>
-                            {card.isPositive ? (
-                              <TrendingUp className="h-3 w-3 text-emerald-600 shrink-0" />
-                            ) : (
-                              <TrendingDown className="h-3 w-3 text-rose-600 shrink-0" />
-                            )}
-                            <span>{percentPart}</span>
-                          </span>
-                        </div>
-
-                        {labelPart && (
-                          <div className="text-[9px] font-bold text-slate-400 tracking-tight leading-tight" title={labelPart}>
-                            {labelPart.trim()}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
+                  <p className="text-[11px] font-semibold text-slate-400 mt-1.5">Total revenue from Xero P&L Report</p>
                 </div>
+              </>
+            )}
+          </div>
 
-                {/* Bottom Section: Dynamic Sparkline Wave */}
-                <div className="mt-2 -mx-3.5 -mb-3.5 rounded-b-xl overflow-hidden">
-                  <DynamicSparkline data={card.trendData} color={card.color} />
+          {/* 2. Less Credit Notes */}
+          <div className="bg-white dark:bg-slate-900/90 p-4.5 rounded-2xl border border-rose-200/80 dark:border-rose-900/40 bg-rose-50/10 dark:bg-rose-950/10 shadow-2xs flex flex-col justify-between h-[140px] relative group hover:border-rose-300 transition duration-200 cursor-pointer" onClick={() => setIsCreditNotesPanelOpen(true)}>
+            {loading ? (
+              <KpiCardSkeleton />
+            ) : (
+              <>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11.5px] font-extrabold text-rose-700 dark:text-rose-400 flex items-center gap-1.5 min-w-0 pr-2">
+                    <span className="truncate">Less: Credit Notes & Returns</span>
+                    <CardTooltip text="Total credit notes, customer refunds, and sales return adjustments." />
+                  </span>
+                  <span className="px-2.5 py-0.5 rounded-md text-[9.5px] font-extrabold bg-rose-50 text-rose-600 border border-rose-100 uppercase tracking-wider shrink-0 flex items-center gap-1">
+                    <span>− SUBTRACT</span>
+                  </span>
                 </div>
-              </div>
-            );
-          })}
+                <div className="my-1">
+                  <div className="text-[20px] font-black text-rose-600 dark:text-rose-400 tracking-tight leading-none select-all">
+                    {formatAmount(salesData?.salesSnapshot?.creditNotesTotal ?? Math.max(0, (snapshot?.totalRevenue?.value || 0) - (snapshot?.netSales?.value || 0)))}
+                  </div>
+                  <p className="text-[11px] font-semibold text-slate-400 mt-1.5">
+                    <span className="text-rose-600 font-bold">{salesData?.salesSnapshot?.creditNotesCount ?? 0}</span>
+                    <span className="text-slate-400"> Credit Notes in period</span>
+                  </p>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* 3. Net Revenue */}
+          <div className="bg-white dark:bg-slate-900/90 p-4.5 rounded-2xl border-2 border-emerald-300/90 dark:border-emerald-500/50 bg-emerald-50/10 dark:bg-emerald-950/10 shadow-2xs flex flex-col justify-between h-[140px] relative group hover:border-emerald-400 transition duration-200 cursor-pointer" onClick={() => setIsTurnoverDrawerOpen(true)}>
+            {loading ? (
+              <KpiCardSkeleton />
+            ) : (
+              <>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11.5px] font-black text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5 min-w-0 pr-2">
+                    <span className="truncate">Net Revenue (After Credit Notes)</span>
+                    <CardTooltip text="Net Invoiced Revenue = Total P&L Revenue minus Credit Notes & Returns." />
+                  </span>
+                  <span className="px-2.5 py-0.5 rounded-md text-[9.5px] font-extrabold bg-emerald-100 text-emerald-700 border border-emerald-200 uppercase tracking-wider shrink-0 flex items-center gap-1">
+                    <span>= NET SALES</span>
+                  </span>
+                </div>
+                <div className="my-1">
+                  <div className="text-[20px] font-black text-emerald-700 dark:text-emerald-400 tracking-tight leading-none select-all">
+                    {formatAmount(snapshot?.netSales?.value || 0)}
+                  </div>
+                  <p className="text-[11px] font-semibold text-slate-400 mt-1.5">
+                    <span className={snapshot?.netSales?.isPositive ? "text-emerald-600 font-bold" : "text-rose-600 font-bold"}>
+                      {snapshot?.netSales?.change || "↑ 0.0%"}
+                    </span>
+                  </p>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* 4. Invoices */}
+          <div className="bg-white dark:bg-slate-900/90 p-4.5 rounded-2xl border border-slate-200/80 dark:border-white/20 shadow-2xs flex flex-col justify-between h-[140px] relative group hover:border-cyan-300 transition duration-200 cursor-pointer" onClick={() => setIsInvoicesPanelOpen(true)}>
+            {loading ? (
+              <KpiCardSkeleton />
+            ) : (
+              <>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11.5px] font-extrabold text-slate-700 dark:text-slate-200 flex items-center gap-1.5 min-w-0 pr-2">
+                    <span className="truncate">Invoices</span>
+                    <CardTooltip text="Total count of active non-voided Sales Invoices (ACCREC)." />
+                  </span>
+                  <div className="flex h-7.5 w-7.5 items-center justify-center rounded-xl bg-cyan-50 text-cyan-600 border border-cyan-100 shrink-0">
+                    <FileText className="h-4 w-4 text-cyan-600" />
+                  </div>
+                </div>
+                <div className="my-1">
+                  <div className="text-[20px] font-black text-slate-900 dark:text-slate-100 tracking-tight leading-none select-all">
+                    {snapshot?.invoices?.value !== undefined ? snapshot.invoices.value.toString() : (salesData?.salesSnapshot?.invoicesCount !== undefined ? salesData.salesSnapshot.invoicesCount.toString() : (salesData?.allInvoices ? salesData.allInvoices.length.toString() : '0'))}
+                  </div>
+                  <p className="text-[11px] font-semibold text-slate-400 mt-1.5">
+                    <span className={snapshot?.invoices?.isPositive ? "text-emerald-600 font-bold" : "text-rose-600 font-bold"}>
+                      {snapshot?.invoices?.change || "+0.0% vs Last Period"}
+                    </span>
+                  </p>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
       {/* ========================================================================= */}
-      {/* EXECUTIVE ROW 2: REVENUE OVER TIME & SALES VS TARGET / GROWTH ANALYSIS */}
+      {/* PROFITABILITY & COST BREAKDOWN (Gross Profit → COGS → Expenses → Net Profit) */}
+      {/* ========================================================================= */}
+      <div className="space-y-4 select-none pt-1">
+        <div className="flex items-center justify-between border-b border-slate-200/60 dark:border-white/10 pb-2">
+          <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-2">
+            <span className="h-2 w-2 rounded-full bg-emerald-600" />
+            Profitability & Cost Breakdown
+          </h3>
+          <span className="text-[10.5px] font-bold text-slate-400">Gross Profit − COGS − Operating Expenses = Net Profit</span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+          {/* 1. Gross Profit */}
+          <div className="bg-white dark:bg-slate-900/90 p-4.5 rounded-2xl border border-slate-200/80 dark:border-white/20 shadow-2xs flex flex-col justify-between h-[140px] relative group hover:border-emerald-300 transition duration-200 cursor-pointer" onClick={() => setIsGrossProfitBreakdownOpen(true)}>
+            {loading ? (
+              <KpiCardSkeleton />
+            ) : (
+              <>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11.5px] font-extrabold text-slate-700 dark:text-slate-200 flex items-center gap-1.5 min-w-0 pr-2">
+                    <span className="truncate">Gross Profit</span>
+                    <CardTooltip text="Gross Profit = Revenue minus Cost of Goods Sold (Direct Costs)." />
+                  </span>
+                  <div className="flex h-7.5 w-7.5 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-100 shrink-0">
+                    <TrendingUp className="h-4 w-4" />
+                  </div>
+                </div>
+                <div className="my-1">
+                  <div className="text-[20px] font-black text-slate-900 dark:text-slate-100 tracking-tight leading-none select-all">
+                    {formatAmount(snapshot?.grossProfit?.value || 0)}
+                  </div>
+                  <p className="text-[11px] font-semibold text-slate-400 mt-1.5">
+                    <span className="text-emerald-600 font-bold">
+                      {snapshot?.grossMargin?.value ? `${snapshot.grossMargin.value.toFixed(1)}%` : "0.0%"}
+                    </span> Gross Margin
+                  </p>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* 2. Cost of Goods Sold (COGS) */}
+          <div className="bg-white dark:bg-slate-900/90 p-4.5 rounded-2xl border border-slate-200/80 dark:border-white/20 shadow-2xs flex flex-col justify-between h-[140px] relative group hover:border-amber-300 transition duration-200 cursor-pointer" onClick={() => setIsCogsPanelOpen(true)}>
+            {loading ? (
+              <KpiCardSkeleton />
+            ) : (
+              <>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11.5px] font-extrabold text-slate-700 dark:text-slate-200 flex items-center gap-1.5 min-w-0 pr-2">
+                    <span className="truncate">Cost of Goods Sold (COGS)</span>
+                    <CardTooltip text="Direct materials, labor, and production costs directly attributable to revenue." />
+                  </span>
+                  <div className="flex h-7.5 w-7.5 items-center justify-center rounded-xl bg-amber-50 text-amber-600 border border-amber-100 shrink-0">
+                    <span className="text-xs font-bold">$</span>
+                  </div>
+                </div>
+                <div className="my-1">
+                  <div className="text-[20px] font-black text-amber-600 dark:text-amber-400 tracking-tight leading-none select-all">
+                    {formatAmount(salesData?.salesSnapshot?.cogs?.value ?? salesData?.executiveRow4?.grossProfitAnalysis?.cogs ?? Math.max(0, (snapshot?.totalRevenue?.value || 0) - (snapshot?.grossProfit?.value || 0)))}
+                  </div>
+                  <p className="text-[11px] font-semibold text-slate-400 mt-1.5">
+                    <span className="text-amber-600 font-bold">
+                      {snapshot?.totalRevenue?.value > 0 ? (((salesData?.salesSnapshot?.cogs?.value ?? salesData?.executiveRow4?.grossProfitAnalysis?.cogs ?? Math.max(0, (snapshot?.totalRevenue?.value || 0) - (snapshot?.grossProfit?.value || 0))) / snapshot.totalRevenue.value) * 100).toFixed(1) : 0}%
+                    </span> of Revenue (Direct Costs)
+                  </p>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* 3. Indirect & Operating Expenses */}
+          <div className="bg-white dark:bg-slate-900/90 p-4.5 rounded-2xl border border-slate-200/80 dark:border-white/20 shadow-2xs flex flex-col justify-between h-[140px] relative group hover:border-purple-300 transition duration-200 cursor-pointer" onClick={() => setIsExpensesPanelOpen(true)}>
+            {loading ? (
+              <KpiCardSkeleton />
+            ) : (
+              <>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11.5px] font-extrabold text-slate-700 dark:text-slate-200 flex items-center gap-1.5 min-w-0 pr-2">
+                    <span className="truncate">Indirect & Operating Expenses</span>
+                    <CardTooltip text="Indirect overheads, administrative, selling, marketing, and general operational expenses." />
+                  </span>
+                  <div className="flex h-7.5 w-7.5 items-center justify-center rounded-xl bg-purple-50 text-purple-600 border border-purple-100 shrink-0">
+                    <Layers className="h-4 w-4" />
+                  </div>
+                </div>
+                <div className="my-1">
+                  <div className="text-[20px] font-black text-purple-600 dark:text-purple-400 tracking-tight leading-none select-all">
+                    {formatAmount(salesData?.salesSnapshot?.expenses?.value ?? 0)}
+                  </div>
+                  <p className="text-[11px] font-semibold text-slate-400 mt-1.5">
+                    <span className="text-purple-600 font-bold">{snapshot?.invoices?.value !== undefined ? snapshot.invoices.value : (salesData?.salesSnapshot?.invoicesCount ?? salesData?.allInvoices?.length ?? 0)} Invoices</span>
+                    <span className="text-slate-400"> ({snapshot?.totalRevenue?.value > 0 ? (((salesData?.salesSnapshot?.expenses?.value ?? 0) / snapshot.totalRevenue.value) * 100).toFixed(1) : 0}% Ratio)</span>
+                  </p>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* 4. Net Profit (Bottom Line) */}
+          <div className="bg-white dark:bg-slate-900/90 p-4.5 rounded-2xl border-2 border-emerald-300/90 dark:border-emerald-500/50 bg-emerald-50/10 dark:bg-emerald-950/10 shadow-2xs flex flex-col justify-between h-[140px] relative group hover:border-emerald-400 transition duration-200 cursor-pointer" onClick={() => setIsNetProfitPanelOpen(true)}>
+            {loading ? (
+              <KpiCardSkeleton />
+            ) : (
+              <>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11.5px] font-black text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5 min-w-0 pr-2">
+                    <span className="truncate">Net Profit (Bottom Line)</span>
+                    <CardTooltip text="Final Net Profit from Profit & Loss report after COGS and operating expenses." />
+                  </span>
+                  <div className="flex h-7.5 w-7.5 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700 border border-emerald-200 shrink-0">
+                    <ShieldCheck className="h-4 w-4" />
+                  </div>
+                </div>
+                <div className="my-1">
+                  <div className="text-[20px] font-black text-emerald-700 dark:text-emerald-400 tracking-tight leading-none select-all">
+                    {formatAmount(salesData?.salesSnapshot?.netProfit?.value ?? 0)}
+                  </div>
+                  <p className="text-[11px] font-semibold text-slate-400 mt-1.5">
+                    <span className="text-emerald-600 font-bold">
+                      {snapshot?.totalRevenue?.value > 0 ? (((salesData?.salesSnapshot?.netProfit?.value ?? 0) / snapshot.totalRevenue.value) * 100).toFixed(1) : "0.0"}%
+                    </span>
+                    <span className="text-slate-400"> Net Profit Margin</span>
+                  </p>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ========================================================================= */}
+      {/* EXECUTIVE ROW 2: REVENUE OVER TIME */}
       {/* ========================================================================= */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 pt-2">
-        {/* CARD 1: REVENUE OVER TIME */}
-        <div className="lg:col-span-6 bg-white dark:bg-slate-900/90 rounded-2xl border border-slate-200/80 dark:border-white/25 text-slate-800 dark:text-slate-100 p-5 shadow-2xs flex flex-col justify-between min-h-[360px]">
+        {/* CARD 1: REVENUE OVER TIME (FULL WIDTH) */}
+        <div className="lg:col-span-12 bg-white dark:bg-slate-900/90 rounded-2xl border border-slate-200/80 dark:border-white/25 text-slate-800 dark:text-slate-100 p-5 shadow-2xs flex flex-col justify-between min-h-[360px]">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-100 dark:border-white/10 gap-3 shrink-0">
             <div>
               <h3 className="text-[14px] font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">Revenue Over Time</h3>
@@ -1209,177 +1326,13 @@ export default function SalesDashboardPage() {
             </div>
           </div>
 
-          <div className="w-full h-[260px] relative pt-1">
+          <div className="w-full h-[260px] relative pt-1 overflow-hidden">
             {loading ? (
               <RevenueGraphSkeleton />
             ) : (
               <div ref={revenueOverTimeRef} className="w-full h-full" />
             )}
           </div>
-        </div>
-
-        {/* CARD 2: SALES VS TARGET & REVENUE GROWTH ANALYSIS (ATTACHMENT 1 WIDGET) */}
-        <div className="lg:col-span-6 bg-white dark:bg-slate-900/90 rounded-2xl border border-slate-200/80 dark:border-white/25 text-slate-800 dark:text-slate-100 p-5 shadow-2xs flex flex-col justify-between min-h-[380px]">
-          {/* Header with Demo Toggle */}
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-white/10">
-            <div className="flex items-center">
-              <h3 className="text-[13.5px] font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">Sales Target & Growth Analysis</h3>
-              <CardTooltip text="Monthly sales target tracking and customer cohort revenue growth analysis." />
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold text-slate-400">Demo Data</span>
-              <button
-                type="button"
-                onClick={() => setShowDemoTargetData(!showDemoTargetData)}
-                className={cn(
-                  "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
-                  showDemoTargetData ? "bg-blue-600" : "bg-slate-200"
-                )}
-              >
-                <span
-                  className={cn(
-                    "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-xs ring-0 transition duration-200 ease-in-out",
-                    showDemoTargetData ? "translate-x-4" : "translate-x-0"
-                  )}
-                />
-              </button>
-            </div>
-          </div>
-
-          {!showDemoTargetData && targetVal === 0 ? (
-            /* CENTERED SVG EMPTY STATE */
-            <div className="flex flex-col items-center justify-center text-center py-8 px-4 my-auto">
-              <div className="w-14 h-14 rounded-2xl bg-blue-50/80 border border-blue-100/80 flex items-center justify-center mb-3 text-blue-600 shadow-2xs">
-                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 20V10" />
-                  <path d="M18 20V4" />
-                  <path d="M6 20v-4" />
-                </svg>
-              </div>
-              <h4 className="text-[13.5px] font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">No Sufficient Target & Growth Data Available</h4>
-              <p className="text-[10.5px] font-medium text-slate-400 mt-1 max-w-[260px] leading-relaxed">
-                Sales targets and cohort growth drivers are not configured for this date period.
-              </p>
-              <button
-                onClick={() => setShowDemoTargetData(true)}
-                className="mt-4 px-4 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200/80 rounded-xl text-[11px] font-extrabold transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs"
-              >
-                <span>Preview with Demo Data</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          ) : (
-            /* DEMO / LIVE METRICS DATA VIEW */
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 divide-y md:divide-y-0 md:divide-x divide-slate-100 pt-3">
-              {/* SUB-COLUMN 1: SALES VS TARGET (MONTHLY) */}
-              <div className="flex flex-col justify-between pr-0 md:pr-4">
-                <div>
-                  <h4 className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wider mb-2">Sales vs Target</h4>
-
-                  <div className="flex items-center justify-center my-2">
-                    {/* Circular Donut Gauge */}
-                    <div className="relative w-32 h-32 flex items-center justify-center">
-                      <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
-                        <path
-                          className="text-slate-100"
-                          strokeWidth="3.5"
-                          stroke="currentColor"
-                          fill="none"
-                          d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                        />
-                        <path
-                          className="text-cyan-500 transition-all duration-1000"
-                          strokeDasharray={`${showDemoTargetData ? 98 : achievedPct}, 100`}
-                          strokeWidth="3.5"
-                          strokeLinecap="round"
-                          stroke="currentColor"
-                          fill="none"
-                          d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                        />
-                      </svg>
-                      <div className="absolute flex flex-col items-center justify-center text-center">
-                        <span className="text-xl font-black text-slate-900 leading-none">{showDemoTargetData ? '98%' : `${achievedPct}%`}</span>
-                        <span className="text-[9.5px] font-bold text-slate-400 mt-1">Achieved</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Data Breakdown Table */}
-                  <div className="space-y-2 mt-3 text-[11px]">
-                    <div className="flex justify-between items-center">
-                      <span className="font-bold text-slate-400">Target</span>
-                      <span className="font-extrabold text-slate-800 font-sans">{formatAmount(showDemoTargetData ? 4000000 : targetVal)}</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="font-bold text-slate-400">Actual</span>
-                      <span className="font-extrabold text-slate-900 font-sans">{formatAmount(actualVal)}</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="font-bold text-slate-400">Forecast</span>
-                      <span className="font-extrabold text-slate-800 font-sans">{formatAmount(showDemoTargetData ? 4100000 : forecastVal)}</span>
-                    </div>
-                    <div className="flex justify-between items-center border-t border-slate-100 pt-2">
-                      <span className="font-bold text-slate-400">Expected Gap</span>
-                      <span className={cn("font-extrabold font-sans", showDemoTargetData ? "text-emerald-600" : "text-rose-600")}>
-                        {showDemoTargetData ? `+${formatAmount(100000)}` : formatAmount(expectedGapVal)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="text-[9.5px] font-semibold text-slate-400 mt-3 flex items-center gap-1">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" />
-                  <span>Target tracking active based on turnover</span>
-                </div>
-              </div>
-
-              {/* SUB-COLUMN 2: REVENUE GROWTH ANALYSIS */}
-              <div className="flex flex-col justify-between pl-0 md:pl-5 pt-3 md:pt-0">
-                <div>
-                  <h4 className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wider mb-2">Growth Drivers</h4>
-
-                  <div className="mb-3">
-                    <span className="text-xl font-black text-emerald-600 font-sans tracking-tight block">
-                      +{formatAmount(showDemoTargetData ? 420000 : growthVal)}
-                    </span>
-                    <span className="text-[9.5px] font-bold text-slate-400 block mt-0.5">vs Previous Period</span>
-                  </div>
-
-                  {/* Driver Progress Bars */}
-                  <div className="space-y-2 text-[10px]">
-                    {[
-                      { label: "Existing Customers", val: showDemoTargetData ? `+${formatAmount(250000)}` : `+${formatAmount(driverExisting)}`, pct: 75, isPos: true },
-                      { label: "New Customers", val: showDemoTargetData ? `+${formatAmount(180000)}` : `+${formatAmount(driverNew)}`, pct: 50, isPos: true },
-                      { label: "Price / Rate Effect", val: showDemoTargetData ? `+${formatAmount(35000)}` : `+${formatAmount(driverPrice)}`, pct: 35, isPos: true },
-                      { label: "Volume Effect", val: showDemoTargetData ? `+${formatAmount(15000)}` : `+${formatAmount(driverVolume)}`, pct: 20, isPos: true },
-                      { label: "Lost Customers", val: showDemoTargetData ? `-${formatAmount(40000)}` : `-${formatAmount(Math.abs(driverLost))}`, pct: 15, isPos: false },
-                      { label: "Credit Notes", val: showDemoTargetData ? `-${formatAmount(20000)}` : `-${formatAmount(Math.abs(driverCredit))}`, pct: 10, isPos: false }
-                    ].map((row, idx) => (
-                      <div key={idx} className="space-y-0.5">
-                        <div className="flex justify-between items-center">
-                          <span className="font-bold text-slate-600">{row.label}</span>
-                          <span className={cn("font-extrabold font-sans", row.isPos ? "text-slate-800" : "text-rose-600")}>
-                            {row.val}
-                          </span>
-                        </div>
-                        <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
-                          <div
-                            className={cn("h-full rounded-full transition-all duration-500", row.isPos ? "bg-emerald-500" : "bg-rose-500")}
-                            style={{ width: `${row.pct}%` }}
-                          />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <Link href="/analytics" className="text-[10.5px] font-extrabold text-blue-600 hover:text-blue-700 hover:underline mt-3 inline-flex items-center gap-1 self-start cursor-pointer">
-                  <span>View Details</span>
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </Link>
-              </div>
-            </div>
-          )}
         </div>
       </div>
 
@@ -1605,169 +1558,165 @@ export default function SalesDashboardPage() {
       {/* ========================================================================= */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 pt-2">
         <div className="lg:col-span-12 bg-white dark:bg-slate-900/90 rounded-2xl border border-slate-200/80 dark:border-white/25 text-slate-800 dark:text-slate-100 p-5 shadow-2xs flex flex-col justify-between">
-          <div>
-            {/* Header with Demo Toggle */}
-            <div className="flex items-center justify-between mb-4 pb-2.5 border-b border-slate-100 dark:border-white/10">
-              <div className="flex items-center gap-2">
-                <h3 className="text-[13.5px] font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">Revenue by Region</h3>
-                <CardTooltip text="Geographic breakdown of total turnover by customer country or region." />
-              </div>
-              {!(salesData?.regions && salesData.regions.length > 0) && (
+          {loading ? (
+            <CardContentSkeleton height="h-[320px]" />
+          ) : (
+            <div>
+              {/* Header with Demo Toggle */}
+              <div className="flex items-center justify-between mb-4 pb-2.5 border-b border-slate-100 dark:border-white/10">
                 <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-bold text-slate-400">Demo Data</span>
-                  <button
-                    type="button"
-                    onClick={() => setShowDemoRegionData(!showDemoRegionData)}
-                    className={cn(
-                      "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
-                      showDemoRegionData ? "bg-blue-600" : "bg-slate-200 dark:bg-slate-700"
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-xs ring-0 transition duration-200 ease-in-out",
-                        showDemoRegionData ? "translate-x-4" : "translate-x-0"
-                      )}
-                    />
-                  </button>
+                  <h3 className="text-[13.5px] font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">Revenue by Region</h3>
+                  <CardTooltip text="Geographic breakdown of total turnover by customer country or region." />
                 </div>
-              )}
-            </div>
-
-            {/* 2-Column Split Layout for Full Width Card: Map on Left, Interactive Stats & City Breakdown on Right */}
-            {(() => {
-              const activeRegionsList = (salesData?.regions && salesData.regions.length > 0)
-                ? salesData.regions
-                : (showDemoRegionData ? [
-                    {
-                      name: "UK General / South East",
-                      revenue: totalRev || 3799019,
-                      pct: 98.1,
-                      flag: "🇬🇧",
-                      countryCode: "GB",
-                      invoiceCount: 140,
-                      cities: [
-                        { name: "Southend-On-Sea", revenue: 2450000, pct: 64.5, count: 85 },
-                        { name: "Oxford", revenue: 890000, pct: 23.4, count: 35 },
-                        { name: "Marlow & Berkshire", revenue: 459019, pct: 12.1, count: 20 }
-                      ]
-                    },
-                    {
-                      name: "Greater London",
-                      revenue: 65605,
-                      pct: 1.7,
-                      flag: "🇬🇧",
-                      countryCode: "GB",
-                      invoiceCount: 8,
-                      cities: [
-                        { name: "London", revenue: 42500, pct: 64.8, count: 5 },
-                        { name: "Islington & Lambeth", revenue: 15105, pct: 23.0, count: 2 },
-                        { name: "Hillingdon", revenue: 8000, pct: 12.2, count: 1 }
-                      ]
-                    },
-                    {
-                      name: "West Midlands",
-                      revenue: 8141,
-                      pct: 0.2,
-                      flag: "🇬🇧",
-                      countryCode: "GB",
-                      invoiceCount: 2,
-                      cities: [
-                        { name: "Shrewsbury / Shropshire", revenue: 8141, pct: 100.0, count: 2 }
-                      ]
-                    }
-                  ] : []);
-
-              const currentRegion = activeRegionsList && activeRegionsList.length > 0
-                ? (activeRegionsList[selectedRegionIndex % activeRegionsList.length] || activeRegionsList[0])
-                : null;
-              const regionColors = ["bg-blue-600", "bg-emerald-500", "bg-amber-500", "bg-purple-500", "bg-indigo-500", "bg-rose-500", "bg-cyan-500"];
-
-              // Precise Map pin location coordinates & zoom origins per region (SVG 1008x651 canvas)
-              const getPinCoords = (regionName: string, countryCode: string) => {
-                const name = (regionName || '').toLowerCase();
-                const code = (countryCode || '').toUpperCase();
-                if (code === 'ZA' || name.includes('south africa') || name.includes('international')) {
-                  return { top: '84.1%', left: '54.5%', zoomClass: 'origin-[54.5%_84.1%] scale-[1.8]' };
-                }
-                if (name.includes('london')) {
-                  return { top: '42.5%', left: '46.5%', zoomClass: 'origin-[46.5%_42.5%] scale-[1.7]' };
-                }
-                if (name.includes('north west') || name.includes('manchester')) {
-                  return { top: '39.5%', left: '46.0%', zoomClass: 'origin-[46.0%_39.5%] scale-[1.7]' };
-                }
-                if (name.includes('yorkshire') || name.includes('leeds')) {
-                  return { top: '39.5%', left: '46.5%', zoomClass: 'origin-[46.5%_39.5%] scale-[1.7]' };
-                }
-                if (name.includes('midlands') || name.includes('birmingham')) {
-                  return { top: '41.0%', left: '46.0%', zoomClass: 'origin-[46.0%_41.0%] scale-[1.7]' };
-                }
-                // Default UK South East (London/UK center: 46.2% left, 41.5% top)
-                return { top: '41.5%', left: '46.2%', zoomClass: 'origin-[46.2%_41.5%] scale-[1.6]' };
-              };
-
-              const pin = getPinCoords(currentRegion?.name || '', currentRegion?.countryCode || currentRegion?.code || '');
-
-              return (
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
-                  {/* Left Column: Interactive World Map with Smooth Zooming & Accurate Spotlight Pin */}
-                  <div className="lg:col-span-7 flex flex-col items-center justify-center w-full min-h-[290px] relative rounded-2xl bg-slate-50/50 dark:bg-slate-950/50 p-4 border border-slate-100 dark:border-slate-800/80 overflow-hidden">
-                    
-                    {/* Animated Zoomed Map SVG Container */}
-                    <div className={cn("w-full transition-transform duration-700 ease-out transform", pin.zoomClass)}>
-                      <WorldMapSvg activeCountryIds={showDemoRegionData ? ['GB', 'US', 'DE', 'AU'] : activeRegionsList.map((r: any) => r.countryCode || 'GB')} />
-                    </div>
-
-                    {/* Precise Floating Spotlight Pin over Actual Location */}
-                    {currentRegion && (
-                      <div
-                        className="absolute z-20 transition-all duration-500 ease-out pointer-events-none -translate-x-1/2 -translate-y-full"
-                        style={{ top: pin.top, left: pin.left }}
-                      >
-                        {/* Target Pulse Ring */}
-                        <div className="relative flex items-center justify-center mb-1">
-                          <span className="animate-ping absolute inline-flex h-6 w-6 rounded-full bg-blue-400 opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-3 w-3 bg-blue-600 border-2 border-white shadow-md"></span>
-                        </div>
-
-                        {/* Floating Glassmorphism Tooltip Badge */}
-                        <div className="bg-slate-900/95 dark:bg-slate-950/95 text-white p-3 rounded-2xl shadow-2xl border border-slate-700/80 backdrop-blur-md min-w-[175px] text-left animate-bounce-short">
-                          <div className="flex items-center justify-between gap-2 mb-1">
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-sm">{currentRegion.flag || '🇬🇧'}</span>
-                              <span className="text-[11px] font-extrabold text-white tracking-tight line-clamp-1">{currentRegion.name}</span>
-                            </div>
-                            <span className="text-[8.5px] font-extrabold px-1.5 py-0.5 rounded-full bg-blue-500/25 text-blue-300 border border-blue-400/30 uppercase tracking-widest">Focused</span>
-                          </div>
-                          <div className="text-xs font-black text-blue-400 font-mono tracking-tight mt-0.5">{formatAmount(currentRegion.revenue)}</div>
-                          <div className="flex items-center justify-between text-[9.5px] font-bold text-slate-300 mt-1.5 pt-1.5 border-t border-slate-800/80">
-                            <span>{currentRegion.pct}% of total</span>
-                            {currentRegion.invoiceCount && <span>{currentRegion.invoiceCount} invoices</span>}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Quick Reset Zoom Button */}
+                {!(salesData?.regions && salesData.regions.length > 0) && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold text-slate-400">Demo Data</span>
                     <button
                       type="button"
-                      onClick={() => setSelectedRegionIndex(0)}
-                      className="absolute bottom-3 left-3 text-[10px] font-extrabold text-slate-600 dark:text-slate-400 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 px-2.5 py-1 rounded-xl shadow-2xs hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer z-10 flex items-center gap-1"
+                      onClick={() => setShowDemoRegionData(!showDemoRegionData)}
+                      className={cn(
+                        "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
+                        showDemoRegionData ? "bg-blue-600" : "bg-slate-200 dark:bg-slate-700"
+                      )}
                     >
-                      <RefreshCw className="w-3 h-3" />
-                      <span>Reset Map Focus</span>
+                      <span
+                        className={cn(
+                          "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-xs ring-0 transition duration-200 ease-in-out",
+                          showDemoRegionData ? "translate-x-4" : "translate-x-0"
+                        )}
+                      />
                     </button>
                   </div>
+                )}
+              </div>
 
-                  {/* Right Column: Regional Data List + Nested City Breakdown for Active Region */}
-                  <div className="lg:col-span-5 flex flex-col justify-center">
-                    {loading ? (
-                      <div className="space-y-3 py-6 animate-pulse">
-                        <div className="h-4 bg-slate-200/80 dark:bg-slate-800 rounded w-full"></div>
-                        <div className="h-4 bg-slate-200/80 dark:bg-slate-800 rounded w-full"></div>
-                        <div className="h-4 bg-slate-100 dark:bg-slate-800 rounded w-3/4"></div>
+              {/* 2-Column Split Layout for Full Width Card: Map on Left, Interactive Stats & City Breakdown on Right */}
+              {(() => {
+                const activeRegionsList = (salesData?.regions && salesData.regions.length > 0)
+                  ? salesData.regions
+                  : (showDemoRegionData ? [
+                      {
+                        name: "UK General / South East",
+                        revenue: totalRev || 3799019,
+                        pct: 98.1,
+                        flag: "🇬🇧",
+                        countryCode: "GB",
+                        invoiceCount: 140,
+                        cities: [
+                          { name: "Southend-On-Sea", revenue: 2450000, pct: 64.5, count: 85 },
+                          { name: "Oxford", revenue: 890000, pct: 23.4, count: 35 },
+                          { name: "Marlow & Berkshire", revenue: 459019, pct: 12.1, count: 20 }
+                        ]
+                      },
+                      {
+                        name: "Greater London",
+                        revenue: 65605,
+                        pct: 1.7,
+                        flag: "🇬🇧",
+                        countryCode: "GB",
+                        invoiceCount: 8,
+                        cities: [
+                          { name: "London", revenue: 42500, pct: 64.8, count: 5 },
+                          { name: "Islington & Lambeth", revenue: 15105, pct: 23.0, count: 2 },
+                          { name: "Hillingdon", revenue: 8000, pct: 12.2, count: 1 }
+                        ]
+                      },
+                      {
+                        name: "West Midlands",
+                        revenue: 8141,
+                        pct: 0.2,
+                        flag: "🇬🇧",
+                        countryCode: "GB",
+                        invoiceCount: 2,
+                        cities: [
+                          { name: "Shrewsbury / Shropshire", revenue: 8141, pct: 100.0, count: 2 }
+                        ]
+                      }
+                    ] : []);
+
+                const currentRegion = activeRegionsList && activeRegionsList.length > 0
+                  ? (activeRegionsList[selectedRegionIndex % activeRegionsList.length] || activeRegionsList[0])
+                  : null;
+                const regionColors = ["bg-blue-600", "bg-emerald-500", "bg-amber-500", "bg-purple-500", "bg-indigo-500", "bg-rose-500", "bg-cyan-500"];
+
+                // Precise Map pin location coordinates & zoom origins per region (SVG 1008x651 canvas)
+                const getPinCoords = (regionName: string, countryCode: string) => {
+                  const name = (regionName || '').toLowerCase();
+                  const code = (countryCode || '').toUpperCase();
+                  if (code === 'ZA' || name.includes('south africa') || name.includes('international')) {
+                    return { top: '84.1%', left: '54.5%', zoomClass: 'origin-[54.5%_84.1%] scale-[1.8]' };
+                  }
+                  if (name.includes('london')) {
+                    return { top: '42.5%', left: '46.5%', zoomClass: 'origin-[46.5%_42.5%] scale-[1.7]' };
+                  }
+                  if (name.includes('north west') || name.includes('manchester')) {
+                    return { top: '39.5%', left: '46.0%', zoomClass: 'origin-[46.0%_39.5%] scale-[1.7]' };
+                  }
+                  if (name.includes('yorkshire') || name.includes('leeds')) {
+                    return { top: '39.5%', left: '46.5%', zoomClass: 'origin-[46.5%_39.5%] scale-[1.7]' };
+                  }
+                  if (name.includes('midlands') || name.includes('birmingham')) {
+                    return { top: '41.0%', left: '46.0%', zoomClass: 'origin-[46.0%_41.0%] scale-[1.7]' };
+                  }
+                  // Default UK South East (London/UK center: 46.2% left, 41.5% top)
+                  return { top: '41.5%', left: '46.2%', zoomClass: 'origin-[46.2%_41.5%] scale-[1.6]' };
+                };
+
+                const pin = getPinCoords(currentRegion?.name || '', currentRegion?.countryCode || currentRegion?.code || '');
+
+                return (
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
+                    {/* Left Column: Interactive World Map with Smooth Zooming & Accurate Spotlight Pin */}
+                    <div className="lg:col-span-7 flex flex-col items-center justify-center w-full min-h-[290px] relative rounded-2xl bg-slate-50/50 dark:bg-slate-950/50 p-4 border border-slate-100 dark:border-slate-800/80 overflow-hidden">
+                      
+                      {/* Animated Zoomed Map SVG Container */}
+                      <div className={cn("w-full transition-transform duration-700 ease-out transform", pin.zoomClass)}>
+                        <WorldMapSvg activeCountryIds={showDemoRegionData ? ['GB', 'US', 'DE', 'AU'] : activeRegionsList.map((r: any) => r.countryCode || 'GB')} />
                       </div>
-                    ) : (
+
+                      {/* Precise Floating Spotlight Pin over Actual Location */}
+                      {currentRegion && (
+                        <div
+                          className="absolute z-20 transition-all duration-500 ease-out pointer-events-none -translate-x-1/2 -translate-y-full"
+                          style={{ top: pin.top, left: pin.left }}
+                        >
+                          {/* Target Pulse Ring */}
+                          <div className="relative flex items-center justify-center mb-1">
+                            <span className="animate-ping absolute inline-flex h-6 w-6 rounded-full bg-blue-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-3 w-3 bg-blue-600 border-2 border-white shadow-md"></span>
+                          </div>
+
+                          {/* Floating Glassmorphism Tooltip Badge */}
+                          <div className="bg-slate-900/95 dark:bg-slate-950/95 text-white p-3 rounded-2xl shadow-2xl border border-slate-700/80 backdrop-blur-md min-w-[175px] text-left animate-bounce-short">
+                            <div className="flex items-center justify-between gap-2 mb-1">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-sm">{currentRegion.flag || '🇬🇧'}</span>
+                                <span className="text-[11px] font-extrabold text-white tracking-tight line-clamp-1">{currentRegion.name}</span>
+                              </div>
+                              <span className="text-[8.5px] font-extrabold px-1.5 py-0.5 rounded-full bg-blue-500/25 text-blue-300 border border-blue-400/30 uppercase tracking-widest">Focused</span>
+                            </div>
+                            <div className="text-xs font-black text-blue-400 font-mono tracking-tight mt-0.5">{formatAmount(currentRegion.revenue)}</div>
+                            <div className="flex items-center justify-between text-[9.5px] font-bold text-slate-300 mt-1.5 pt-1.5 border-t border-slate-800/80">
+                              <span>{currentRegion.pct}% of total</span>
+                              {currentRegion.invoiceCount && <span>{currentRegion.invoiceCount} invoices</span>}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Quick Reset Zoom Button */}
+                      <button
+                        type="button"
+                        onClick={() => setSelectedRegionIndex(0)}
+                        className="absolute bottom-3 left-3 text-[10px] font-extrabold text-slate-600 dark:text-slate-400 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 px-2.5 py-1 rounded-xl shadow-2xs hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer z-10 flex items-center gap-1"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                        <span>Reset Map Focus</span>
+                      </button>
+                    </div>
+
+                    {/* Right Column: Regional Data List + Nested City Breakdown for Active Region */}
+                    <div className="lg:col-span-5 flex flex-col justify-center">
                       <div className="space-y-3">
                         <div className="flex justify-between items-center">
                           <h4 className="text-[10.5px] font-extrabold text-slate-400 dark:text-slate-400 uppercase tracking-wider">Geographic Distribution</h4>
@@ -1873,19 +1822,10 @@ export default function SalesDashboardPage() {
                           })}
                         </div>
                       </div>
-                    )}
+                    </div>
                   </div>
-                </div>
-              );
-            })()}
-          </div>
-
-          {(showDemoRegionData || (salesData?.regions && salesData.regions.length > 0)) && (
-            <div className="border-t border-slate-100 dark:border-white/10 pt-3 mt-3 flex items-center justify-between">
-              <Link href="/regions" className="text-[11px] font-extrabold text-blue-600 hover:text-blue-700 hover:underline inline-flex items-center gap-1 cursor-pointer">
-                <span>View Regional Analytics & Deep-dive Report</span>
-                <ArrowRight className="h-3.5 w-3.5" />
-              </Link>
+                );
+              })()}
             </div>
           )}
         </div>
@@ -1898,195 +1838,209 @@ export default function SalesDashboardPage() {
 
         {/* CARD 1: GROSS PROFIT ANALYSIS */}
         <div className="lg:col-span-4 bg-white dark:bg-slate-900/90 rounded-2xl border border-slate-200/80 dark:border-white/25 text-slate-800 dark:text-slate-100 p-4.5 shadow-2xs flex flex-col justify-between min-h-[300px]">
-          <div className="flex flex-col h-full justify-between">
-            <h3 className="text-[13.5px] font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">Gross Profit Analysis</h3>
+          {loading ? (
+            <CardContentSkeleton height="h-[260px]" />
+          ) : (
+            <div className="flex flex-col h-full justify-between">
+              <h3 className="text-[13.5px] font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">Gross Profit Analysis</h3>
 
-            {/* Waterfall Chart */}
-            <div ref={waterfallRef} className="w-full h-44 my-auto" />
+              {/* Waterfall Chart */}
+              <div ref={waterfallRef} className="w-full h-44 my-auto" />
 
-            {/* Bottom 4 Metrics */}
-            <div className="grid grid-cols-4 gap-1.5 pt-2.5 border-t border-slate-100 dark:border-white/10 text-center">
-              <div>
-                <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Gross Profit</div>
-                <div className="text-[11.5px] font-extrabold text-slate-800 dark:text-slate-100 font-sans">
-                  {formatAmount(salesData?.executiveRow4?.grossProfitAnalysis?.grossProfit || 0)}
+              {/* Bottom 4 Metrics */}
+              <div className="grid grid-cols-4 gap-1.5 pt-2.5 border-t border-slate-100 dark:border-white/10 text-center">
+                <div>
+                  <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Gross Profit</div>
+                  <div className="text-[11.5px] font-extrabold text-slate-800 dark:text-slate-100 font-sans">
+                    {formatAmount(salesData?.executiveRow4?.grossProfitAnalysis?.grossProfit || 0)}
+                  </div>
                 </div>
-              </div>
-              <div>
-                <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Gross Margin</div>
-                <div className="text-[11.5px] font-extrabold text-slate-800 dark:text-slate-100">
-                  {(salesData?.executiveRow4?.grossProfitAnalysis?.grossMarginPct || 0).toFixed(1)}%
+                <div>
+                  <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Gross Margin</div>
+                  <div className="text-[11.5px] font-extrabold text-slate-800 dark:text-slate-100">
+                    {(salesData?.executiveRow4?.grossProfitAnalysis?.grossMarginPct || 0).toFixed(1)}%
+                  </div>
                 </div>
-              </div>
-              <div>
-                <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">vs Prev Margin</div>
-                <div className="text-[11.5px] font-extrabold text-slate-800 dark:text-slate-100">
-                  {(salesData?.executiveRow4?.grossProfitAnalysis?.prevGrossMarginPct || 0).toFixed(1)}%
+                <div>
+                  <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">vs Prev Margin</div>
+                  <div className="text-[11.5px] font-extrabold text-slate-800 dark:text-slate-100">
+                    {(salesData?.executiveRow4?.grossProfitAnalysis?.prevGrossMarginPct || 0).toFixed(1)}%
+                  </div>
                 </div>
-              </div>
-              <div>
-                <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Change</div>
-                <div className={cn("text-[11.5px] font-extrabold", salesData?.executiveRow4?.grossProfitAnalysis?.gmChangeIsUp ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400")}>
-                  {salesData?.executiveRow4?.grossProfitAnalysis?.gmChangePts || '+0.0 pts'}
+                <div>
+                  <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Change</div>
+                  <div className={cn("text-[11.5px] font-extrabold", salesData?.executiveRow4?.grossProfitAnalysis?.gmChangeIsUp ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400")}>
+                    {salesData?.executiveRow4?.grossProfitAnalysis?.gmChangePts || '+0.0 pts'}
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
+          )}
         </div>
 
         {/* CARD 2: REVENUE QUALITY */}
         <div className="lg:col-span-4 bg-white dark:bg-slate-900/90 rounded-2xl border border-slate-200/80 dark:border-white/25 text-slate-800 dark:text-slate-100 shadow-2xs flex flex-col overflow-hidden min-h-[300px]">
-          {/* Header */}
-          <div className="px-5 pt-4 pb-3 border-b border-slate-100 dark:border-white/10 flex items-center justify-between">
-            <h3 className="text-[13.5px] font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">Revenue Quality</h3>
-            <span className="text-[10px] font-extrabold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/60 border border-blue-100 dark:border-blue-800/60 px-2 py-0.5 rounded-full">
-              Score Based
-            </span>
-          </div>
-
-          <div className="flex-1 flex flex-col px-5 py-4 gap-4">
-            {/* Score + Legend Row */}
-            <div className="flex items-center gap-4">
-              {/* Donut */}
-              <div className="relative shrink-0" style={{ width: 96, height: 96 }}>
-                <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
-                  <path stroke="#f1f5f9" strokeWidth="4" fill="none"
-                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
-                  <path
-                    stroke="url(#blueGrad)" strokeDasharray={`${salesData?.executiveRow4?.revenueQuality?.qualityScore || 0}, 100`}
-                    strokeWidth="4" strokeLinecap="round" fill="none"
-                    className="transition-all duration-1000"
-                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                  />
-                  <defs>
-                    <linearGradient id="blueGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                      <stop offset="0%" stopColor="#2563eb" />
-                      <stop offset="100%" stopColor="#06b6d4" />
-                    </linearGradient>
-                  </defs>
-                </svg>
-                <div className="absolute inset-0 flex flex-col items-center justify-center" style={{ lineHeight: 1 }}>
-                  <div className="flex items-end">
-                    <span className="text-[21px] font-black text-slate-800 dark:text-slate-100">{salesData?.executiveRow4?.revenueQuality?.qualityScore || 0}</span>
-                    <span className="text-[9px] font-bold text-slate-400 mb-0.5">/100</span>
-                  </div>
-                  <span className="text-[7.5px] font-extrabold text-slate-400 uppercase tracking-widest mt-0.5">Score</span>
-                </div>
+          {loading ? (
+            <CardContentSkeleton height="h-[260px]" />
+          ) : (
+            <>
+              {/* Header */}
+              <div className="px-5 pt-4 pb-3 border-b border-slate-100 dark:border-white/10 flex items-center justify-between">
+                <h3 className="text-[13.5px] font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">Revenue Quality</h3>
+                <span className="text-[10px] font-extrabold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/60 border border-blue-100 dark:border-blue-800/60 px-2 py-0.5 rounded-full">
+                  Score Based
+                </span>
               </div>
 
-              {/* Score Label Stack */}
-              <div className="flex flex-col gap-1.5">
-                {[
-                  { label: 'Excellent', range: '90–100', color: '#10b981' },
-                  { label: 'Good', range: '75–89', color: '#2563eb' },
-                  { label: 'Fair', range: '50–74', color: '#f59e0b' },
-                  { label: 'At Risk', range: '<50', color: '#ef4444' },
-                ].map(item => (
-                  <div key={item.label} className="flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
-                    <span className="text-[9px] font-bold text-slate-500 dark:text-slate-400">{item.label}</span>
-                    <span className="text-[9px] font-semibold text-slate-400 dark:text-slate-500 ml-0.5">{item.range}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* 3 Revenue Metrics with progress */}
-            <div className="space-y-2.5">
-              {[
-                { label: 'Profitable Revenue', value: salesData?.executiveRow4?.revenueQuality?.profitableRevenue || 0, pct: salesData?.executiveRow4?.revenueQuality?.profitableRevenue > 0 ? (salesData?.executiveRow4?.revenueQuality?.profitablePct || 0) : 0, color: '#10b981' },
-                { label: 'Collectable Revenue', value: salesData?.executiveRow4?.revenueQuality?.collectableRevenue || 0, pct: salesData?.executiveRow4?.revenueQuality?.collectableRevenue > 0 ? (salesData?.executiveRow4?.revenueQuality?.collectablePct || 0) : 0, color: '#2563eb' },
-                { label: 'Sustainable Revenue', value: salesData?.executiveRow4?.revenueQuality?.sustainableRevenue || 0, pct: salesData?.executiveRow4?.revenueQuality?.sustainableRevenue > 0 ? (salesData?.executiveRow4?.revenueQuality?.sustainablePct || 0) : 0, color: '#f59e0b' },
-              ].map((row) => (
-                <div key={row.label}>
-                  <div className="flex justify-between items-baseline mb-1">
-                    <span className="text-[9.5px] font-extrabold text-slate-400 uppercase tracking-wider">{row.label}</span>
-                    <span className="text-[10.5px] font-extrabold" style={{ color: row.color }}>{row.pct.toFixed(0)}%</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="flex-1 bg-slate-100 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden">
-                      <div className="h-full rounded-full transition-all duration-700" style={{ width: `${row.pct}%`, backgroundColor: row.color }} />
+              <div className="flex-1 flex flex-col px-5 py-4 gap-4">
+                {/* Score + Legend Row */}
+                <div className="flex items-center gap-4">
+                  {/* Donut */}
+                  <div className="relative shrink-0" style={{ width: 96, height: 96 }}>
+                    <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
+                      <path stroke="#f1f5f9" strokeWidth="4" fill="none"
+                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                      <path
+                        stroke="url(#blueGrad)" strokeDasharray={`${salesData?.executiveRow4?.revenueQuality?.qualityScore || 0}, 100`}
+                        strokeWidth="4" strokeLinecap="round" fill="none"
+                        className="transition-all duration-1000"
+                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                      />
+                      <defs>
+                        <linearGradient id="blueGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                          <stop offset="0%" stopColor="#2563eb" />
+                          <stop offset="100%" stopColor="#06b6d4" />
+                        </linearGradient>
+                      </defs>
+                    </svg>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center" style={{ lineHeight: 1 }}>
+                      <div className="flex items-end">
+                        <span className="text-[21px] font-black text-slate-800 dark:text-slate-100">{salesData?.executiveRow4?.revenueQuality?.qualityScore || 0}</span>
+                        <span className="text-[9px] font-bold text-slate-400 mb-0.5">/100</span>
+                      </div>
+                      <span className="text-[7.5px] font-extrabold text-slate-400 uppercase tracking-widest mt-0.5">Score</span>
                     </div>
-                    <span className="text-[10.5px] font-extrabold text-slate-700 dark:text-slate-300 font-sans shrink-0">{formatAmount(row.value)}</span>
+                  </div>
+
+                  {/* Score Label Stack */}
+                  <div className="flex flex-col gap-1.5">
+                    {[
+                      { label: 'Excellent', range: '90–100', color: '#10b981' },
+                      { label: 'Good', range: '75–89', color: '#2563eb' },
+                      { label: 'Fair', range: '50–74', color: '#f59e0b' },
+                      { label: 'At Risk', range: '<50', color: '#ef4444' },
+                    ].map(item => (
+                      <div key={item.label} className="flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
+                        <span className="text-[9px] font-bold text-slate-500 dark:text-slate-400">{item.label}</span>
+                        <span className="text-[9px] font-semibold text-slate-400 dark:text-slate-500 ml-0.5">{item.range}</span>
+                      </div>
+                    ))}
                   </div>
                 </div>
-              ))}
-            </div>
-          </div>
 
-          {/* Footer */}
-          <div className="px-5 py-2.5 border-t border-slate-100 dark:border-white/10 bg-slate-50/50 dark:bg-slate-900/50">
-            <p className="text-[9.5px] font-semibold text-slate-400">
-              • Quality score is based on profitability, collectability & sustainability metrics.
-            </p>
-          </div>
+                {/* 3 Revenue Metrics with progress */}
+                <div className="space-y-2.5">
+                  {[
+                    { label: 'Profitable Revenue', value: salesData?.executiveRow4?.revenueQuality?.profitableRevenue || 0, pct: salesData?.executiveRow4?.revenueQuality?.profitableRevenue > 0 ? (salesData?.executiveRow4?.revenueQuality?.profitablePct || 0) : 0, color: '#10b981' },
+                    { label: 'Collectable Revenue', value: salesData?.executiveRow4?.revenueQuality?.collectableRevenue || 0, pct: salesData?.executiveRow4?.revenueQuality?.collectableRevenue > 0 ? (salesData?.executiveRow4?.revenueQuality?.collectablePct || 0) : 0, color: '#2563eb' },
+                    { label: 'Sustainable Revenue', value: salesData?.executiveRow4?.revenueQuality?.sustainableRevenue || 0, pct: salesData?.executiveRow4?.revenueQuality?.sustainableRevenue > 0 ? (salesData?.executiveRow4?.revenueQuality?.sustainablePct || 0) : 0, color: '#f59e0b' },
+                  ].map((row) => (
+                    <div key={row.label}>
+                      <div className="flex justify-between items-baseline mb-1">
+                        <span className="text-[9.5px] font-extrabold text-slate-400 uppercase tracking-wider">{row.label}</span>
+                        <span className="text-[10.5px] font-extrabold" style={{ color: row.color }}>{row.pct.toFixed(0)}%</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 bg-slate-100 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                          <div className="h-full rounded-full transition-all duration-700" style={{ width: `${row.pct}%`, backgroundColor: row.color }} />
+                        </div>
+                        <span className="text-[10.5px] font-extrabold text-slate-700 dark:text-slate-300 font-sans shrink-0">{formatAmount(row.value)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="px-5 py-2.5 border-t border-slate-100 dark:border-white/10 bg-slate-50/50 dark:bg-slate-900/50">
+                <p className="text-[9.5px] font-semibold text-slate-400">
+                  • Quality score is based on profitability, collectability & sustainability metrics.
+                </p>
+              </div>
+            </>
+          )}
         </div>
 
         {/* CARD 3: CUSTOMER CONCENTRATION */}
         <div className="lg:col-span-4 bg-white dark:bg-slate-900/90 rounded-2xl border border-slate-200/80 dark:border-white/25 text-slate-800 dark:text-slate-100 p-4.5 shadow-2xs flex flex-col justify-between min-h-[300px]">
-          <div className="flex flex-col h-full justify-between">
-            <h3 className="text-[13.5px] font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">Customer Concentration</h3>
+          {loading ? (
+            <CardContentSkeleton height="h-[260px]" />
+          ) : (
+            <div className="flex flex-col h-full justify-between">
+              <h3 className="text-[13.5px] font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">Customer Concentration</h3>
 
-            <div className="my-auto space-y-4 py-1">
-              {/* Top 5 Contribution */}
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <div>
-                    <span className="text-2xl font-black text-slate-800 dark:text-slate-100 tracking-tight">
-                      {(salesData?.executiveRow4?.customerConcentration?.top5ContributionPct || 0).toFixed(1)}%
+              <div className="my-auto space-y-4 py-1">
+                {/* Top 5 Contribution */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div>
+                      <span className="text-2xl font-black text-slate-800 dark:text-slate-100 tracking-tight">
+                        {(salesData?.executiveRow4?.customerConcentration?.top5ContributionPct || 0).toFixed(1)}%
+                      </span>
+                      <span className="text-[10px] font-bold text-slate-400 block">Top 5 Customers Contribution</span>
+                    </div>
+                    <span className={cn(
+                      "text-[10.5px] font-extrabold px-2.5 py-0.5 rounded-full border shadow-2xs",
+                      salesData?.executiveRow4?.customerConcentration?.riskLevel === 'High Risk'
+                        ? "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/60 dark:text-amber-400 dark:border-amber-800/60"
+                        : "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-400 dark:border-emerald-800/60"
+                    )}>
+                      {salesData?.executiveRow4?.customerConcentration?.riskLevel || 'Low Risk'}
                     </span>
-                    <span className="text-[10px] font-bold text-slate-400 block">Top 5 Customers Contribution</span>
                   </div>
-                  <span className={cn(
-                    "text-[10.5px] font-extrabold px-2.5 py-0.5 rounded-full border shadow-2xs",
-                    salesData?.executiveRow4?.customerConcentration?.riskLevel === 'High Risk'
-                      ? "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/60 dark:text-amber-400 dark:border-amber-800/60"
-                      : "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-400 dark:border-emerald-800/60"
-                  )}>
-                    {salesData?.executiveRow4?.customerConcentration?.riskLevel || 'Low Risk'}
-                  </span>
+                  <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-amber-500 rounded-full transition-all duration-500"
+                      style={{ width: `${Math.min(100, salesData?.executiveRow4?.customerConcentration?.top5ContributionPct || 0)}%` }}
+                    />
+                  </div>
                 </div>
-                <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-amber-500 rounded-full transition-all duration-500"
-                    style={{ width: `${Math.min(100, salesData?.executiveRow4?.customerConcentration?.top5ContributionPct || 0)}%` }}
-                  />
+
+                {/* Largest Customer Contribution */}
+                <div>
+                  <div className="flex justify-between items-baseline mb-1.5">
+                    <div>
+                      <span className="text-xl font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">
+                        {(salesData?.executiveRow4?.customerConcentration?.largestContributionPct || 0).toFixed(1)}%
+                      </span>
+                      <span className="text-[10px] font-bold text-slate-400 block">Largest Customer Contribution</span>
+                    </div>
+                  </div>
+                  <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-blue-600 rounded-full transition-all duration-500"
+                      style={{ width: `${Math.min(100, salesData?.executiveRow4?.customerConcentration?.largestContributionPct || 0)}%` }}
+                    />
+                  </div>
                 </div>
               </div>
 
-              {/* Largest Customer Contribution */}
-              <div>
-                <div className="flex justify-between items-baseline mb-1.5">
-                  <div>
-                    <span className="text-xl font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">
-                      {(salesData?.executiveRow4?.customerConcentration?.largestContributionPct || 0).toFixed(1)}%
-                    </span>
-                    <span className="text-[10px] font-bold text-slate-400 block">Largest Customer Contribution</span>
-                  </div>
-                </div>
-                <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-blue-600 rounded-full transition-all duration-500"
-                    style={{ width: `${Math.min(100, salesData?.executiveRow4?.customerConcentration?.largestContributionPct || 0)}%` }}
-                  />
-                </div>
+              <div className="border-t border-slate-100 dark:border-white/10 pt-2.5 flex flex-col gap-1">
+                <p className="text-[10px] font-semibold text-slate-400">
+                  • High concentration increases business risk.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setIsCustomerConcentrationOpen(true)}
+                  className="text-[11px] font-extrabold text-blue-600 hover:text-blue-700 hover:underline inline-flex items-center gap-1 cursor-pointer self-start border-none bg-transparent p-0"
+                >
+                  <span>View Concentration Analysis</span>
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </button>
               </div>
             </div>
-
-            <div className="border-t border-slate-100 dark:border-white/10 pt-2.5 flex flex-col gap-1">
-              <p className="text-[10px] font-semibold text-slate-400">
-                • High concentration increases business risk.
-              </p>
-              <button
-                type="button"
-                onClick={() => setIsCustomerConcentrationOpen(true)}
-                className="text-[11px] font-extrabold text-blue-600 hover:text-blue-700 hover:underline inline-flex items-center gap-1 cursor-pointer self-start border-none bg-transparent p-0"
-              >
-                <span>View Concentration Analysis</span>
-                <ArrowRight className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          </div>
+          )}
         </div>
 
       </div>
@@ -2098,444 +2052,321 @@ export default function SalesDashboardPage() {
 
         {/* CARD 1: RECEIVABLES AGING */}
         <div className="lg:col-span-4 bg-white dark:bg-slate-900/90 rounded-2xl border border-slate-200/80 dark:border-white/25 text-slate-800 dark:text-slate-100 p-4.5 shadow-2xs flex flex-col justify-between min-h-[310px]">
-          <div className="flex flex-col h-full justify-between">
-            <div className="flex items-center">
-              <h3 className="text-[13.5px] font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">Receivables Aging</h3>
-              <CardTooltip text="Tracks unpaid customer invoices grouped by overdue days (Current, 1-30, 31-60, 61-90, 90+ days) to monitor collection risk." />
-            </div>
+          {loading ? (
+            <CardContentSkeleton height="h-[270px]" />
+          ) : (
+            <div className="flex flex-col h-full justify-between">
+              <div className="flex items-center">
+                <h3 className="text-[13.5px] font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">Receivables Aging</h3>
+                <CardTooltip text="Tracks unpaid customer invoices grouped by overdue days (Current, 1-30, 31-60, 61-90, 90+ days) to monitor collection risk." />
+              </div>
 
-            {/* Total AR metric */}
-            <div className="mt-1 flex items-baseline justify-between">
-              <div>
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center">
-                  Total AR
-                  <CardTooltip text="Total Accounts Receivable balance currently outstanding as on the selected date." />
+              {/* Total AR metric */}
+              <div className="mt-1 flex items-baseline justify-between">
+                <div>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center">
+                    Total AR
+                    <CardTooltip text="Total Accounts Receivable balance currently outstanding as on the selected date." />
+                  </span>
+                  <span className="text-xl font-black text-slate-800 font-sans tracking-tight block">
+                    {formatAmount(salesData?.agingSummary?.totalAR || 0)}
+                  </span>
+                </div>
+                <span className="text-[9.5px] font-bold text-slate-500 bg-slate-100 dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 px-2 py-0.5 rounded-md">
+                  As on {salesData?.agingSummary?.asOnDate || (salesData?.meta?.toDate ? new Date(salesData.meta.toDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }))}
                 </span>
-                <span className="text-xl font-black text-slate-800 font-sans tracking-tight block">
-                  {formatAmount(salesData?.agingSummary?.totalAR || 0)}
-                </span>
-              </div>
-              <span className="text-[9.5px] font-bold text-slate-500 bg-slate-100 dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 px-2 py-0.5 rounded-md">
-                As on {salesData?.agingSummary?.asOnDate || (salesData?.meta?.toDate ? new Date(salesData.meta.toDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }))}
-              </span>
-            </div>
-
-            {/* Donut Chart + Legend */}
-            <div className="grid grid-cols-12 gap-2 items-center my-auto py-1">
-              {/* Donut Ring (Left) - Bigger Size */}
-              <div className="col-span-5 flex items-center justify-center">
-                <div ref={agingRef} className="w-28 h-28" />
               </div>
 
-              {/* Legend (Right) */}
-              <div className="col-span-7 space-y-1.5 text-[10px]">
-                {[
-                  { label: "Current", val: salesData?.agingSummary?.current || 0, color: "bg-blue-600" },
-                  { label: "1 - 30 Days", val: salesData?.agingSummary?.days1_30 || 0, color: "bg-emerald-500" },
-                  { label: "31 - 60 Days", val: salesData?.agingSummary?.days31_60 || 0, color: "bg-amber-500" },
-                  { label: "61 - 90 Days", val: salesData?.agingSummary?.days61_90 || 0, color: "bg-pink-500" },
-                  { label: "90+ Days", val: salesData?.agingSummary?.days90Plus || 0, color: "bg-purple-500" }
-                ].map((item, idx) => {
-                  const total = salesData?.agingSummary?.totalAR || 0;
-                  const pct = total > 0 ? ((item.val / total) * 100).toFixed(1) : "0.0";
-                  return (
-                    <div key={idx} className="flex items-center justify-between font-semibold">
-                      <div className="flex items-center gap-1.5 truncate max-w-[90px]">
-                        <span className={cn("h-2 w-2 rounded-full shrink-0", item.color)} />
-                        <span className="text-slate-600 dark:text-slate-400 truncate">{item.label}</span>
+              {/* Donut Chart + Legend */}
+              <div className="grid grid-cols-12 gap-2 items-center my-auto py-1">
+                {/* Donut Ring (Left) - Bigger Size */}
+                <div className="col-span-5 flex items-center justify-center">
+                  <div ref={agingRef} className="w-28 h-28" />
+                </div>
+
+                {/* Legend (Right) */}
+                <div className="col-span-7 space-y-1.5 text-[10px]">
+                  {[
+                    { label: "Current", val: salesData?.agingSummary?.current || 0, color: "bg-blue-600" },
+                    { label: "1 - 30 Days", val: salesData?.agingSummary?.days1_30 || 0, color: "bg-emerald-500" },
+                    { label: "31 - 60 Days", val: salesData?.agingSummary?.days31_60 || 0, color: "bg-amber-500" },
+                    { label: "61 - 90 Days", val: salesData?.agingSummary?.days61_90 || 0, color: "bg-pink-500" },
+                    { label: "90+ Days", val: salesData?.agingSummary?.days90Plus || 0, color: "bg-purple-500" }
+                  ].map((item, idx) => {
+                    const total = salesData?.agingSummary?.totalAR || 0;
+                    const pct = total > 0 ? ((item.val / total) * 100).toFixed(1) : "0.0";
+                    return (
+                      <div key={idx} className="flex items-center justify-between font-semibold">
+                        <div className="flex items-center gap-1.5 truncate max-w-[90px]">
+                          <span className={cn("h-2 w-2 rounded-full shrink-0", item.color)} />
+                          <span className="text-slate-600 dark:text-slate-400 truncate">{item.label}</span>
+                        </div>
+                        <div className="flex items-center gap-1 font-sans">
+                          <span className="font-extrabold text-slate-800 dark:text-slate-200">{formatAmount(item.val)}</span>
+                          <span className="text-slate-400 text-[9px]">({pct}%)</span>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-1 font-sans">
-                        <span className="font-extrabold text-slate-800 dark:text-slate-200">{formatAmount(item.val)}</span>
-                        <span className="text-slate-400 text-[9px]">({pct}%)</span>
-                      </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="border-t border-slate-100 dark:border-slate-800 pt-2.5 flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={() => setIsARPanelOpen(true)}
+                  className="text-[11px] font-extrabold text-blue-600 hover:text-blue-700 dark:text-blue-400 hover:underline inline-flex items-center gap-1 cursor-pointer bg-transparent border-0 p-0"
+                >
+                  <span>Inspect Aging Drawer</span>
+                </button>
+
+                <Link
+                  href={`/invoices?as_on_date=${salesData?.meta?.toDate || toDate || new Date().toISOString().split('T')[0]}`}
+                  className="text-[11px] font-extrabold text-blue-600 hover:text-blue-700 dark:text-blue-400 hover:underline inline-flex items-center gap-1 cursor-pointer"
+                >
+                  <span>View Full AR Report</span>
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </Link>
               </div>
             </div>
-
-            {/* Footer */}
-            <div className="border-t border-slate-100 dark:border-slate-800 pt-2.5 flex items-center justify-between">
-              <button
-                type="button"
-                onClick={() => setIsARPanelOpen(true)}
-                className="text-[11px] font-extrabold text-blue-600 hover:text-blue-700 dark:text-blue-400 hover:underline inline-flex items-center gap-1 cursor-pointer bg-transparent border-0 p-0"
-              >
-                <span>Inspect Aging Drawer</span>
-              </button>
-
-              <Link
-                href={`/invoices?as_on_date=${salesData?.meta?.toDate || toDate || new Date().toISOString().split('T')[0]}`}
-                className="text-[11px] font-extrabold text-blue-600 hover:text-blue-700 dark:text-blue-400 hover:underline inline-flex items-center gap-1 cursor-pointer"
-              >
-                <span>View Full AR Report</span>
-                <ArrowRight className="h-3.5 w-3.5" />
-              </Link>
-            </div>
-          </div>
+          )}
         </div>
 
         {/* CARD 2: DAYS SALES OUTSTANDING (DSO) */}
-        <div className="lg:col-span-4 bg-white dark:bg-slate-900/90 rounded-2xl border border-slate-200/80 dark:border-white/25 text-slate-800 dark:text-slate-100 p-4.5 shadow-2xs flex flex-col justify-between min-h-[310px]">
-          <div className="flex flex-col h-full justify-between">
-            <div className="flex items-center">
-              <h3 className="text-[13.5px] font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">Days Sales Outstanding (DSO)</h3>
-              <CardTooltip text="Measures average collection time in days. Lower DSO means cash is collected faster from customers." />
-            </div>
-
-            <div className="my-auto space-y-5 py-1">
-              {/* Big DSO Metric */}
-              <div>
-                <span className="text-3xl font-black text-slate-800 dark:text-slate-100 tracking-tight block">
-                  {salesData?.dsoSummary?.currentDso || 0} Days
-                </span>
-                <span className="text-[10.5px] font-bold text-slate-400 block mt-0.5">Average Collection Period</span>
+        <div className="lg:col-span-4 bg-white dark:bg-slate-900/90 rounded-2xl border border-slate-200/80 dark:border-white/25 text-slate-800 dark:text-slate-100 p-4.5 shadow-2xs flex flex-col justify-between min-h-[310px] cursor-pointer hover:border-blue-300 transition duration-200" onClick={() => setIsARPanelOpen(true)}>
+          {loading ? (
+            <CardContentSkeleton height="h-[270px]" />
+          ) : (
+            <div className="flex flex-col h-full justify-between">
+              <div className="flex items-center">
+                <h3 className="text-[13.5px] font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">Days Sales Outstanding (DSO)</h3>
+                <CardTooltip text="Measures average collection time in days. Lower DSO means cash is collected faster from customers." />
               </div>
 
-              {/* vs Previous Period */}
-              <div className="pt-2 border-t border-slate-100">
-                <span className="text-[9.5px] font-bold text-slate-400 uppercase tracking-wider flex items-center mb-1">
-                  vs Previous Period
-                  <CardTooltip text="Comparison against DSO of the previous equal date range." />
-                </span>
-                <div className="flex items-center justify-between">
-                  <span className="text-lg font-extrabold text-slate-800">
-                    {salesData?.dsoSummary?.prevDso || 0} Days
+              <div className="my-auto space-y-5 py-1">
+                {/* Big DSO Metric */}
+                <div>
+                  <span className="text-3xl font-black text-slate-800 dark:text-slate-100 tracking-tight block">
+                    {salesData?.dsoSummary?.currentDso || 0} Days
                   </span>
-                  <span className="text-[10.5px] font-extrabold px-2.5 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200 shadow-2xs flex items-center gap-1">
-                    <span>↑ {salesData?.dsoSummary?.dsoChange || 0} Days</span>
+                  <span className="text-[10.5px] font-bold text-slate-400 block mt-0.5">Average Collection Period</span>
+                </div>
+
+                {/* vs Previous Period */}
+                <div className="pt-2 border-t border-slate-100">
+                  <span className="text-[9.5px] font-bold text-slate-400 uppercase tracking-wider flex items-center mb-1">
+                    vs Previous Period
+                    <CardTooltip text="Comparison against DSO of the previous equal date range." />
                   </span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-lg font-extrabold text-slate-800">
+                      {salesData?.dsoSummary?.prevDso || 0} Days
+                    </span>
+                    <span className="text-[10.5px] font-extrabold px-2.5 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200 shadow-2xs flex items-center gap-1">
+                      <span>↑ {salesData?.dsoSummary?.dsoChange || 0} Days</span>
+                    </span>
+                  </div>
+                </div>
+
+                {/* Industry Benchmark */}
+                <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-[11px]">
+                  <span className="font-bold text-slate-400 flex items-center">
+                    Industry Benchmark
+                    <CardTooltip text="Standard 35-day target benchmark for optimal credit control and cash collection." />
+                  </span>
+                  <span className="font-extrabold text-slate-800">35 Days</span>
                 </div>
               </div>
 
-              {/* Industry Benchmark */}
-              <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-[11px]">
-                <span className="font-bold text-slate-400 flex items-center">
-                  Industry Benchmark
-                  <CardTooltip text="Standard 35-day target benchmark for optimal credit control and cash collection." />
-                </span>
-                <span className="font-extrabold text-slate-800">35 Days</span>
-              </div>
-            </div>
 
-            {/* Footer */}
-            <div className="border-t border-slate-100 pt-2.5">
-              <Link href="/dso" className="text-[11px] font-extrabold text-blue-600 hover:text-blue-700 hover:underline inline-flex items-center gap-1 cursor-pointer">
-                <span>View DSO Analysis</span>
-                <ArrowRight className="h-3.5 w-3.5" />
-              </Link>
             </div>
-          </div>
+          )}
         </div>
 
         {/* CARD 3: SALES TO CASH CONVERSION */}
-        <div className="lg:col-span-4 bg-white dark:bg-slate-900/90 rounded-2xl border border-slate-200/80 dark:border-white/25 text-slate-800 dark:text-slate-100 p-4.5 shadow-2xs flex flex-col justify-between min-h-[310px]">
-          <div className="flex flex-col h-full justify-between">
-            <div className="flex items-center mb-2">
-              <h3 className="text-[13.5px] font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">Sales to Cash Conversion</h3>
-              <CardTooltip text="Shows sales turnover funnel from Revenue to Invoiced to Collected cash vs Outstanding & Overdue receivables." />
-            </div>
+        <div className="lg:col-span-4 bg-white dark:bg-slate-900/90 rounded-2xl border border-slate-200/80 dark:border-white/25 text-slate-800 dark:text-slate-100 p-4.5 shadow-2xs flex flex-col justify-between min-h-[310px] cursor-pointer hover:border-blue-300 transition duration-200" onClick={() => setIsARPanelOpen(true)}>
+          {loading ? (
+            <CardContentSkeleton height="h-[270px]" />
+          ) : (
+            <div className="flex flex-col h-full justify-between">
+              <div className="flex items-center mb-2">
+                <h3 className="text-[13.5px] font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">Sales to Cash Conversion</h3>
+                <CardTooltip text="Shows sales turnover funnel from Revenue to Invoiced to Collected cash vs Outstanding & Overdue receivables." />
+              </div>
 
-            <div className="grid grid-cols-12 gap-2 items-center my-auto py-1">
-              {/* Funnel Breakdown with Wide SVG Illustration (Left) */}
-              <div className="col-span-7 flex items-center gap-2">
-                {/* 72px Wide SVG 5-Stage Funnel Illustration */}
-                <svg width="72" height="122" viewBox="0 0 72 122" fill="none" xmlns="http://www.w3.org/2000/svg" className="shrink-0 drop-shadow-2xs">
-                  <path d="M 2,2 L 70,2 C 71.1,2 71.8,3.1 71.2,4.1 L 61.8,20.1 C 61.4,21.2 60.4,22 59.2,22 L 12.8,22 C 11.6,22 10.6,21.2 10.2,20.1 L 0.8,4.1 C 0.2,3.1 0.9,2 2,2 Z" fill="#2563eb" />
-                  <path d="M 11.2,26 L 60.8,26 C 61.9,26 62.6,27.1 62.0,28.1 L 52.8,44.1 C 52.4,45.2 51.4,46 50.2,46 L 21.8,46 C 20.6,46 19.6,45.2 19.2,44.1 L 10.0,28.1 C 9.4,27.1 10.1,26 11.2,26 Z" fill="#60a5fa" />
-                  <path d="M 20.2,50 L 51.8,50 C 52.9,50 53.6,51.1 53.0,52.1 L 44.8,68.1 C 44.4,69.2 43.4,70 42.2,70 L 29.8,70 C 28.6,70 27.6,69.2 27.2,68.1 L 19.0,52.1 C 18.4,51.1 19.1,50 20.2,50 Z" fill="#93c5fd" />
-                  <path d="M 28.2,74 L 43.8,74 C 44.9,74 45.6,75.1 45.0,76.1 L 37.8,92.1 C 37.4,93.2 36.4,94 35.2,94 L 36.8,94 C 35.6,94 34.6,93.2 34.2,92.1 L 27.0,76.1 C 26.4,75.1 27.1,74 28.2,74 Z" fill="#bfdbfe" />
-                  <path d="M 33.5,98 L 38.5,98 C 39.6,98 40.2,99.2 39.5,100.1 L 36.7,115.1 C 36.3,116.2 35.7,116.2 35.3,115.1 L 32.5,100.1 C 31.8,99.2 32.4,98 33.5,98 Z" fill="#34d399" />
-                </svg>
+              <div className="grid grid-cols-12 gap-2 items-center my-auto py-1">
+                {/* Funnel Breakdown with Wide SVG Illustration (Left) */}
+                <div className="col-span-7 flex items-center gap-2">
+                  {/* 72px Wide SVG 5-Stage Funnel Illustration */}
+                  <svg width="72" height="122" viewBox="0 0 72 122" fill="none" xmlns="http://www.w3.org/2000/svg" className="shrink-0 drop-shadow-2xs">
+                    <path d="M 2,2 L 70,2 C 71.1,2 71.8,3.1 71.2,4.1 L 61.8,20.1 C 61.4,21.2 60.4,22 59.2,22 L 12.8,22 C 11.6,22 10.6,21.2 10.2,20.1 L 0.8,4.1 C 0.2,3.1 0.9,2 2,2 Z" fill="#2563eb" />
+                    <path d="M 11.2,26 L 60.8,26 C 61.9,26 62.6,27.1 62.0,28.1 L 52.8,44.1 C 52.4,45.2 51.4,46 50.2,46 L 21.8,46 C 20.6,46 19.6,45.2 19.2,44.1 L 10.0,28.1 C 9.4,27.1 10.1,26 11.2,26 Z" fill="#60a5fa" />
+                    <path d="M 20.2,50 L 51.8,50 C 52.9,50 53.6,51.1 53.0,52.1 L 44.8,68.1 C 44.4,69.2 43.4,70 42.2,70 L 29.8,70 C 28.6,70 27.6,69.2 27.2,68.1 L 19.0,52.1 C 18.4,51.1 19.1,50 20.2,50 Z" fill="#93c5fd" />
+                    <path d="M 28.2,74 L 43.8,74 C 44.9,74 45.6,75.1 45.0,76.1 L 37.8,92.1 C 37.4,93.2 36.4,94 35.2,94 L 36.8,94 C 35.6,94 34.6,93.2 34.2,92.1 L 27.0,76.1 C 26.4,75.1 27.1,74 28.2,74 Z" fill="#bfdbfe" />
+                    <path d="M 33.5,98 L 38.5,98 C 39.6,98 40.2,99.2 39.5,100.1 L 36.7,115.1 C 36.3,116.2 35.7,116.2 35.3,115.1 L 32.5,100.1 C 31.8,99.2 32.4,98 33.5,98 Z" fill="#34d399" />
+                  </svg>
 
-                {/* Rows List */}
-                <div className="flex-1 space-y-2 min-w-0">
-                  {[
-                    { label: "Revenue", val: totalRev || 0, pct: "100%" },
-                    { label: "Invoiced", val: salesData?.cashConversion?.invoiced || totalRev || 0, pct: totalRev > 0 ? `${(((salesData?.cashConversion?.invoiced || totalRev || 0) / totalRev) * 100).toFixed(0)}%` : "0%" },
-                    { label: "Collected", val: salesData?.cashConversion?.collected || 0, pct: totalRev > 0 ? `${(((salesData?.cashConversion?.collected || 0) / totalRev) * 100).toFixed(0)}%` : "0%" },
-                    { label: "Outstanding", val: salesData?.cashConversion?.outstanding || 0, pct: totalRev > 0 ? `${(((salesData?.cashConversion?.outstanding || 0) / totalRev) * 100).toFixed(0)}%` : "0%" },
-                    { label: "Overdue", val: salesData?.cashConversion?.overdue || 0, pct: totalRev > 0 ? `${(((salesData?.cashConversion?.overdue || 0) / totalRev) * 100).toFixed(0)}%` : "0%" }
-                  ].map((row, idx) => (
-                    <div key={idx} className="flex justify-between items-center text-[9.5px]">
-                      <span className="font-bold text-slate-600 truncate mr-1">{row.label}</span>
-                      <div className="flex items-center gap-1 font-sans shrink-0">
-                        <span className="font-extrabold text-slate-800">{formatAmount(row.val)}</span>
-                        <span className="text-slate-400 text-[8.5px] w-5 text-right font-semibold">{row.pct}</span>
+                  {/* Rows List */}
+                  <div className="flex-1 space-y-2 min-w-0">
+                    {[
+                      { label: "Revenue", val: totalRev || 0, pct: "100%" },
+                      { label: "Invoiced", val: salesData?.cashConversion?.invoiced || totalRev || 0, pct: totalRev > 0 ? `${(((salesData?.cashConversion?.invoiced || totalRev || 0) / totalRev) * 100).toFixed(0)}%` : "0%" },
+                      { label: "Collected", val: salesData?.cashConversion?.collected || 0, pct: totalRev > 0 ? `${(((salesData?.cashConversion?.collected || 0) / totalRev) * 100).toFixed(0)}%` : "0%" },
+                      { label: "Outstanding", val: salesData?.cashConversion?.outstanding || 0, pct: totalRev > 0 ? `${(((salesData?.cashConversion?.outstanding || 0) / totalRev) * 100).toFixed(0)}%` : "0%" },
+                      { label: "Overdue", val: salesData?.cashConversion?.overdue || 0, pct: totalRev > 0 ? `${(((salesData?.cashConversion?.overdue || 0) / totalRev) * 100).toFixed(0)}%` : "0%" }
+                    ].map((row, idx) => (
+                      <div key={idx} className="flex justify-between items-center text-[9.5px]">
+                        <span className="font-bold text-slate-600 truncate mr-1">{row.label}</span>
+                        <div className="flex items-center gap-1 font-sans shrink-0">
+                          <span className="font-extrabold text-slate-800">{formatAmount(row.val)}</span>
+                          <span className="text-slate-400 text-[8.5px] w-5 text-right font-semibold">{row.pct}</span>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
+                </div>
+
+                {/* Cash Conversion Rate Card (Right) */}
+                <div className="col-span-5 bg-slate-50/70 rounded-xl border border-slate-100 p-2 flex flex-col items-center justify-between text-center min-h-[145px]">
+                  <span className="text-[8.5px] font-extrabold text-slate-400 uppercase tracking-wider flex items-center justify-center">
+                    Cash Conversion
+                    <CardTooltip text="Ratio of cash collected to total sales revenue. Higher % means faster cash flow conversion." />
+                  </span>
+
+                  <div className="my-0.5">
+                    <span className="text-xl font-black text-slate-800 dark:text-slate-100 tracking-tight block">
+                      {(salesData?.cashConversion?.rate || 0).toFixed(1)}%
+                    </span>
+                    <span className="text-[8.5px] font-bold text-slate-400 block">
+                      vs Prev: {(salesData?.cashConversion?.prevRate || 0).toFixed(1)}%
+                    </span>
+                  </div>
+
+                  {/* Sparkline line container */}
+                  <div ref={conversionSparkRef} className="w-full h-8 my-0.5" />
+
+                  <span className={cn(
+                    "text-[9px] font-extrabold px-2 py-0.5 rounded-full border shadow-2xs truncate max-w-full",
+                    salesData?.cashConversion?.isImproving !== false
+                      ? "text-emerald-600 bg-emerald-50 border-emerald-100"
+                      : "text-rose-600 bg-rose-50 border-rose-100"
+                  )}>
+                    {salesData?.cashConversion?.isImproving !== false ? 'Improving ↑' : 'Declining ↓'} {salesData?.cashConversion?.rateChangePts || '+0.0 pts'}
+                  </span>
                 </div>
               </div>
 
-              {/* Cash Conversion Rate Card (Right) */}
-              <div className="col-span-5 bg-slate-50/70 rounded-xl border border-slate-100 p-2 flex flex-col items-center justify-between text-center min-h-[145px]">
-                <span className="text-[8.5px] font-extrabold text-slate-400 uppercase tracking-wider flex items-center justify-center">
-                  Cash Conversion
-                  <CardTooltip text="Ratio of cash collected to total sales revenue. Higher % means faster cash flow conversion." />
-                </span>
 
-                <div className="my-0.5">
-                  <span className="text-xl font-black text-slate-800 dark:text-slate-100 tracking-tight block">
-                    {(salesData?.cashConversion?.rate || 0).toFixed(1)}%
-                  </span>
-                  <span className="text-[8.5px] font-bold text-slate-400 block">
-                    vs Prev: {(salesData?.cashConversion?.prevRate || 0).toFixed(1)}%
-                  </span>
-                </div>
-
-                {/* Sparkline line container */}
-                <div ref={conversionSparkRef} className="w-full h-8 my-0.5" />
-
-                <span className={cn(
-                  "text-[9px] font-extrabold px-2 py-0.5 rounded-full border shadow-2xs truncate max-w-full",
-                  salesData?.cashConversion?.isImproving !== false
-                    ? "text-emerald-600 bg-emerald-50 border-emerald-100"
-                    : "text-rose-600 bg-rose-50 border-rose-100"
-                )}>
-                  {salesData?.cashConversion?.isImproving !== false ? 'Improving ↑' : 'Declining ↓'} {salesData?.cashConversion?.rateChangePts || '+0.0 pts'}
-                </span>
-              </div>
             </div>
-
-            {/* Footer */}
-            <div className="border-t border-slate-100 pt-2.5">
-              <Link href="/analytics" className="text-[11px] font-extrabold text-blue-600 hover:text-blue-700 hover:underline inline-flex items-center gap-1 cursor-pointer">
-                <span>View Cash Flow Analysis</span>
-                <ArrowRight className="h-3.5 w-3.5" />
-              </Link>
-            </div>
-          </div>
+          )}
         </div>
 
       </div>
 
       {/* ========================================================================= */}
-      {/* EXECUTIVE ROW 6: SALES FORECAST, CUSTOMER RISK & MARGIN RISK */}
+      {/* EXECUTIVE ROW 6: CUSTOMER RISK & MARGIN RISK */}
       {/* ========================================================================= */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 pt-2 pb-6">
 
-        {/* CARD 1: SALES FORECAST (NEXT 30 DAYS) - COMING SOON WITH DEMO PREVIEW */}
-        <div className="lg:col-span-4 bg-white dark:bg-slate-900/90 rounded-2xl border border-slate-200/80 dark:border-white/25 text-slate-800 dark:text-slate-100 p-4.5 shadow-2xs flex flex-col justify-between min-h-[310px]">
-          <div className="flex flex-col h-full justify-between">
-            <div>
-              {/* Header with Coming Soon Badge & Demo Toggle */}
-              <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-white/10 mb-3">
-                <div className="flex items-center gap-1.5">
-                  <h3 className="text-[13.5px] font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">Sales Forecast (Next 30 Days)</h3>
-                  <CardTooltip text="AI/Statistical 30-day projected turnover based on customer purchasing history, contracts, and seasonality." />
-                  <span className="text-[9px] font-black px-2 py-0.5 rounded-md bg-purple-50 text-purple-600 border border-purple-100">
-                    Coming Soon
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-bold text-slate-400">Demo Data</span>
-                  <button
-                    type="button"
-                    onClick={() => setShowDemoForecast(!showDemoForecast)}
-                    className={cn(
-                      "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
-                      showDemoForecast ? "bg-purple-600" : "bg-slate-200"
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-xs ring-0 transition duration-200 ease-in-out",
-                        showDemoForecast ? "translate-x-4" : "translate-x-0"
-                      )}
-                    />
-                  </button>
-                </div>
+        {/* CARD 1: CUSTOMER RISK OVERVIEW */}
+        <div className="lg:col-span-6 bg-white dark:bg-slate-900/90 rounded-2xl border border-slate-200/80 dark:border-white/25 text-slate-800 dark:text-slate-100 p-5 shadow-2xs flex flex-col justify-between min-h-[310px] cursor-pointer hover:border-blue-300 transition duration-200" onClick={() => setIsCustomerConcentrationOpen(true)}>
+          {loading ? (
+            <CardContentSkeleton height="h-[260px]" />
+          ) : (
+            <>
+              {/* Header */}
+              <div className="flex items-center pb-2.5 border-b border-slate-100 dark:border-white/10">
+                <h3 className="text-[13.5px] font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">Customer Risk Overview</h3>
+                <CardTooltip text="Categorizes active customers into Low, Medium, and High credit risk based on payment delays and DSO trends." />
               </div>
 
-              {!showDemoForecast ? (
-                /* CENTERED COMING SOON STATE */
-                <div className="flex flex-col items-center justify-center text-center py-5 px-3 my-auto">
-                  <div className="w-12 h-12 rounded-2xl bg-purple-50/80 border border-purple-100/80 flex items-center justify-center mb-2 text-purple-600 shadow-2xs">
-                    <Sparkles className="w-6 h-6 text-purple-600" />
-                  </div>
-                  <h4 className="text-[13px] font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">AI Sales Forecast (Coming Soon)</h4>
-                  <p className="text-[10.5px] font-medium text-slate-400 mt-1 max-w-[240px] leading-relaxed">
-                    Predictive 30-day turnover modeling powered by AI customer purchasing trends.
-                  </p>
-                  <button
-                    onClick={() => setShowDemoForecast(true)}
-                    className="mt-3.5 px-3.5 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-600 border border-purple-200/80 rounded-xl text-[10.5px] font-extrabold transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs"
-                  >
-                    <span>Preview Demo Forecast</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ) : (
-                /* DEMO FORECAST PREVIEW MODE */
-                <div>
-                  {/* Projected Revenue & Confidence Row */}
-                  <div className="flex items-center justify-between mt-2 mb-3">
-                    <div>
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Projected Revenue</span>
-                      <span className="text-2xl font-black text-slate-800 font-sans tracking-tight">
-                        {formatAmount(4860000)}
-                      </span>
-                    </div>
-                    <div className="text-right">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Confidence</span>
-                      <span className="inline-block px-3 py-1 bg-emerald-50 text-emerald-600 border border-emerald-100/80 rounded-full text-xs font-black mt-0.5">
-                        82%
-                      </span>
-                    </div>
+              {/* 100% VERTICALLY & HORIZONTALLY CENTERED CONTENT */}
+              <div className="flex-1 flex items-center justify-center py-2">
+                <div className="flex items-center justify-center gap-7">
+                  {/* Donut Ring (Left - 160px Large) */}
+                  <div className="flex items-center justify-center shrink-0">
+                    <div ref={customerRiskRef} className="w-40 h-40" />
                   </div>
 
-                  {/* 3 Scenario Boxes */}
-                  <div className="grid grid-cols-3 gap-2 my-auto">
-                    {/* Downside */}
-                    <div className="bg-rose-50/60 border border-rose-100/80 rounded-xl p-2 text-center">
-                      <span className="text-[9.5px] font-extrabold text-slate-500 block">Downside</span>
-                      <span className="text-[12.5px] font-black text-slate-800 font-sans block my-0.5">
-                        {formatAmount(4420000)}
-                      </span>
-                      <span className="text-[9px] font-extrabold text-rose-600 block">
-                        -9.1%
-                      </span>
-                    </div>
-
-                    {/* Base Case */}
-                    <div className="bg-blue-50/60 border border-blue-100/80 rounded-xl p-2 text-center">
-                      <span className="text-[9.5px] font-extrabold text-blue-600 block">Base Case</span>
-                      <span className="text-[12.5px] font-black text-slate-800 font-sans block my-0.5">
-                        {formatAmount(4860000)}
-                      </span>
-                      <span className="text-[9px] font-extrabold text-slate-400 block">
-                        0.0%
-                      </span>
-                    </div>
-
-                    {/* Upside */}
-                    <div className="bg-emerald-50/60 border border-emerald-100/80 rounded-xl p-2 text-center">
-                      <span className="text-[9.5px] font-extrabold text-emerald-600 block">Upside</span>
-                      <span className="text-[12.5px] font-black text-slate-800 font-sans block my-0.5">
-                        {formatAmount(5240000)}
-                      </span>
-                      <span className="text-[9px] font-extrabold text-emerald-600 block">
-                        +7.8%
-                      </span>
-                    </div>
+                  {/* Legend (Right - Larger text & spacing) */}
+                  <div className="space-y-3.5 text-xs min-w-[155px]">
+                    {[
+                      { label: "Low Risk", val: salesData?.customerRiskOverview?.lowRisk || 0, pct: salesData?.customerRiskOverview?.lowRiskPct || 0, color: "bg-emerald-500" },
+                      { label: "Medium Risk", val: salesData?.customerRiskOverview?.mediumRisk || 0, pct: salesData?.customerRiskOverview?.mediumRiskPct || 0, color: "bg-amber-500" },
+                      { label: "High Risk", val: salesData?.customerRiskOverview?.highRisk || 0, pct: salesData?.customerRiskOverview?.highRiskPct || 0, color: "bg-rose-500" }
+                    ].map((item, idx) => (
+                      <div key={idx} className="flex items-center justify-between gap-3.5 font-semibold">
+                        <div className="flex items-center gap-2 truncate">
+                          <span className={cn("h-3 w-3 rounded-full shrink-0", item.color)} />
+                          <span className="text-slate-700 font-bold truncate text-xs">{item.label}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 font-sans">
+                          <span className="font-extrabold text-slate-800 text-sm">{item.val}</span>
+                          <span className="text-slate-400 text-xs font-bold">({item.pct}%)</span>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
-              )}
-            </div>
-
-            {/* Footer */}
-            <div className="border-t border-slate-100 pt-2.5 mt-3">
-              <Link href="/analytics" className="text-[11px] font-extrabold text-blue-600 hover:text-blue-700 hover:underline inline-flex items-center gap-1 cursor-pointer">
-                <span>View Forecast Report</span>
-                <ArrowRight className="h-3.5 w-3.5" />
-              </Link>
-            </div>
-          </div>
+              </div>
+            </>
+          )}
         </div>
 
-        {/* CARD 2: CUSTOMER RISK OVERVIEW */}
-        <div className="lg:col-span-4 bg-white dark:bg-slate-900/90 rounded-2xl border border-slate-200/80 dark:border-white/25 text-slate-800 dark:text-slate-100 p-5 shadow-2xs flex flex-col justify-between min-h-[310px]">
-          {/* Header */}
-          <div className="flex items-center pb-2.5 border-b border-slate-100 dark:border-white/10">
-            <h3 className="text-[13.5px] font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">Customer Risk Overview</h3>
-            <CardTooltip text="Categorizes active customers into Low, Medium, and High credit risk based on payment delays and DSO trends." />
-          </div>
-
-          {/* 100% VERTICALLY & HORIZONTALLY CENTERED CONTENT */}
-          <div className="flex-1 flex items-center justify-center py-2">
-            <div className="flex items-center justify-center gap-7">
-              {/* Donut Ring (Left - 160px Large) */}
-              <div className="flex items-center justify-center shrink-0">
-                <div ref={customerRiskRef} className="w-40 h-40" />
+        {/* CARD 2: MARGIN RISK OVERVIEW */}
+        <div className="lg:col-span-6 bg-white dark:bg-slate-900/90 rounded-2xl border border-slate-200/80 dark:border-white/25 text-slate-800 dark:text-slate-100 p-5 shadow-2xs flex flex-col justify-between min-h-[310px] cursor-pointer hover:border-blue-300 transition duration-200" onClick={() => setIsProductBreakdownOpen(true)}>
+          {loading ? (
+            <CardContentSkeleton height="h-[260px]" />
+          ) : (
+            <>
+              {/* Header */}
+              <div className="flex items-center pb-2.5 border-b border-slate-100 dark:border-white/10">
+                <h3 className="text-[13.5px] font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">Margin Risk Overview</h3>
+                <CardTooltip text="Monitors gross profit margin trends per product line (Improving, Stable, Declining) to detect cost erosion." />
               </div>
 
-              {/* Legend (Right - Larger text & spacing) */}
-              <div className="space-y-3.5 text-xs min-w-[155px]">
-                {[
-                  { label: "Low Risk", val: salesData?.customerRiskOverview?.lowRisk || 0, pct: salesData?.customerRiskOverview?.lowRiskPct || 0, color: "bg-emerald-500" },
-                  { label: "Medium Risk", val: salesData?.customerRiskOverview?.mediumRisk || 0, pct: salesData?.customerRiskOverview?.mediumRiskPct || 0, color: "bg-amber-500" },
-                  { label: "High Risk", val: salesData?.customerRiskOverview?.highRisk || 0, pct: salesData?.customerRiskOverview?.highRiskPct || 0, color: "bg-rose-500" }
-                ].map((item, idx) => (
-                  <div key={idx} className="flex items-center justify-between gap-3.5 font-semibold">
-                    <div className="flex items-center gap-2 truncate">
-                      <span className={cn("h-3 w-3 rounded-full shrink-0", item.color)} />
-                      <span className="text-slate-700 font-bold truncate text-xs">{item.label}</span>
-                    </div>
-                    <div className="flex items-center gap-1.5 font-sans">
-                      <span className="font-extrabold text-slate-800 text-sm">{item.val}</span>
-                      <span className="text-slate-400 text-xs font-bold">({item.pct}%)</span>
-                    </div>
+              {/* 100% VERTICALLY & HORIZONTALLY CENTERED CONTENT */}
+              <div className="flex-1 flex items-center justify-center py-2">
+                <div className="flex items-center justify-center gap-7">
+                  {/* Donut Ring (Left - 160px Large) */}
+                  <div className="flex items-center justify-center shrink-0">
+                    <div ref={marginRiskRef} className="w-40 h-40" />
                   </div>
-                ))}
-              </div>
-            </div>
-          </div>
 
-          {/* Footer */}
-          <div className="border-t border-slate-100 pt-2.5">
-            <Link href="/customers" className="text-[11px] font-extrabold text-blue-600 hover:text-blue-700 hover:underline inline-flex items-center gap-1 cursor-pointer">
-              <span>View Customer Risk</span>
-              <ArrowRight className="h-3.5 w-3.5" />
-            </Link>
-          </div>
-        </div>
-
-        {/* CARD 3: MARGIN RISK OVERVIEW */}
-        <div className="lg:col-span-4 bg-white dark:bg-slate-900/90 rounded-2xl border border-slate-200/80 dark:border-white/25 text-slate-800 dark:text-slate-100 p-5 shadow-2xs flex flex-col justify-between min-h-[310px]">
-          {/* Header */}
-          <div className="flex items-center pb-2.5 border-b border-slate-100 dark:border-white/10">
-            <h3 className="text-[13.5px] font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">Margin Risk Overview</h3>
-            <CardTooltip text="Monitors gross profit margin trends per product line (Improving, Stable, Declining) to detect cost erosion." />
-          </div>
-
-          {/* 100% VERTICALLY & HORIZONTALLY CENTERED CONTENT */}
-          <div className="flex-1 flex items-center justify-center py-2">
-            <div className="flex items-center justify-center gap-7">
-              {/* Donut Ring (Left - 160px Large) */}
-              <div className="flex items-center justify-center shrink-0">
-                <div ref={marginRiskRef} className="w-40 h-40" />
-              </div>
-
-              {/* Legend (Right - Larger text & spacing) */}
-              <div className="space-y-3.5 text-xs min-w-[155px]">
-                {[
-                  { label: "Improving", val: salesData?.marginRiskOverview?.improving || 0, pct: salesData?.marginRiskOverview?.improvingPct || 0, color: "bg-emerald-500" },
-                  { label: "Stable", val: salesData?.marginRiskOverview?.stable || 0, pct: salesData?.marginRiskOverview?.stablePct || 0, color: "bg-amber-500" },
-                  { label: "Declining", val: salesData?.marginRiskOverview?.declining || 0, pct: salesData?.marginRiskOverview?.decliningPct || 0, color: "bg-rose-500" }
-                ].map((item, idx) => (
-                  <div key={idx} className="flex items-center justify-between gap-3.5 font-semibold">
-                    <div className="flex items-center gap-2 truncate">
-                      <span className={cn("h-3 w-3 rounded-full shrink-0", item.color)} />
-                      <span className="text-slate-700 font-bold truncate text-xs">{item.label}</span>
-                    </div>
-                    <div className="flex items-center gap-1.5 font-sans">
-                      <span className="font-extrabold text-slate-800 text-sm">{item.val}</span>
-                      <span className="text-slate-400 text-xs font-bold">({item.pct}%)</span>
-                    </div>
+                  {/* Legend (Right - Larger text & spacing) */}
+                  <div className="space-y-3.5 text-xs min-w-[155px]">
+                    {[
+                      { label: "Improving", val: salesData?.marginRiskOverview?.improving || 0, pct: salesData?.marginRiskOverview?.improvingPct || 0, color: "bg-emerald-500" },
+                      { label: "Stable", val: salesData?.marginRiskOverview?.stable || 0, pct: salesData?.marginRiskOverview?.stablePct || 0, color: "bg-amber-500" },
+                      { label: "Declining", val: salesData?.marginRiskOverview?.declining || 0, pct: salesData?.marginRiskOverview?.decliningPct || 0, color: "bg-rose-500" }
+                    ].map((item, idx) => (
+                      <div key={idx} className="flex items-center justify-between gap-3.5 font-semibold">
+                        <div className="flex items-center gap-2 truncate">
+                          <span className={cn("h-3 w-3 rounded-full shrink-0", item.color)} />
+                          <span className="text-slate-700 font-bold truncate text-xs">{item.label}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 font-sans">
+                          <span className="font-extrabold text-slate-800 text-sm">{item.val}</span>
+                          <span className="text-slate-400 text-xs font-bold">({item.pct}%)</span>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
+                </div>
               </div>
-            </div>
-          </div>
-
-          {/* Footer */}
-          <div className="border-t border-slate-100 pt-2.5">
-            <Link href="/analytics" className="text-[11px] font-extrabold text-blue-600 hover:text-blue-700 hover:underline inline-flex items-center gap-1 cursor-pointer">
-              <span>View Margin Risk</span>
-              <ArrowRight className="h-3.5 w-3.5" />
-            </Link>
-          </div>
+            </>
+          )}
         </div>
       </div>
 
       {/* ========================================================================= */}
-      {/* EXECUTIVE ROW 7: SALES INSIGHTS & CFO RECOMMENDED ACTIONS */}
+      {/* EXECUTIVE ROW 7: SALES INSIGHTS */}
       {/* ========================================================================= */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 pt-2 pb-6">
 
-        {/* CARD 1: SALES INSIGHTS (DATA TABLE FORMAT) */}
-        <div className="lg:col-span-5 bg-white dark:bg-slate-900/90 rounded-2xl border border-slate-200/80 dark:border-white/25 text-slate-800 dark:text-slate-100 p-5 shadow-2xs flex flex-col justify-between min-h-[350px]">
+        {/* CARD 1: SALES INSIGHTS (FULL WIDTH) */}
+        <div className="lg:col-span-12 bg-white dark:bg-slate-900/90 rounded-2xl border border-slate-200/80 dark:border-white/25 text-slate-800 dark:text-slate-100 p-5 shadow-2xs flex flex-col justify-between min-h-[350px]">
           <div className="flex flex-col h-full justify-between">
             <div>
               <div className="flex items-center gap-2 mb-3 pb-2 border-b border-slate-100 dark:border-white/10">
@@ -2558,172 +2389,69 @@ export default function SalesDashboardPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50 text-[11px]">
-                    {[
-                      {
-                        cat: "Revenue",
-                        catBg: "bg-blue-50 text-blue-700 border-blue-200",
-                        text: salesData?.salesSnapshot?.totalRevenue
-                          ? `Revenue stands at ${formatAmount(salesData.salesSnapshot.totalRevenue.value)}, driven by core sales activity.`
-                          : "Revenue grew 18.6%, mainly driven by existing customers.",
-                        time: "5 min ago"
-                      },
-                      {
-                        cat: "Margin",
-                        catBg: "bg-amber-50 text-amber-700 border-amber-200",
-                        text: salesData?.executiveRow4?.grossProfitAnalysis
-                          ? `Gross margin is currently ${salesData.executiveRow4.grossProfitAnalysis.grossMarginPct.toFixed(1)}% across net turnover.`
-                          : "Gross margin declined by 4.2 pts due to low-margin customers.",
-                        time: "12 min ago"
-                      },
-                      {
-                        cat: "Collections",
-                        catBg: "bg-purple-50 text-purple-700 border-purple-200",
-                        text: salesData?.dsoSummary
-                          ? `Average collection period (DSO) is ${salesData.dsoSummary.currentDso} Days.`
-                          : "DSO increased by 9 days, indicating slower collections.",
-                        time: "18 min ago"
-                      },
-                      {
-                        cat: "Customer",
-                        catBg: "bg-emerald-50 text-emerald-700 border-emerald-200",
-                        text: salesData?.topCustomers?.[0]
-                          ? `Top customer "${salesData.topCustomers[0].name}" accounts for ${formatAmount(salesData.topCustomers[0].revenue)} of total sales.`
-                          : "No customer sales activity recorded for this period.",
-                        time: "25 min ago"
-                      },
-                      {
-                        cat: "AR Risk",
-                        catBg: "bg-rose-50 text-rose-700 border-rose-200",
-                        text: salesData?.agingSummary
-                          ? `${formatAmount(salesData.agingSummary.days61_90 + salesData.agingSummary.days90Plus)} receivables are overdue beyond 60 days.`
-                          : "Receivables beyond 60 days require collection attention.",
-                        time: "32 min ago"
-                      }
-                    ].map((item, idx) => (
-                      <tr key={idx} className="hover:bg-slate-50/50 transition">
-                        <td className="py-3 text-center font-black text-slate-400 text-[10px]">{idx + 1}</td>
-                        <td className="py-3 font-bold text-slate-800 leading-snug pr-2">{item.text}</td>
-                        <td className="py-3">
-                          <span className={cn("text-[9.5px] font-extrabold px-2.5 py-0.5 rounded-full border inline-block whitespace-nowrap", item.catBg)}>
-                            {item.cat}
-                          </span>
-                        </td>
-                        <td className="py-3 text-right font-bold text-slate-400 text-[10px] whitespace-nowrap">{item.time}</td>
-                      </tr>
-                    ))}
+                    {loading ? (
+                      <TableSkeletonRows rows={5} cols={4} />
+                    ) : (
+                      [
+                        {
+                          cat: "Revenue",
+                          catBg: "bg-blue-50 text-blue-700 border-blue-200",
+                          text: salesData?.salesSnapshot?.totalRevenue
+                            ? `Revenue stands at ${formatAmount(salesData.salesSnapshot.totalRevenue.value)}, driven by core sales activity.`
+                            : "Revenue grew 18.6%, mainly driven by existing customers.",
+                          time: "5 min ago"
+                        },
+                        {
+                          cat: "Margin",
+                          catBg: "bg-amber-50 text-amber-700 border-amber-200",
+                          text: salesData?.executiveRow4?.grossProfitAnalysis
+                            ? `Gross margin is currently ${salesData.executiveRow4.grossProfitAnalysis.grossMarginPct.toFixed(1)}% across net turnover.`
+                            : "Gross margin declined by 4.2 pts due to low-margin customers.",
+                          time: "12 min ago"
+                        },
+                        {
+                          cat: "Collections",
+                          catBg: "bg-purple-50 text-purple-700 border-purple-200",
+                          text: salesData?.dsoSummary
+                            ? `Average collection period (DSO) is ${salesData.dsoSummary.currentDso} Days.`
+                            : "DSO increased by 9 days, indicating slower collections.",
+                          time: "18 min ago"
+                        },
+                        {
+                          cat: "Customer",
+                          catBg: "bg-emerald-50 text-emerald-700 border-emerald-200",
+                          text: salesData?.topCustomers?.[0]
+                            ? `Top customer "${salesData.topCustomers[0].name}" accounts for ${formatAmount(salesData.topCustomers[0].revenue)} of total sales.`
+                            : "No customer sales activity recorded for this period.",
+                          time: "25 min ago"
+                        },
+                        {
+                          cat: "AR Risk",
+                          catBg: "bg-rose-50 text-rose-700 border-rose-200",
+                          text: salesData?.agingSummary
+                            ? `${formatAmount(salesData.agingSummary.days61_90 + salesData.agingSummary.days90Plus)} receivables are overdue beyond 60 days.`
+                            : "Receivables beyond 60 days require collection attention.",
+                          time: "32 min ago"
+                        }
+                      ].map((item, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50/50 transition">
+                          <td className="py-3 text-center font-black text-slate-400 text-[10px]">{idx + 1}</td>
+                          <td className="py-3 font-bold text-slate-800 leading-snug pr-2">{item.text}</td>
+                          <td className="py-3">
+                            <span className={cn("text-[9.5px] font-extrabold px-2.5 py-0.5 rounded-full border inline-block whitespace-nowrap", item.catBg)}>
+                              {item.cat}
+                            </span>
+                          </td>
+                          <td className="py-3 text-right font-bold text-slate-400 text-[10px] whitespace-nowrap">{item.time}</td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
             </div>
 
-            {/* Footer */}
-            <div className="border-t border-slate-100 pt-3 mt-3">
-              <Link href="/analytics" className="text-[11px] font-extrabold text-blue-600 hover:text-blue-700 hover:underline inline-flex items-center gap-1 cursor-pointer">
-                <span>View All Insights</span>
-                <ArrowRight className="h-3.5 w-3.5" />
-              </Link>
-            </div>
-          </div>
-        </div>
 
-        {/* CARD 2: CFO RECOMMENDED ACTIONS (COMING SOON WITH DEMO PREVIEW) */}
-        <div className="lg:col-span-7 bg-white dark:bg-slate-900/90 rounded-2xl border border-slate-200/80 dark:border-white/25 text-slate-800 dark:text-slate-100 p-5 shadow-2xs flex flex-col justify-between min-h-[350px]">
-          <div className="flex flex-col h-full justify-between">
-            <div>
-              {/* Header with Coming Soon Badge & Demo Toggle */}
-              <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-white/10 mb-3">
-                <div className="flex items-center gap-1.5">
-                  <h3 className="text-[13.5px] font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">CFO Recommended Actions</h3>
-                  <CardTooltip text="AI-driven priority action list to optimize gross margin, accelerate cash collections, and minimize concentration risk." />
-                  <span className="text-[9px] font-black px-2 py-0.5 rounded-md bg-purple-50 text-purple-600 border border-purple-100">
-                    Coming Soon
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-bold text-slate-400">Demo Data</span>
-                  <button
-                    type="button"
-                    onClick={() => setShowDemoCfoActions(!showDemoCfoActions)}
-                    className={cn(
-                      "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
-                      showDemoCfoActions ? "bg-purple-600" : "bg-slate-200"
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-xs ring-0 transition duration-200 ease-in-out",
-                        showDemoCfoActions ? "translate-x-4" : "translate-x-0"
-                      )}
-                    />
-                  </button>
-                </div>
-              </div>
-
-              {!showDemoCfoActions ? (
-                /* CENTERED COMING SOON STATE - Prominent & Well Proportioned */
-                <div className="flex flex-col items-center justify-center text-center py-10 px-4 my-auto">
-                  <div className="w-14 h-14 rounded-2xl bg-purple-50/80 border border-purple-100/80 flex items-center justify-center mb-3 text-purple-600 shadow-2xs">
-                    <Sparkles className="w-7 h-7 text-purple-600" />
-                  </div>
-                  <h4 className="text-[14px] font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">AI CFO Recommended Actions (Coming Soon)</h4>
-                  <p className="text-[11px] font-medium text-slate-400 mt-1 max-w-[320px] leading-relaxed">
-                    Automated CFO intervention recommendations to maximize gross margin and accelerate cash flow collections.
-                  </p>
-                  <button
-                    onClick={() => setShowDemoCfoActions(true)}
-                    className="mt-4 px-4 py-2 bg-purple-50 hover:bg-purple-100 text-purple-600 border border-purple-200/80 rounded-xl text-[11px] font-extrabold transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs"
-                  >
-                    <span>Preview Recommended Actions</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ) : (
-                /* DEMO RECOMMENDED ACTIONS TABLE PREVIEW - Spacious & Readable */
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse text-[11px]">
-                    <thead>
-                      <tr className="border-b border-slate-100 dark:border-white/10 text-slate-400 font-bold uppercase tracking-wider text-[10px]">
-                        <th className="pb-3 font-bold">Priority</th>
-                        <th className="pb-3 font-bold">Action</th>
-                        <th className="pb-3 font-bold">Impact</th>
-                        <th className="pb-3 font-bold">Reason</th>
-                        <th className="pb-3 text-right font-bold">Due Date</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-50 text-[11px]">
-                      {[
-                        { priority: "High", pColor: "bg-rose-50 text-rose-700 border-rose-200", action: "Review pricing for 4 customers", impact: "+£3.8k GP / month", impColor: "text-emerald-600", reason: "Low margins vs historical", due: "This Week" },
-                        { priority: "High", pColor: "bg-rose-50 text-rose-700 border-rose-200", action: "Collect overdue from 6 accounts", impact: "+£4.2k cash", impColor: "text-emerald-600", reason: "£1.3k overdue > 90 days", due: "This Week" },
-                        { priority: "Medium", pColor: "bg-amber-50 text-amber-700 border-amber-200", action: "Reduce revenue concentration", impact: "Reduce risk by 27.4%", impColor: "text-emerald-600", reason: "Top 5 customers 61.4% revenue", due: "This Month" },
-                        { priority: "Medium", pColor: "bg-amber-50 text-amber-700 border-amber-200", action: "Improve product mix (Low margin)", impact: "+£1.6k GP / month", impColor: "text-emerald-600", reason: "Low margin products grew 18%", due: "Next 30 Days" },
-                        { priority: "Low", pColor: "bg-emerald-50 text-emerald-700 border-emerald-200", action: "New customer acquisition", impact: "+14% pipeline", impColor: "text-emerald-600", reason: "Sustainable long term growth", due: "Ongoing" }
-                      ].map((row, itemIdx) => (
-                        <tr key={itemIdx} className="hover:bg-slate-50/50 transition">
-                          <td className="py-3">
-                            <span className={cn("text-[9.5px] font-extrabold px-2.5 py-0.5 rounded-full border inline-flex items-center gap-1.5", row.pColor)}>
-                              <span className="h-1.5 w-1.5 rounded-full bg-current" />
-                              <span>{row.priority}</span>
-                            </span>
-                          </td>
-                          <td className="py-3 font-bold text-slate-800">{row.action}</td>
-                          <td className={cn("py-3 font-extrabold font-sans", row.impColor)}>{row.impact}</td>
-                          <td className="py-3 font-semibold text-slate-500">{row.reason}</td>
-                          <td className="py-3 text-right font-extrabold text-slate-700">{row.due}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-
-            {/* Footer */}
-            <div className="border-t border-slate-100 pt-3 mt-3">
-              <Link href="/analytics" className="text-[11px] font-extrabold text-blue-600 hover:text-blue-700 hover:underline inline-flex items-center gap-1 cursor-pointer">
-                <span>View All Actions</span>
-                <ArrowRight className="h-3.5 w-3.5" />
-              </Link>
-            </div>
           </div>
         </div>
       </div>
@@ -2850,10 +2578,14 @@ export default function SalesDashboardPage() {
 
             {/* Footer */}
             <div className="border-t border-slate-100 pt-2.5 mt-2">
-              <Link href="/invoices" className="text-[11px] font-extrabold text-blue-600 hover:text-blue-700 hover:underline inline-flex items-center gap-1 cursor-pointer">
-                <span>View All Invoices</span>
+              <button
+                type="button"
+                onClick={() => setIsInvoicesPanelOpen(true)}
+                className="text-[11px] font-extrabold text-blue-600 hover:text-blue-700 hover:underline inline-flex items-center gap-1 cursor-pointer bg-transparent border-none p-0 outline-none"
+              >
+                <span>View All Invoices & Concentration Analysis</span>
                 <ArrowRight className="h-3.5 w-3.5" />
-              </Link>
+              </button>
             </div>
           </div>
         </div>
@@ -2968,10 +2700,14 @@ export default function SalesDashboardPage() {
 
             {/* Footer */}
             <div className="border-t border-slate-100 pt-2.5 mt-2">
-              <Link href="/invoices" className="text-[11px] font-extrabold text-blue-600 hover:text-blue-700 hover:underline inline-flex items-center gap-1 cursor-pointer">
-                <span>View All Credit Notes</span>
+              <button
+                type="button"
+                onClick={() => setIsCreditNotesPanelOpen(true)}
+                className="text-[11px] font-extrabold text-blue-600 hover:text-blue-700 hover:underline inline-flex items-center gap-1 cursor-pointer bg-transparent border-none p-0 outline-none"
+              >
+                <span>View All Credit Notes & Returns Breakdown</span>
                 <ArrowRight className="h-3.5 w-3.5" />
-              </Link>
+              </button>
             </div>
           </div>
         </div>
@@ -3086,10 +2822,14 @@ export default function SalesDashboardPage() {
 
             {/* Footer */}
             <div className="border-t border-slate-100 pt-2.5 mt-2">
-              <Link href="/bank-transactions" className="text-[11px] font-extrabold text-blue-600 hover:text-blue-700 hover:underline inline-flex items-center gap-1 cursor-pointer">
-                <span>View All Payments</span>
+              <button
+                type="button"
+                onClick={() => setIsARPanelOpen(true)}
+                className="text-[11px] font-extrabold text-blue-600 hover:text-blue-700 hover:underline inline-flex items-center gap-1 cursor-pointer bg-transparent border-none p-0 outline-none"
+              >
+                <span>View All Payments & AR Ledger</span>
                 <ArrowRight className="h-3.5 w-3.5" />
-              </Link>
+              </button>
             </div>
           </div>
         </div>
@@ -3118,12 +2858,21 @@ export default function SalesDashboardPage() {
       <GrossProfitBreakdownPanel
         isOpen={isGrossProfitBreakdownOpen}
         onClose={() => setIsGrossProfitBreakdownOpen(false)}
+        salesData={salesData}
+        formatAmount={formatAmount}
+      />
+
+      <NetProfitBreakdownPanel
+        isOpen={isNetProfitPanelOpen}
+        onClose={() => setIsNetProfitPanelOpen(false)}
+        salesData={salesData}
         formatAmount={formatAmount}
       />
 
       <GrossMarginAnalysisPanel
         isOpen={isGrossMarginPanelOpen}
         onClose={() => setIsGrossMarginPanelOpen(false)}
+        salesData={salesData}
         formatAmount={formatAmount}
       />
 
@@ -3133,6 +2882,35 @@ export default function SalesDashboardPage() {
         invoices={salesData?.allInvoices || salesData?.recentInvoices || []}
         currencySymbol={currencyCode === 'GBP' ? '£' : currencyCode === 'EUR' ? '€' : '$'}
         dateLabel={salesData?.meta?.fromDate && salesData?.meta?.toDate ? `${salesData.meta.fromDate} to ${salesData.meta.toDate}` : ''}
+      />
+
+      <CreditNotesBreakdownPanel
+        isOpen={isCreditNotesPanelOpen}
+        onClose={() => setIsCreditNotesPanelOpen(false)}
+        creditNotes={salesData?.allCreditNotes || salesData?.recentCreditNotes || []}
+        currencySymbol={currencyCode === 'GBP' ? '£' : currencyCode === 'EUR' ? '€' : '$'}
+        dateLabel={salesData?.meta?.fromDate && salesData?.meta?.toDate ? `${salesData.meta.fromDate} to ${salesData.meta.toDate}` : ''}
+      />
+
+      <CogsBreakdownPanel
+        isOpen={isCogsPanelOpen}
+        onClose={() => setIsCogsPanelOpen(false)}
+        cogsAccounts={salesData?.cogsStreams || salesData?.pnlAccounts?.cogsStreams || []}
+        totalCogs={salesData?.salesSnapshot?.cogs?.value || 0}
+        currencySymbol={currencyCode === 'GBP' ? '£' : currencyCode === 'EUR' ? '€' : '$'}
+        dateLabel={salesData?.meta?.fromDate && salesData?.meta?.toDate ? `${salesData.meta.fromDate} to ${salesData.meta.toDate}` : ''}
+        salesData={salesData}
+        formatAmount={formatAmount}
+      />
+
+      <ExpensesBreakdownPanel
+        isOpen={isExpensesPanelOpen}
+        onClose={() => setIsExpensesPanelOpen(false)}
+        expenses={salesData?.expenseStreams || salesData?.pnlAccounts?.expenseStreams || []}
+        totalExpenses={salesData?.salesSnapshot?.expenses?.value || 0}
+        currencySymbol={currencyCode === 'GBP' ? '£' : currencyCode === 'EUR' ? '€' : '$'}
+        dateLabel={salesData?.meta?.fromDate && salesData?.meta?.toDate ? `${salesData.meta.fromDate} to ${salesData.meta.toDate}` : ''}
+        formatAmount={formatAmount}
       />
 
       <AccountReceivableBreakdownPanel

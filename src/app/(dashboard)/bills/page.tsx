@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import ReactECharts from 'echarts-for-react';
+import { resolveBrandingTheme } from '@/lib/constants/brandingThemes';
 import {
   CreditCard,
   Clock,
@@ -128,9 +129,96 @@ const DynamicSparkline = ({ data = [], color = '#2563eb' }: { data?: number[]; c
   );
 };
 
+import XeroInvoiceViewerDrawer, { OpenInvoiceData } from '@/components/sales/XeroInvoiceViewerDrawer';
+
 export default function AccountPayableDashboard() {
   const [loading, setLoading] = useState<boolean>(true);
   const [data, setData] = useState<any>(null);
+
+  // Multi-window floating Xero Invoice/Bill viewer drawer state
+  const [openInvoices, setOpenInvoices] = useState<OpenInvoiceData[]>([]);
+
+  const handleOpenBillModal = (inv: any, vendorName?: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const invId = inv.id || inv.InvoiceID || inv.billNumber || inv.invoiceNumber || inv.invoice_number || `bill-${Date.now()}`;
+    const displayRef = inv.billNumber || inv.invoiceNumber || inv.InvoiceNumber || inv.reference || inv.Reference || 'BILL-001';
+
+    const count = openInvoices.length;
+    const startX = Math.min(80 + count * 35, typeof window !== 'undefined' ? window.innerWidth - 750 : 100);
+    const startY = Math.min(60 + count * 35, typeof window !== 'undefined' ? window.innerHeight - 650 : 100);
+    const winW = Math.min(800, typeof window !== 'undefined' ? window.innerWidth - 60 : 800);
+    const winH = Math.min(700, typeof window !== 'undefined' ? window.innerHeight - 80 : 700);
+    const maxZ = Math.max(...openInvoices.map(i => i.zIndex || 1000), 1000);
+
+    const grossTotal = parseFloat(inv.total ?? inv.Total ?? inv.amount ?? inv.amountDue ?? 0);
+    const subTotal = inv.subTotal !== undefined ? parseFloat(inv.subTotal) : (inv.SubTotal !== undefined ? parseFloat(inv.SubTotal) : (inv.sub_total !== undefined ? parseFloat(inv.sub_total) : grossTotal));
+    const totalTax = inv.totalTax !== undefined ? parseFloat(inv.totalTax) : (inv.TotalTax !== undefined ? parseFloat(inv.TotalTax) : (inv.total_tax !== undefined ? parseFloat(inv.total_tax) : Math.max(0, grossTotal - subTotal)));
+
+    const rawLineItems = inv.lineItems || inv.LineItems || inv.line_items || [];
+
+    setOpenInvoices(prev => {
+      const existing = prev.find(i => i.id === invId || i.refNumber === displayRef);
+      if (existing) {
+        return prev.map(i => i.id === existing.id ? { ...i, zIndex: maxZ + 1 } : i);
+      }
+
+      return [
+        ...prev,
+        {
+          id: invId,
+          refNumber: displayRef,
+          contactName: vendorName || inv.vendorName || inv.contactName || inv.ContactName || (inv.Contact && inv.Contact.Name) || 'Vendor',
+          date: inv.date || inv.DateString || inv.Date || new Date().toISOString(),
+          dueDate: inv.dueDate || inv.DueDateString || inv.DueDate || inv.date || new Date().toISOString(),
+          paymentDate: inv.paymentDate || inv.date,
+          desc: inv.reference || inv.Reference || inv.desc || `Bill ${displayRef}`,
+          amount: grossTotal,
+          subTotal: subTotal,
+          totalTax: totalTax,
+          amountPaid: parseFloat(inv.amountPaid ?? inv.AmountPaid ?? inv.amount_paid ?? 0),
+          amountDue: parseFloat(inv.amountDue ?? inv.AmountDue ?? inv.amount_due ?? 0),
+          status: inv.status || inv.Status || 'AUTHORISED',
+          brandingTheme: resolveBrandingTheme(inv),
+          lineItems: Array.isArray(rawLineItems) && rawLineItems.length > 0 ? rawLineItems.map((item: any) => ({
+            desc: item.Description || item.description || item.desc || item.ItemCode || item.itemCode || `Line item for ${displayRef}`,
+            Description: item.Description || item.description || item.desc || item.ItemCode || item.itemCode || `Line item for ${displayRef}`,
+            account: item.AccountCode ? `${item.AccountCode} - ${item.AccountName || 'Cost of Goods'}` : (item.accountCode ? `${item.accountCode} - Cost of Goods` : (item.account || '500 Cost of Goods')),
+            AccountCode: item.AccountCode || item.accountCode || item.account_code || '500',
+            taxRate: item.TaxType || item.taxType || item.tax_type || item.taxRate || '20% (VAT on Expenses)',
+            TaxType: item.TaxType || item.taxType || item.tax_type || 'INPUT2',
+            amountGbp: parseFloat(item.LineAmount ?? item.lineAmount ?? item.line_amount ?? item.amountGbp ?? item.UnitAmount ?? item.unitAmount ?? grossTotal),
+            LineAmount: item.LineAmount ?? item.lineAmount ?? item.line_amount,
+            UnitAmount: item.UnitAmount ?? item.unitAmount ?? item.unit_amount,
+            Quantity: item.Quantity ?? item.quantity,
+            TaxAmount: item.TaxAmount ?? item.taxAmount ?? item.tax_amount
+          })) : [
+            {
+              desc: `Bill ${displayRef} - ${vendorName || inv.vendorName || 'Vendor Services'}`,
+              account: '500 Cost of Goods',
+              taxRate: '20% (VAT on Expenses)',
+              amountGbp: grossTotal
+            }
+          ],
+          attachments: inv.attachments || inv.Attachments || [],
+          x: startX,
+          y: startY,
+          width: winW,
+          height: winH,
+          zIndex: maxZ + 1,
+          isMinimized: false,
+          isMaximized: false,
+          isHighlighted: true
+        }
+      ];
+    });
+  };
+
+  const handleCloseInvoice = (id: string) => setOpenInvoices(prev => prev.filter(inv => inv.id !== id));
+  const handleFocusInvoice = (id: string) => setOpenInvoices(prev => {
+    const maxZ = Math.max(...prev.map(i => i.zIndex || 1000), 1000);
+    return prev.map(inv => inv.id === id ? { ...inv, zIndex: maxZ + 1 } : inv);
+  });
+  const handleUpdateInvoice = (id: string, updates: Partial<OpenInvoiceData>) => setOpenInvoices(prev => prev.map(inv => inv.id === id ? { ...inv, ...updates } : inv));
 
   // Filter States
   const [asOnDate, setAsOnDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
@@ -887,17 +975,13 @@ export default function AccountPayableDashboard() {
                       data.topOverdueBills.map((inv: any) => (
                         <div 
                           key={inv.id}
-                          onClick={() => {
-                            setExpandedVendor(inv.vendorName);
-                            setActiveTab('vendors');
-                            toast.info(`Drilled down to vendor: ${inv.vendorName}`);
-                          }}
-                          className="p-2.5 rounded-lg border border-slate-100 hover:border-slate-300 hover:bg-slate-50 transition cursor-pointer flex items-center justify-between gap-2"
+                          onClick={(e) => handleOpenBillModal(inv, inv.vendorName, e)}
+                          className="p-2.5 rounded-lg border border-slate-100 hover:border-blue-300 hover:bg-slate-50 transition cursor-pointer flex items-center justify-between gap-2"
                         >
                           <div className="flex items-center gap-2 min-w-0">
                             <StripeAvatar name={inv.vendorName} />
                             <div className="min-w-0">
-                              <div className="text-[11px] font-bold text-slate-900 truncate">{inv.billNumber}</div>
+                              <div className="text-[11px] font-extrabold text-blue-600 hover:underline truncate">{inv.billNumber}</div>
                               <div className="text-[9.5px] text-slate-500 truncate">{inv.vendorName}</div>
                             </div>
                           </div>
@@ -1090,7 +1174,15 @@ export default function AccountPayableDashboard() {
                                     <tbody className="divide-y divide-slate-100">
                                       {vendor.bills?.map((b: any, bIdx: number) => (
                                         <tr key={bIdx} className="hover:bg-slate-50">
-                                          <td className="py-1.5 px-2 font-bold text-blue-600">{b.billNumber}</td>
+                                          <td className="py-1.5 px-2">
+                                            <button
+                                              onClick={(e) => handleOpenBillModal(b, vendor.vendorName, e)}
+                                              className="font-extrabold text-blue-600 hover:underline cursor-pointer text-left"
+                                              title="Click to view tax invoice/bill drawer modal"
+                                            >
+                                              {b.billNumber}
+                                            </button>
+                                          </td>
                                           <td className="py-1.5 px-2 text-slate-600">{formatToDDMMYYYY(b.date)}</td>
                                           <td className="py-1.5 px-2 text-slate-600">{formatToDDMMYYYY(b.dueDate)}</td>
                                           <td className="py-1.5 px-2">
@@ -1234,7 +1326,15 @@ export default function AccountPayableDashboard() {
               <tbody className="divide-y divide-slate-100">
                 {overdueBillsList.map((inv: any, i: number) => (
                   <tr key={i} className="hover:bg-slate-50 transition">
-                    <td className="py-3 px-3 font-bold text-blue-600">{inv.billNumber}</td>
+                    <td className="py-3 px-3">
+                      <button
+                        onClick={(e) => handleOpenBillModal(inv, inv.vendorName, e)}
+                        className="font-extrabold text-blue-600 hover:underline cursor-pointer text-left"
+                        title="Click to view tax invoice/bill drawer modal"
+                      >
+                        {inv.billNumber}
+                      </button>
+                    </td>
                     <td className="py-3 px-3 font-bold text-slate-900">{inv.vendorName}</td>
                     <td className="py-3 px-3 text-slate-600">{formatToDDMMYYYY(inv.date)}</td>
                     <td className="py-3 px-3 text-slate-600">{formatToDDMMYYYY(inv.dueDate)}</td>
@@ -1300,6 +1400,14 @@ export default function AccountPayableDashboard() {
           </div>
         </div>
       )}
+
+      {/* Floating Multi-window Xero Bill & Invoice Viewer Drawer Manager */}
+      <XeroInvoiceViewerDrawer
+        invoices={openInvoices}
+        onCloseInvoice={handleCloseInvoice}
+        onFocusInvoice={handleFocusInvoice}
+        onUpdateInvoice={handleUpdateInvoice}
+      />
 
     </div>
   );

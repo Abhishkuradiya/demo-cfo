@@ -25,11 +25,8 @@ export const XeroGeneralLedgerService = {
       }
     });
 
-    if (res.status === 429 && retriesLeft > 0) {
-      const retryAfter = parseInt(res.headers.get('Retry-After') || '2') * 1000;
-      console.warn(`[Xero Journals API] Rate limit (429) hit. Waiting ${retryAfter}ms before retry...`);
-      await new Promise(resolve => setTimeout(resolve, retryAfter));
-      return XeroGeneralLedgerService.fetchXeroJournals(accessToken, xeroTenantId, offset, retriesLeft - 1);
+    if (res.status === 429) {
+      throw new Error(`Xero Journals API Rate Limit (429) Exceeded`);
     }
 
     if (!res.ok) {
@@ -49,7 +46,7 @@ export const XeroGeneralLedgerService = {
   /**
    * Fetch manual journals using page-based pagination.
    */
-  fetchXeroManualJournals: async (accessToken: string, xeroTenantId: string, page = 1, retriesLeft = 3): Promise<any[]> => {
+  fetchXeroManualJournals: async (accessToken: string, xeroTenantId: string, page = 1): Promise<any[]> => {
     const url = `https://api.xero.com/api.xro/2.0/ManualJournals?page=${page}`;
     
     // Throttle to naturally pace concurrent requests
@@ -63,11 +60,8 @@ export const XeroGeneralLedgerService = {
       }
     });
 
-    if (res.status === 429 && retriesLeft > 0) {
-      const retryAfter = parseInt(res.headers.get('Retry-After') || '2') * 1000;
-      console.warn(`[Xero Manual Journals API] Rate limit (429) hit. Waiting ${retryAfter}ms before retry...`);
-      await new Promise(resolve => setTimeout(resolve, retryAfter));
-      return XeroGeneralLedgerService.fetchXeroManualJournals(accessToken, xeroTenantId, page, retriesLeft - 1);
+    if (res.status === 429) {
+      throw new Error(`Xero Manual Journals API Rate Limit (429) Exceeded`);
     }
 
     if (!res.ok) {

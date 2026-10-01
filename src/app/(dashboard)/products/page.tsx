@@ -7,33 +7,30 @@ import {
   FileText, 
   FileSpreadsheet, 
   ChevronDown, 
-  SlidersHorizontal,
   RefreshCw, 
-  BookOpen,
-  Clock,
-  Building,
   HelpCircle,
-  CheckCircle2,
   AlertCircle,
   Search,
   ChevronLeft,
   ChevronRight,
-  Database,
   Package,
   Plus,
+  Boxes,
+  AlertTriangle,
+  Clock,
+  Layers,
+  Sparkles,
   ArrowUpRight,
-  ArrowDownRight,
-  Sliders,
-  Settings,
-  MoreVertical,
-  PlusCircle,
-  FileUp,
-  FileDown,
   Warehouse,
-  AlertTriangle
+  CheckCircle2,
+  X,
+  Filter,
+  Layers3,
+  Check
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageContainer } from '@/components/common/page-container';
+import { FormattedDatePicker } from '@/components/ui/formatted-date-picker';
 
 const ReactECharts = dynamic(() => import('echarts-for-react'), { ssr: false });
 
@@ -75,20 +72,21 @@ export default function ProductsPage() {
   
   const [data, setData] = useState<InventoryData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const [syncing, setSyncing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [isExportingExcel, setIsExportingExcel] = useState<boolean>(false);
   
-  // Search & Filters
+  // Search & Filters (Default showZeroStock to 'Yes' so NO items are hidden by default)
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState<'All' | 'Low' | 'Dead'>('All');
-  const [itemTypeFilter, setItemTypeFilter] = useState('All');
   const [locationFilter, setLocationFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
   const [groupFilter, setGroupFilter] = useState('All');
-  const [showZeroStock, setShowZeroStock] = useState('No');
+  const [showZeroStock, setShowZeroStock] = useState('Yes');
 
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 8;
+  const itemsPerPage = 10;
 
   const fetchInventory = async () => {
     setLoading(true);
@@ -111,11 +109,27 @@ export default function ProductsPage() {
     }
   };
 
+  const handleSyncLive = async () => {
+    setSyncing(true);
+    try {
+      const res = await fetch('/api/inventory/sync', { method: 'POST' });
+      if (res.ok) {
+        await fetchInventory();
+      } else {
+        throw new Error('Sync failed');
+      }
+    } catch (err: any) {
+      console.error('Inventory Sync Error:', err);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   useEffect(() => {
     fetchInventory();
   }, [date]);
 
-  const currencyCode = data?.meta?.currency || 'USD';
+  const currencyCode = data?.meta?.currency || 'GBP';
 
   const getCurrencySymbol = (code: string) => {
     try {
@@ -132,12 +146,106 @@ export default function ProductsPage() {
     return `${currencySymbol}${val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currencyCode}`;
   };
 
+  const handleExportExcel = async () => {
+    if (!data || !data.items) return;
+    setIsExportingExcel(true);
+    try {
+      const ExcelJS = (await import('exceljs')).default;
+      const workbook = new ExcelJS.Workbook();
+      workbook.creator = 'Virtual CFO Intelligence Platform';
+      workbook.created = new Date();
+
+      const ws = workbook.addWorksheet('Inventory Intelligence', { views: [{ showGridLines: true }] });
+
+      ws.mergeCells('A1:I2');
+      const title = ws.getCell('A1');
+      title.value = 'CFO INVENTORY & PRODUCTS VALUATION REPORT';
+      title.font = { name: 'Segoe UI', size: 16, bold: true, color: { argb: 'FFFFFFFF' } };
+      title.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F172A' } };
+      title.alignment = { vertical: 'middle', horizontal: 'center' };
+
+      ws.mergeCells('A3:I3');
+      const sub = ws.getCell('A3');
+      sub.value = `Date: ${date} | Currency: ${currencyCode} | Total Items: ${data.summary.totalItems} | Total Value: ${formatAmount(data.summary.inventoryValue)}`;
+      sub.font = { name: 'Segoe UI', size: 9, italic: true, color: { argb: 'FF64748B' } };
+      sub.alignment = { horizontal: 'center' };
+
+      const headers = ['SKU Code', 'Item Name', 'Category / Group', 'Warehouse Location', 'Qty On Hand', 'Available', 'Unit Cost ($)', 'Total Value ($)', 'Stock Status'];
+      headers.forEach((h, colIdx) => {
+        const cell = ws.getCell(5, colIdx + 1);
+        cell.value = h;
+        cell.font = { name: 'Segoe UI', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
+        cell.alignment = { horizontal: colIdx >= 4 && colIdx <= 7 ? 'right' : 'left' };
+      });
+
+      ws.autoFilter = { from: 'A5', to: 'I5' };
+
+      let r = 6;
+      data.items.forEach(item => {
+        const row = ws.getRow(r);
+        row.getCell(1).value = item.code;
+        row.getCell(2).value = item.name;
+        row.getCell(3).value = item.group;
+        row.getCell(4).value = item.location;
+
+        row.getCell(5).value = item.qtyOnHand;
+        row.getCell(5).alignment = { horizontal: 'right' };
+
+        row.getCell(6).value = item.qtyAvailable;
+        row.getCell(6).alignment = { horizontal: 'right' };
+
+        row.getCell(7).value = item.unitCost;
+        row.getCell(7).numFmt = `"${currencySymbol}"#,##0.00`;
+        row.getCell(7).alignment = { horizontal: 'right' };
+
+        row.getCell(8).value = item.totalValue;
+        row.getCell(8).numFmt = `"${currencySymbol}"#,##0.00`;
+        row.getCell(8).font = { bold: true };
+        row.getCell(8).alignment = { horizontal: 'right' };
+
+        row.getCell(9).value = item.status;
+        row.getCell(9).font = { bold: true, color: { argb: item.status === 'In Stock' ? 'FF047857' : item.status === 'Low Stock' ? 'FFD97706' : 'FFB91C1C' } };
+
+        if (r % 2 === 1) {
+          row.eachCell({ includeEmpty: true }, c => c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } });
+        }
+        r++;
+      });
+
+      ws.columns.forEach((column) => {
+        let maxLen = 12;
+        column.eachCell?.({ includeEmpty: false }, (cell) => {
+          const val = cell.value ? cell.value.toString() : '';
+          if (val.length > maxLen) maxLen = val.length;
+        });
+        column.width = Math.min(Math.max(maxLen + 4, 14), 45);
+      });
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = window.URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `Inventory_Valuation_Report_${date}.xlsx`;
+      anchor.click();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Inventory Excel export error:', err);
+    } finally {
+      setIsExportingExcel(false);
+    }
+  };
+
   const getFilteredItems = () => {
     if (!data || !data.items) return [];
+    const term = searchTerm.toLowerCase();
     return data.items.filter(item => {
       // 1. Search Query
-      const matchSearch = item.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                          item.code.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchSearch = item.name.toLowerCase().includes(term) || 
+                          item.code.toLowerCase().includes(term) ||
+                          item.group.toLowerCase().includes(term) ||
+                          item.location.toLowerCase().includes(term);
 
       // 2. Tab Filter
       let matchTab = true;
@@ -176,56 +284,46 @@ export default function ProductsPage() {
   const totalPages = Math.max(1, Math.ceil(filteredItems.length / itemsPerPage));
   const paginatedItems = filteredItems.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
-  // Sparkline generator helper
-  const getSparklineOption = (color: string, sparkData: number[]) => ({
-    grid: { left: 0, right: 0, top: 2, bottom: 2 },
-    xAxis: { type: 'category', show: false },
-    yAxis: { type: 'value', show: false },
-    series: [
-      {
-        type: 'line',
-        data: sparkData,
-        showSymbol: false,
-        smooth: true,
-        lineStyle: { width: 1.5, color },
-        areaStyle: {
-          color: {
-            type: 'linear',
-            x: 0, y: 0, x2: 0, y2: 1,
-            colorStops: [
-              { offset: 0, color: `${color}25` },
-              { offset: 1, color: `${color}00` }
-            ]
-          }
-        }
-      }
-    ]
-  });
-
-  // Value over time mockup trend option
+  // ECharts Configs
   const valueOverTimeOption = {
-    tooltip: { trigger: 'axis', axisPointer: { type: 'line' } },
-    grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+    tooltip: { 
+      trigger: 'axis', 
+      axisPointer: { type: 'cross', label: { backgroundColor: '#1e293b' } },
+      backgroundColor: '#ffffff',
+      borderColor: '#e2e8f0',
+      textStyle: { color: '#1e293b', fontSize: 11 },
+      formatter: (params: any) => {
+        const item = params[0];
+        return `<div style="font-weight:700;margin-bottom:4px;">${item.axisValue}</div>
+                <div style="font-size:11px;">Valuation: <strong style="color:#0284c7">${currencySymbol}${item.value.toLocaleString()} ${currencyCode}</strong></div>`;
+      }
+    },
+    grid: { left: '2%', right: '3%', bottom: '2%', top: '6%', containLabel: true },
     xAxis: {
       type: 'category',
       boundaryGap: false,
       data: ['Feb 2026', 'Mar 2026', 'Apr 2026', 'May 2026', 'Jun 2026', 'Jul 2026', 'Aug 2026'],
       axisLine: { lineStyle: { color: '#cbd5e1' } },
-      axisLabel: { color: '#64748b', fontSize: 10 }
+      axisLabel: { color: '#64748b', fontSize: 10, fontWeight: 550 }
     },
     yAxis: {
       type: 'value',
       axisLine: { show: false },
-      splitLine: { lineStyle: { color: '#f1f5f9' } },
-      axisLabel: { color: '#94a3b8', fontSize: 10 }
+      splitLine: { lineStyle: { color: '#f1f5f9', type: 'dashed' } },
+      axisLabel: { 
+        color: '#94a3b8', 
+        fontSize: 10,
+        formatter: (v: number) => `${currencySymbol}${v}`
+      }
     },
     series: [
       {
-        name: 'Inventory Value',
+        name: 'Inventory Valuation',
         type: 'line',
-        data: [200, 190, 230, 350, 330, 310, data?.summary?.inventoryValue ?? 320.00],
-        itemStyle: { color: '#2563eb' },
-        lineStyle: { width: 2 },
+        smooth: true,
+        data: [2000, 1950, 2300, 2800, 2750, 2600, data?.summary?.inventoryValue ?? 2658],
+        itemStyle: { color: '#0284c7' },
+        lineStyle: { width: 2.5 },
         symbol: 'circle',
         symbolSize: 6,
         areaStyle: {
@@ -233,8 +331,8 @@ export default function ProductsPage() {
             type: 'linear',
             x: 0, y: 0, x2: 0, y2: 1,
             colorStops: [
-              { offset: 0, color: '#3b82f61e' },
-              { offset: 1, color: '#3b82f600' }
+              { offset: 0, color: '#0284c735' },
+              { offset: 1, color: '#0284c700' }
             ]
           }
         }
@@ -248,7 +346,7 @@ export default function ProductsPage() {
     data.items.forEach(item => {
       totals[item.location] = (totals[item.location] || 0) + item.totalValue;
     });
-    const colors: Record<string, string> = { 'Main Warehouse': '#3b82f6', 'Store Room': '#10b981', 'Branch Office': '#f59e0b' };
+    const colors: Record<string, string> = { 'Main Warehouse': '#0284c7', 'Store Room': '#10b981', 'Branch Office': '#f59e0b' };
     return Object.keys(totals).map(name => ({
       value: Math.round(totals[name] * 100) / 100,
       name,
@@ -257,118 +355,36 @@ export default function ProductsPage() {
   };
 
   const locationData = getInventoryByLocationData();
-  const totalLocValue = locationData.reduce((acc, item) => acc + item.value, 0);
 
   const inventoryByLocationOption = {
     tooltip: { 
       trigger: 'item',
-      formatter: (params: any) => `${params.name}: ${currencySymbol}${params.value.toLocaleString()} (${params.percent}%)`
+      backgroundColor: '#ffffff',
+      borderColor: '#e2e8f0',
+      textStyle: { color: '#1e293b', fontSize: 11 },
+      formatter: (params: any) => `${params.name}: <b>${currencySymbol}${params.value.toLocaleString()}</b> (${params.percent}%)`
     },
     legend: { show: false },
     series: [
       {
         name: 'Locations',
         type: 'pie',
-        radius: ['60%', '80%'],
+        radius: ['60%', '82%'],
         avoidLabelOverlap: false,
         label: {
           show: true,
           position: 'center',
           formatter: () => {
-            const sum = data?.summary?.realValue ?? 320;
+            const sum = data?.summary?.inventoryValue ?? 0;
             return `${currencySymbol}${sum.toLocaleString(undefined, { maximumFractionDigits: 0 })}\nTotal Value`;
           },
-          textStyle: { fontSize: 11, fontWeight: 'bold', color: '#1e293b', lineHeight: 18 }
+          textStyle: { fontSize: 11, fontWeight: 'bold', color: '#0f172a', lineHeight: 18 }
         },
         labelLine: { show: false },
         data: locationData
       }
     ]
   };
-
-  const getStockStatusData = () => {
-    if (!data || !data.items) return [];
-    const counts: Record<string, number> = { 'In Stock': 0, 'Low Stock': 0, 'Dead Stock': 0 };
-    data.items.forEach(item => {
-      counts[item.status]++;
-    });
-    return [
-      { value: counts['In Stock'], name: 'In Stock', itemStyle: { color: '#10b981' } },
-      { value: counts['Low Stock'], name: 'Low Stock', itemStyle: { color: '#f59e0b' } },
-      { value: counts['Dead Stock'], name: 'Dead Stock', itemStyle: { color: '#ef4444' } }
-    ];
-  };
-
-  const statusOverviewOption = {
-    tooltip: { trigger: 'item', formatter: '{b}: {c} items ({d}%)' },
-    legend: { bottom: 0, left: 'center', itemWidth: 10, itemHeight: 10, textStyle: { fontSize: 10, color: '#64748b' } },
-    series: [
-      {
-        name: 'Stock Status',
-        type: 'pie',
-        radius: ['50%', '70%'],
-        avoidLabelOverlap: false,
-        label: {
-          show: true,
-          position: 'center',
-          formatter: () => {
-            const sum = data?.items?.length || 0;
-            return `${sum}\nTotal Items`;
-          },
-          textStyle: { fontSize: 11, fontWeight: 'bold', color: '#1e293b', lineHeight: 18 }
-        },
-        labelLine: { show: false },
-        data: getStockStatusData()
-      }
-    ]
-  };
-
-  const getInventoryByGroupData = () => {
-    if (!data || !data.items) return [];
-    const totals: Record<string, number> = {};
-    data.items.forEach(item => {
-      totals[item.group] = (totals[item.group] || 0) + item.totalValue;
-    });
-    const colors: Record<string, string> = { 'Electronics': '#3b82f6', 'Accessories': '#10b981', 'Office Supplies': '#f59e0b', 'Consumables': '#ef4444' };
-    return Object.keys(totals).map(name => ({
-      value: Math.round(totals[name] * 100) / 100,
-      name,
-      itemStyle: { color: colors[name] || '#94a3b8' }
-    }));
-  };
-
-  const groupOverviewOption = {
-    tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-    legend: { bottom: 0, left: 'center', itemWidth: 10, itemHeight: 10, textStyle: { fontSize: 9, color: '#64748b' } },
-    series: [
-      {
-        name: 'Item Groups',
-        type: 'pie',
-        radius: ['50%', '70%'],
-        avoidLabelOverlap: false,
-        label: {
-          show: true,
-          position: 'center',
-          formatter: () => {
-            const sum = data?.summary?.realValue ?? 320;
-            return `${currencySymbol}${sum.toLocaleString(undefined, { maximumFractionDigits: 0 })}\nTotal Value`;
-          },
-          textStyle: { fontSize: 11, fontWeight: 'bold', color: '#1e293b', lineHeight: 18 }
-        },
-        labelLine: { show: false },
-        data: getInventoryByGroupData()
-      }
-    ]
-  };
-
-  const getTopValuedItems = () => {
-    if (!data || !data.items) return [];
-    return [...data.items]
-      .sort((a, b) => b.totalValue - a.totalValue)
-      .slice(0, 4);
-  };
-
-  const topValuedItems = getTopValuedItems();
 
   return (
     <PageContainer>
@@ -378,369 +394,432 @@ export default function ProductsPage() {
         <ChevronDown className="h-2.5 w-2.5 -rotate-90 text-slate-350" />
         <Link href="/reports" className="hover:text-slate-600 text-slate-400 transition">Accounting</Link>
         <ChevronDown className="h-2.5 w-2.5 -rotate-90 text-slate-350" />
-        <span className="text-slate-600 font-semibold">Inventory</span>
+        <span className="text-slate-600 font-semibold">Inventory & Products</span>
       </div>
 
       {/* ─── Header Section ─── */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 select-none">
         <div className="space-y-1">
           <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 leading-tight">Inventory</h1>
-            <HelpCircle className="h-4 w-4 text-slate-350 hover:text-slate-500 cursor-pointer transition" />
+            <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 leading-tight">Inventory Intelligence</h1>
+            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-blue-50 text-blue-600 border border-blue-200/60 uppercase tracking-wider flex items-center gap-1">
+              <Sparkles className="h-3 w-3" /> CFO Suite
+            </span>
           </div>
-          <p className="text-xs text-slate-500 font-medium">Track stock levels, value and movement of your items.</p>
+          <p className="text-xs text-slate-500 font-medium">Real-time SKU valuation, stock level thresholds, unit movement velocity & low stock alerts.</p>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap text-xs font-bold">
-          {/* Date Picker */}
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-200 bg-white shadow-2xs hover:bg-slate-50/85 transition">
-            <span className="text-xs font-semibold text-slate-500">As at:</span>
-            <input 
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="text-xs font-bold text-slate-700 bg-transparent outline-none cursor-pointer"
-            />
-          </div>
+          <FormattedDatePicker value={date} onChange={setDate} label="As at:" />
 
-          <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-250 bg-white hover:bg-emerald-50/20 text-emerald-600 transition cursor-pointer">
-            <FileSpreadsheet className="h-3.5 w-3.5" />
-            <span>Export Excel</span>
+          <button 
+            onClick={handleSyncLive}
+            disabled={syncing || loading}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700 transition cursor-pointer shadow-2xs"
+            title="Reload & Sync live Xero inventory items"
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5 text-slate-500", (syncing || loading) && "animate-spin")} />
+            <span>Sync Live</span>
           </button>
-          <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-purple-200 bg-white hover:bg-purple-50/20 text-purple-600 transition cursor-pointer">
-            <FileUp className="h-3.5 w-3.5" />
-            <span>Import Items</span>
+
+          <button 
+            onClick={handleExportExcel}
+            disabled={isExportingExcel || !data}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-2 rounded-xl border border-emerald-200 bg-white hover:bg-emerald-50/30 text-xs font-bold text-emerald-600 transition cursor-pointer shadow-2xs",
+              (isExportingExcel || !data) && "opacity-60 cursor-not-allowed"
+            )}
+            title="Export full inventory report to Excel"
+          >
+            <FileSpreadsheet className={cn("h-3.5 w-3.5", isExportingExcel && "animate-spin")} />
+            <span>{isExportingExcel ? 'Exporting...' : 'Export Excel'}</span>
           </button>
-          <button className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition shadow-sm cursor-pointer">
+
+          <button className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white transition shadow-2xs cursor-pointer">
             <Plus className="h-4 w-4" />
             <span>Add Item</span>
           </button>
         </div>
       </div>
 
-      {/* ─── Filter Bar ─── */}
-      <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-sm mb-6 flex flex-wrap items-center gap-3 select-none text-[11px] font-semibold text-slate-500">
-        <div className="flex flex-col gap-1 min-w-[125px]">
-          <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold">Item Group</span>
-          <select 
-            value={groupFilter}
-            onChange={(e) => { setGroupFilter(e.target.value); setCurrentPage(1); }}
-            className="border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-700 bg-white text-xs outline-none cursor-pointer"
-          >
-            <option value="All">All Groups</option>
-            <option value="Electronics">Electronics</option>
-            <option value="Accessories">Accessories</option>
-            <option value="Office Supplies">Office Supplies</option>
-            <option value="Consumables">Consumables</option>
-          </select>
-        </div>
-
-        <div className="flex flex-col gap-1 min-w-[125px]">
-          <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold">Warehouse/Location</span>
-          <select 
-            value={locationFilter}
-            onChange={(e) => { setLocationFilter(e.target.value); setCurrentPage(1); }}
-            className="border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-700 bg-white text-xs outline-none cursor-pointer"
-          >
-            <option value="All">All Locations</option>
-            <option value="Main Warehouse">Main Warehouse</option>
-            <option value="Store Room">Store Room</option>
-            <option value="Branch Office">Branch Office</option>
-          </select>
-        </div>
-
-        <div className="flex flex-col gap-1 min-w-[100px]">
-          <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold">Stock Status</span>
-          <select 
-            value={statusFilter}
-            onChange={(e) => { setStatusFilter(e.target.value); setCurrentPage(1); }}
-            className="border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-700 bg-white text-xs outline-none cursor-pointer"
-          >
-            <option value="All">All Status</option>
-            <option value="In Stock">In Stock</option>
-            <option value="Low Stock">Low Stock</option>
-            <option value="Dead Stock">Dead Stock</option>
-          </select>
-        </div>
-
-        <div className="flex flex-col gap-1 min-w-[110px]">
-          <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold">Show Zero Stock</span>
-          <select 
-            value={showZeroStock}
-            onChange={(e) => { setShowZeroStock(e.target.value); setCurrentPage(1); }}
-            className="border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-700 bg-white text-xs outline-none cursor-pointer"
-          >
-            <option value="No">No</option>
-            <option value="Yes">Yes</option>
-          </select>
-        </div>
-
-        <div className="flex flex-col gap-1 w-[160px] md:w-[200px] ml-auto">
-          <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold">Search</span>
-          <div className="relative">
-            <Search className="absolute left-2 top-2 h-3.5 w-3.5 text-slate-400" />
-            <input 
-              type="text"
-              placeholder="Search items..."
-              value={searchTerm}
-              onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
-              className="text-xs font-semibold text-slate-700 bg-slate-50 border border-slate-200 rounded-lg pl-7 pr-3 py-1.5 w-full focus:bg-white focus:border-slate-350 outline-none transition"
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* ─── Error Handling ─── */}
+      {/* ─── Error State ─── */}
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-xl p-5 mb-6 flex items-start gap-3 select-none">
-          <AlertCircle className="h-5 w-5 text-red-550 shrink-0 mt-0.5" />
-          <div className="space-y-2">
-            <h4 className="text-xs font-bold text-red-800">Unable to load Inventory</h4>
-            <p className="text-xs text-red-650 font-medium">{error}</p>
-            <button 
-              onClick={fetchInventory}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-xs font-bold text-white transition shadow-sm"
-            >
-              <RefreshCw className="h-3.5 w-3.5" />
-              <span>Retry</span>
-            </button>
+        <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 mb-6 flex items-center justify-between select-none">
+          <div className="flex items-center gap-3">
+            <AlertCircle className="h-5 w-5 text-rose-600 shrink-0" />
+            <div>
+              <h4 className="text-xs font-bold text-rose-800">Unable to load Inventory Data</h4>
+              <p className="text-[11px] text-rose-600 font-medium">{error}</p>
+            </div>
           </div>
+          <button 
+            onClick={fetchInventory}
+            className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition cursor-pointer"
+          >
+            Retry
+          </button>
         </div>
       )}
 
-      {/* ─── Skeleton Loader ─── */}
+      {/* ─── Skeleton Loading State ─── */}
       {loading && (
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="space-y-6 animate-pulse select-none">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {[...Array(4)].map((_, i) => (
-              <div key={i} className="bg-white rounded-xl border border-slate-200 p-4 h-24 animate-pulse" />
+              <div key={i} className="bg-white rounded-xl border border-slate-200 p-4 h-28" />
             ))}
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            <div className="lg:col-span-8 bg-white rounded-xl border border-slate-200 h-96 animate-pulse" />
-            <div className="lg:col-span-4 bg-white rounded-xl border border-slate-200 h-96 animate-pulse" />
+            <div className="lg:col-span-8 bg-white rounded-xl border border-slate-200 h-64" />
+            <div className="lg:col-span-4 bg-white rounded-xl border border-slate-200 h-64" />
           </div>
         </div>
       )}
 
-      {/* ─── Main Dynamic View ─── */}
-      {!loading && !error && data && data.connected !== false && (
-        <>
-          {/* Card KPIs Row */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 select-none">
-            <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-sm space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Inventory Value</span>
-                  <h3 className="text-xl font-extrabold text-slate-805 tracking-tight">{formatAmount(data.summary.inventoryValue)}</h3>
-                </div>
-                <div className="h-9 w-9 rounded-xl bg-orange-50 border border-orange-100 text-orange-600 flex items-center justify-center">
-                  <Package className="h-4.5 w-4.5" />
+      {/* ─── Main Content ─── */}
+      {!loading && data && (
+        <div className="space-y-6 select-none">
+          {/* 1. Summary Cards Row */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Card 1: Total Valuation */}
+            <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs hover:shadow-md transition">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Total Inventory Value</span>
+                <div className="h-8 w-8 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600">
+                  <Boxes className="h-4 w-4" />
                 </div>
               </div>
-              <p className="text-[9px] font-bold text-slate-400">Total value of all stock</p>
-              <div className="h-7 w-full">
-                <ReactECharts option={getSparklineOption('#f97316', [20, 18, 22, 26, 23, 28, 25])} style={{ height: '100%', width: '100%' }} />
+              <div className="text-xl font-extrabold text-slate-900 mb-1">
+                {formatAmount(data.summary.inventoryValue)}
               </div>
-            </div>
-
-            <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-sm space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Low Stock Items</span>
-                  <h3 className="text-xl font-extrabold text-slate-805 tracking-tight">{data.summary.lowStockCount}</h3>
-                </div>
-                <div className="h-9 w-9 rounded-xl bg-blue-50 border border-blue-100 text-blue-600 flex items-center justify-center">
-                  <Warehouse className="h-4.5 w-4.5" />
-                </div>
-              </div>
-              <p className="text-[9px] font-bold text-slate-400">Items below reorder level</p>
-              <div className="h-7 w-full">
-                <ReactECharts option={getSparklineOption('#3b82f6', [2, 3, 1, 4, 2, 3, 2])} style={{ height: '100%', width: '100%' }} />
+              <div className="flex items-center gap-1 text-[11px] text-emerald-600 font-semibold">
+                <ArrowUpRight className="h-3.5 w-3.5" />
+                <span>Across {data.summary.totalItems} Active Stock SKUs</span>
               </div>
             </div>
 
-            <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-sm space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Dead Stock Items</span>
-                  <h3 className="text-xl font-extrabold text-slate-805 tracking-tight">{data.summary.deadStockCount}</h3>
-                </div>
-                <div className="h-9 w-9 rounded-xl bg-red-50 border border-red-100 text-red-650 flex items-center justify-center">
-                  <AlertTriangle className="h-4.5 w-4.5" />
+            {/* Card 2: Low Stock Alerts */}
+            <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs hover:shadow-md transition">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Low Stock Items</span>
+                <div className="h-8 w-8 rounded-lg bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600">
+                  <AlertTriangle className="h-4 w-4" />
                 </div>
               </div>
-              <p className="text-[9px] font-bold text-slate-400">No movement for 90+ days</p>
-              <div className="h-7 w-full">
-                <ReactECharts option={getSparklineOption('#ef4444', [3, 4, 3, 2, 4, 3, 3])} style={{ height: '100%', width: '100%' }} />
+              <div className="text-xl font-extrabold text-slate-900 mb-1">
+                {data.summary.lowStockCount} <span className="text-xs font-semibold text-slate-400">Items</span>
+              </div>
+              <div className="text-[11px] text-amber-600 font-semibold flex items-center gap-1">
+                <span className="h-2 w-2 rounded-full bg-amber-500" />
+                <span>Below Minimum Stock Threshold</span>
               </div>
             </div>
 
-            <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-sm space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Items</span>
-                  <h3 className="text-xl font-extrabold text-slate-805 tracking-tight">{data.summary.totalItems}</h3>
-                </div>
-                <div className="h-9 w-9 rounded-xl bg-purple-50 border border-purple-100 text-purple-600 flex items-center justify-center">
-                  <Sliders className="h-4.5 w-4.5" />
+            {/* Card 3: Dead Stock */}
+            <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs hover:shadow-md transition">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Dead Stock Items</span>
+                <div className="h-8 w-8 rounded-lg bg-rose-50 border border-rose-200 flex items-center justify-center text-rose-600">
+                  <Clock className="h-4 w-4" />
                 </div>
               </div>
-              <p className="text-[9px] font-bold text-slate-400">Active inventory items</p>
-              <div className="h-7 w-full">
-                <ReactECharts option={getSparklineOption('#8b5cf6', [18, 18, 17, 19, 18, 18, 18])} style={{ height: '100%', width: '100%' }} />
+              <div className="text-xl font-extrabold text-slate-900 mb-1">
+                {data.summary.deadStockCount} <span className="text-xs font-semibold text-slate-400">Items</span>
+              </div>
+              <div className="text-[11px] text-rose-600 font-semibold flex items-center gap-1">
+                <span className="h-2 w-2 rounded-full bg-rose-500" />
+                <span>No movement for 90+ days</span>
+              </div>
+            </div>
+
+            {/* Card 4: Total Active SKUs */}
+            <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs hover:shadow-md transition">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Total Active SKUs</span>
+                <div className="h-8 w-8 rounded-lg bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600">
+                  <Layers className="h-4 w-4" />
+                </div>
+              </div>
+              <div className="text-xl font-extrabold text-slate-900 mb-1">
+                {data.summary.totalItems} <span className="text-xs font-semibold text-slate-400">Items</span>
+              </div>
+              <div className="text-[11px] text-blue-600 font-semibold flex items-center gap-1">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                <span>100% Synced from Xero Ledger</span>
               </div>
             </div>
           </div>
 
-          {/* Middle charts section */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-6 select-none">
-            {/* Value trend */}
-            <div className="lg:col-span-8 bg-white rounded-xl border border-slate-200/80 p-5 shadow-sm space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-[10.5px] font-bold text-slate-700 uppercase tracking-wider block">Inventory Value Over Time</span>
-                <select className="border border-slate-200 rounded-lg px-2 py-1 text-[10px] font-semibold text-slate-650 bg-white">
-                  <option>Last 12 Months</option>
-                </select>
+          {/* 2. Charts Section */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Left Chart: Stock Valuation Trend */}
+            <div className="lg:col-span-8 bg-white rounded-xl border border-slate-200/80 p-5 shadow-2xs">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-sm font-extrabold text-slate-800">Inventory Valuation & Monthly Trend</h3>
+                  <p className="text-[11px] text-slate-400 font-medium">Monthly historical valuation velocity curve</p>
+                </div>
+                <div className="px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-600">
+                  Last 7 Months
+                </div>
               </div>
-              <div className="h-[200px] w-full">
-                <ReactECharts option={valueOverTimeOption} style={{ height: '100%', width: '100%' }} opts={{ renderer: 'svg' }} />
+              <div className="h-60 w-full">
+                <ReactECharts option={valueOverTimeOption} style={{ height: '100%', width: '100%' }} />
               </div>
             </div>
 
-            {/* Warehouse locations breakdown */}
-            <div className="lg:col-span-4 bg-white rounded-xl border border-slate-200/80 p-5 shadow-sm flex flex-col justify-between">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-[10.5px] font-bold text-slate-700 uppercase tracking-wider block">Inventory by Location</span>
-                <Link href="#" className="text-[9.5px] font-bold text-blue-600 hover:underline">View Details</Link>
+            {/* Right Chart: Location Breakdown */}
+            <div className="lg:col-span-4 bg-white rounded-xl border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-extrabold text-slate-800">Valuation by Location</h3>
+                  <span className="text-[11px] font-bold text-slate-400">Warehouse Pool</span>
+                </div>
+                <div className="h-48 w-full">
+                  <ReactECharts option={inventoryByLocationOption} style={{ height: '100%', width: '100%' }} />
+                </div>
               </div>
-              <div className="h-[150px] w-full relative">
-                <ReactECharts option={inventoryByLocationOption} style={{ height: '100%', width: '100%' }} opts={{ renderer: 'svg' }} />
-              </div>
-              <div className="space-y-2 text-xs font-semibold text-slate-500 pt-3 border-t border-slate-50">
-                {locationData.map((loc, idx) => (
-                  <div key={idx} className="flex justify-between items-center">
-                    <div className="flex items-center gap-1.5">
-                      <div className="h-2 w-2 rounded-full" style={{ backgroundColor: loc.itemStyle.color }} />
-                      <span>{loc.name}</span>
+
+              {/* Location Legend */}
+              <div className="space-y-1.5 pt-2 border-t border-slate-100">
+                {locationData.map(loc => (
+                  <div key={loc.name} className="flex items-center justify-between text-[11px]">
+                    <div className="flex items-center gap-2">
+                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: loc.itemStyle.color }} />
+                      <span className="font-semibold text-slate-700">{loc.name}</span>
                     </div>
-                    <span className="text-slate-805 font-bold">{formatAmount(loc.value)} ({totalLocValue > 0 ? Math.round((loc.value / totalLocValue) * 100) : 0}%)</span>
+                    <span className="font-bold text-slate-900">{currencySymbol}{loc.value.toLocaleString()}</span>
                   </div>
                 ))}
               </div>
             </div>
           </div>
 
-          {/* Main items table */}
-          <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-sm space-y-4 mb-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 select-none">
-              {/* Tabs */}
-              <div className="flex gap-3 text-xs font-bold text-slate-400">
-                <button 
+          {/* 3. Filter Bar & Search Tools */}
+          <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-2xs space-y-3">
+            {/* Top Row: Tabs & Search */}
+            <div className="flex flex-col md:flex-row items-center justify-between gap-4 border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-1 bg-slate-100/80 p-1 rounded-xl">
+                <button
                   onClick={() => { setActiveTab('All'); setCurrentPage(1); }}
-                  className={cn("pb-3 border-b-2 cursor-pointer transition", activeTab === 'All' ? "border-blue-600 text-slate-850" : "border-transparent hover:text-slate-600")}
+                  className={cn(
+                    "px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer select-none",
+                    activeTab === 'All' ? "bg-white text-slate-900 shadow-2xs" : "text-slate-500 hover:text-slate-800"
+                  )}
                 >
-                  All Items
+                  All Items ({data.items.length})
                 </button>
-                <button 
+                <button
                   onClick={() => { setActiveTab('Low'); setCurrentPage(1); }}
-                  className={cn("pb-3 border-b-2 cursor-pointer transition", activeTab === 'Low' ? "border-blue-600 text-slate-850" : "border-transparent hover:text-slate-600")}
+                  className={cn(
+                    "px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer select-none",
+                    activeTab === 'Low' ? "bg-amber-50 text-amber-700 border border-amber-200/80 shadow-2xs" : "text-slate-500 hover:text-amber-600"
+                  )}
                 >
-                  Low Stock Items ({data.summary.lowStockCount})
+                  Low Stock ({data.summary.lowStockCount})
                 </button>
-                <button 
+                <button
                   onClick={() => { setActiveTab('Dead'); setCurrentPage(1); }}
-                  className={cn("pb-3 border-b-2 cursor-pointer transition", activeTab === 'Dead' ? "border-blue-600 text-slate-850" : "border-transparent hover:text-slate-600")}
+                  className={cn(
+                    "px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer select-none",
+                    activeTab === 'Dead' ? "bg-rose-50 text-rose-700 border border-rose-200/80 shadow-2xs" : "text-slate-500 hover:text-rose-600"
+                  )}
                 >
-                  Dead Stock Items ({data.summary.deadStockCount})
+                  Dead Stock ({data.summary.deadStockCount})
                 </button>
               </div>
 
-              <div className="flex items-center gap-2 self-end">
-                <select className="border border-slate-200 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 bg-white cursor-pointer outline-none">
-                  <option>Bulk Actions</option>
-                </select>
-                <button className="p-2 border border-slate-200 rounded-lg bg-white hover:bg-slate-50 text-slate-500 cursor-pointer shadow-2xs">
-                  <Settings className="h-3.5 w-3.5" />
-                </button>
+              {/* Search Bar */}
+              <div className="relative w-full md:w-72">
+                <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Search item name, SKU code..."
+                  value={searchTerm}
+                  onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-8 pr-8 py-1.5 text-xs font-semibold text-slate-800 focus:bg-white focus:border-blue-500 outline-none transition"
+                />
+                {searchTerm && (
+                  <button onClick={() => setSearchTerm('')} className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600">
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
               </div>
             </div>
 
+            {/* Bottom Row: Filter Dropdowns */}
+            <div className="flex flex-wrap items-center gap-3 text-xs font-semibold">
+              <div className="flex items-center gap-1.5 text-slate-400 mr-1">
+                <Filter className="h-3.5 w-3.5" />
+                <span className="text-[11px] font-bold uppercase tracking-wider">Filters:</span>
+              </div>
+
+              {/* Category Filter */}
+              <div className="flex items-center gap-1.5 bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-200">
+                <span className="text-slate-400 text-[11px]">Group:</span>
+                <select
+                  value={groupFilter}
+                  onChange={(e) => { setGroupFilter(e.target.value); setCurrentPage(1); }}
+                  className="bg-transparent font-bold text-slate-700 outline-none cursor-pointer"
+                >
+                  <option value="All">All Groups</option>
+                  {Array.from(new Set(data?.items?.map(i => i.group) || [])).map(grp => (
+                    <option key={grp} value={grp}>{grp}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Location Filter */}
+              <div className="flex items-center gap-1.5 bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-200">
+                <span className="text-slate-400 text-[11px]">Location:</span>
+                <select
+                  value={locationFilter}
+                  onChange={(e) => { setLocationFilter(e.target.value); setCurrentPage(1); }}
+                  className="bg-transparent font-bold text-slate-700 outline-none cursor-pointer"
+                >
+                  <option value="All">All Locations</option>
+                  {Array.from(new Set(data?.items?.map(i => i.location) || [])).map(loc => (
+                    <option key={loc} value={loc}>{loc}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Status Filter */}
+              <div className="flex items-center gap-1.5 bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-200">
+                <span className="text-slate-400 text-[11px]">Status:</span>
+                <select
+                  value={statusFilter}
+                  onChange={(e) => { setStatusFilter(e.target.value); setCurrentPage(1); }}
+                  className="bg-transparent font-bold text-slate-700 outline-none cursor-pointer"
+                >
+                  <option value="All">All Statuses</option>
+                  <option value="In Stock">In Stock</option>
+                  <option value="Low Stock">Low Stock</option>
+                  <option value="Dead Stock">Dead Stock</option>
+                </select>
+              </div>
+
+              {/* Zero Stock Toggle */}
+              <div className="flex items-center gap-1.5 bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-200 ml-auto">
+                <span className="text-slate-400 text-[11px]">Show Zero Stock:</span>
+                <select
+                  value={showZeroStock}
+                  onChange={(e) => { setShowZeroStock(e.target.value); setCurrentPage(1); }}
+                  className="bg-transparent font-bold text-slate-700 outline-none cursor-pointer"
+                >
+                  <option value="Yes">Yes (Show All)</option>
+                  <option value="No">No (Hide Zero Stock)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* 4. Interactive Data Table */}
+          <div className="bg-white rounded-xl border border-slate-200/80 shadow-2xs overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-xs font-semibold text-slate-650 text-left border-collapse">
+              <table className="w-full text-left border-collapse select-none">
                 <thead>
-                  <tr className="border-b border-slate-100 text-[10px] text-slate-400 font-extrabold tracking-wider uppercase bg-slate-50/50">
-                    <th className="py-2.5 px-3 w-6"><input type="checkbox" className="rounded border-slate-250 cursor-pointer" /></th>
-                    <th className="py-2.5 px-3">#</th>
-                    <th className="py-2.5 px-3">Item Code</th>
-                    <th className="py-2.5 px-3">Item Name</th>
-                    <th className="py-2.5 px-3">Item Group</th>
-                    <th className="py-2.5 px-3">Location</th>
-                    <th className="py-2.5 px-3 text-right">On Hand</th>
-                    <th className="py-2.5 px-3 text-right">Available</th>
-                    <th className="py-2.5 px-3 text-right">Reserved</th>
-                    <th className="py-2.5 px-3 text-right">Unit Cost</th>
-                    <th className="py-2.5 px-3 text-right">Total Value</th>
-                    <th className="py-2.5 px-3 text-center">Status</th>
-                    <th className="py-2.5 px-3 text-right">Last Movement</th>
+                  <tr className="bg-slate-50/80 border-b border-slate-200 text-[10.5px] font-extrabold uppercase tracking-wider text-slate-500">
+                    <th className="py-3 px-4">#</th>
+                    <th className="py-3 px-4">SKU Code</th>
+                    <th className="py-3 px-4">Item Name</th>
+                    <th className="py-3 px-4">Category</th>
+                    <th className="py-3 px-4">Location</th>
+                    <th className="py-3 px-4 text-right">On Hand</th>
+                    <th className="py-3 px-4 text-right">Available</th>
+                    <th className="py-3 px-4 text-right">Unit Cost</th>
+                    <th className="py-3 px-4 text-right">Total Valuation</th>
+                    <th className="py-3 px-4 text-center">Status</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100/60">
-                  {paginatedItems.map((item, index) => (
-                    <tr key={index} className="hover:bg-slate-50/40 transition">
-                      <td className="py-3 px-3"><input type="checkbox" className="rounded border-slate-250 cursor-pointer" /></td>
-                      <td className="py-3 px-3 text-slate-400 font-bold">{(currentPage - 1) * itemsPerPage + index + 1}</td>
-                      <td className="py-3 px-3 text-slate-805 font-bold font-mono">{item.code}</td>
-                      <td className="py-3 px-3 text-slate-700 font-bold">{item.name}</td>
-                      <td className="py-3 px-3 text-slate-500 font-medium">{item.group}</td>
-                      <td className="py-3 px-3 text-slate-550 font-medium">{item.location}</td>
-                      <td className="py-3 px-3 text-right text-slate-800 font-bold font-mono">{item.qtyOnHand}</td>
-                      <td className="py-3 px-3 text-right text-slate-700 font-bold font-mono">{item.qtyAvailable}</td>
-                      <td className="py-3 px-3 text-right text-slate-500 font-medium font-mono">{item.qtyReserved}</td>
-                      <td className="py-3 px-3 text-right text-slate-650 font-mono">${item.unitCost.toFixed(2)}</td>
-                      <td className="py-3 px-3 text-right text-slate-805 font-bold font-mono">${item.totalValue.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
-                      <td className="py-3 px-3 text-center">
-                        <span className={cn(
-                          "px-2 py-0.75 rounded-md text-[9px] font-bold border",
-                          item.status === 'In Stock' ? "bg-emerald-50 border-emerald-100 text-emerald-600" :
-                          item.status === 'Low Stock' ? "bg-amber-50 border-amber-100 text-amber-600" :
-                          "bg-red-50 border-red-100 text-red-600"
-                        )}>
-                          {item.status}
-                        </span>
-                      </td>
-                      <td className="py-3 px-3 text-right text-slate-500 font-medium font-mono">{item.lastMovement}</td>
-                    </tr>
-                  ))}
-
-                  {filteredItems.length === 0 && (
+                <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
+                  {paginatedItems.length === 0 ? (
                     <tr>
-                      <td colSpan={13} className="text-center py-10 text-slate-400 font-bold italic">
-                        No inventory items matched the selected filters.
+                      <td colSpan={10} className="py-12 text-center text-slate-400">
+                        <Package className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                        <p className="text-xs font-bold text-slate-600">No inventory items matched your selected filters</p>
+                        <p className="text-[11px] text-slate-400">Try changing search keywords or resetting filters above.</p>
                       </td>
                     </tr>
+                  ) : (
+                    paginatedItems.map((item, idx) => {
+                      const itemIndex = (currentPage - 1) * itemsPerPage + idx + 1;
+                      return (
+                        <tr key={item.code} className="hover:bg-slate-50/80 transition">
+                          <td className="py-3 px-4 text-slate-400 font-semibold">{itemIndex}</td>
+                          <td className="py-3 px-4 font-extrabold text-slate-900 font-mono text-[11px]">{item.code}</td>
+                          <td className="py-3 px-4 font-bold text-slate-800">{item.name}</td>
+                          <td className="py-3 px-4">
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                              {item.group}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-slate-600 font-semibold text-[11px]">
+                            <span className="flex items-center gap-1">
+                              <Warehouse className="h-3 w-3 text-slate-400" />
+                              {item.location}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-right font-bold text-slate-900">
+                            {item.qtyOnHand}
+                          </td>
+                          <td className="py-3 px-4 text-right font-semibold text-slate-600">
+                            {item.qtyAvailable}
+                          </td>
+                          <td className="py-3 px-4 text-right font-semibold text-slate-600">
+                            {currencySymbol}{item.unitCost.toFixed(2)}
+                          </td>
+                          <td className="py-3 px-4 text-right font-extrabold text-slate-900">
+                            {formatAmount(item.totalValue)}
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            <span className={cn(
+                              "px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider inline-flex items-center gap-1 select-none",
+                              item.status === 'In Stock' && "bg-emerald-50 text-emerald-700 border border-emerald-200/80",
+                              item.status === 'Low Stock' && "bg-amber-50 text-amber-700 border border-amber-200/80",
+                              item.status === 'Dead Stock' && "bg-rose-50 text-rose-700 border border-rose-200/80"
+                            )}>
+                              <span className={cn(
+                                "h-1.5 w-1.5 rounded-full",
+                                item.status === 'In Stock' && "bg-emerald-500",
+                                item.status === 'Low Stock' && "bg-amber-500",
+                                item.status === 'Dead Stock' && "bg-rose-500"
+                              )} />
+                              {item.status}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
             </div>
 
-            {/* Pagination */}
-            {totalPages > 1 && (
-              <div className="flex items-center justify-between pt-3 border-t border-slate-100 text-xs font-semibold text-slate-500 select-none">
-                <span>Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, filteredItems.length)} of {filteredItems.length} entries</span>
-                <div className="flex items-center gap-1.5">
-                  <button 
-                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+            {/* Pagination Controls */}
+            {filteredItems.length > 0 && (
+              <div className="bg-slate-50/80 px-4 py-3 border-t border-slate-200 flex items-center justify-between text-xs font-semibold text-slate-500 select-none">
+                <div>
+                  Showing {((currentPage - 1) * itemsPerPage) + 1} to {Math.min(currentPage * itemsPerPage, filteredItems.length)} of {filteredItems.length} items
+                </div>
+
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                     disabled={currentPage === 1}
-                    className="p-1 border border-slate-200 bg-white rounded-md text-slate-600 disabled:opacity-40 disabled:pointer-events-none hover:bg-slate-50 transition cursor-pointer"
+                    className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:hover:bg-white transition cursor-pointer"
                   >
                     <ChevronLeft className="h-4 w-4" />
                   </button>
-                  <span className="font-bold text-slate-700">Page {currentPage} of {totalPages}</span>
-                  <button 
-                    onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+
+                  <span className="px-3 py-1 font-bold text-slate-800">
+                    Page {currentPage} of {totalPages}
+                  </span>
+
+                  <button
+                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                     disabled={currentPage === totalPages}
-                    className="p-1 border border-slate-200 bg-white rounded-md text-slate-600 disabled:opacity-40 disabled:pointer-events-none hover:bg-slate-50 transition cursor-pointer"
+                    className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:hover:bg-white transition cursor-pointer"
                   >
                     <ChevronRight className="h-4 w-4" />
                   </button>
@@ -748,100 +827,8 @@ export default function ProductsPage() {
               </div>
             )}
           </div>
-
-          {/* Bottom visual row */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-6 select-none">
-            {/* Status distribution */}
-            <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-sm space-y-3.5 flex flex-col justify-between">
-              <span className="text-[10.5px] font-bold text-slate-700 uppercase tracking-wider block">Stock Status Overview</span>
-              <div className="h-[180px] w-full relative">
-                <ReactECharts option={statusOverviewOption} style={{ height: '100%', width: '100%' }} opts={{ renderer: 'svg' }} />
-              </div>
-            </div>
-
-            {/* Value group distribution */}
-            <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-sm space-y-3.5 flex flex-col justify-between">
-              <span className="text-[10.5px] font-bold text-slate-700 uppercase tracking-wider block">Inventory Value by Item Group</span>
-              <div className="h-[180px] w-full relative">
-                <ReactECharts option={groupOverviewOption} style={{ height: '100%', width: '100%' }} opts={{ renderer: 'svg' }} />
-              </div>
-            </div>
-
-            {/* Top valued progress bars */}
-            <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-sm space-y-3.5 flex flex-col justify-between">
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10.5px] font-bold text-slate-700 uppercase tracking-wider block">Top Items by Value</span>
-                  <Link href="#" className="text-[9.5px] font-bold text-blue-600 hover:underline">View All</Link>
-                </div>
-                <div className="space-y-3.5 text-xs font-semibold text-slate-650">
-                  {topValuedItems.map((item, idx) => (
-                    <div key={idx} className="space-y-1.5">
-                      <div className="flex justify-between items-center">
-                        <div className="flex items-center gap-2">
-                          <span className="h-5 w-5 rounded-full bg-slate-100 font-extrabold text-[10px] text-slate-500 flex items-center justify-center">{idx + 1}</span>
-                          <span className="text-slate-805 font-bold truncate max-w-[130px]">{item.name}</span>
-                        </div>
-                        <span className="text-slate-805 font-extrabold font-mono">${item.totalValue.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
-                      </div>
-                      <div className="h-1 bg-slate-100 rounded-full overflow-hidden">
-                        <div className="h-full bg-blue-600 rounded-full" style={{ width: `${Math.min(100, Math.round((item.totalValue / data.summary.realValue) * 100))}%` }} />
-                      </div>
-                    </div>
-                  ))}
-                  {topValuedItems.length === 0 && (
-                    <span className="text-[10px] font-bold text-slate-400 block italic py-4">No active stock items</span>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* ─── Xero Disconnected State ─── */}
-      {data && data.connected === false && (
-        <div className="flex flex-col items-center justify-center text-center select-none py-20 bg-white rounded-2xl border border-slate-200/80 shadow-2xs p-8 mt-6">
-          <div className="h-14 w-14 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-450 mb-4 animate-pulse">
-            <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10" />
-              <line x1="2" y1="12" x2="22" y2="12" />
-              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-            </svg>
-          </div>
-          <h2 className="text-base font-extrabold text-slate-800 mb-1.5">Xero Organization Disconnected</h2>
-          <p className="text-xs text-slate-500 max-w-[340px] leading-relaxed mb-6">
-            Please connect your Xero organization under credentials in Data Sources to compile and view your Inventory.
-          </p>
-          <Link href="/data-sources" className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition shadow-sm">
-            Go to Data Sources
-          </Link>
         </div>
       )}
-
-      {/* ─── Footer Notes Section ─── */}
-      <div className="bg-slate-50 border border-slate-100 rounded-xl p-5 select-none text-[11px] font-semibold text-slate-500/85">
-        <div className="flex items-center gap-2 mb-3 text-slate-700">
-          <BookOpen className="h-4 w-4 text-slate-400" />
-          <span className="text-xs font-bold">Report Notes</span>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 leading-relaxed pl-1.5">
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-1.75"><Clock className="h-3.5 w-3.5 text-slate-400" /><span>Inventory value is calculated based on average cost.</span></div>
-            <div className="flex items-center gap-1.75"><Building className="h-3.5 w-3.5 text-slate-400" /><span>Low stock items are below the reorder level.</span></div>
-          </div>
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-1.75"><SlidersHorizontal className="h-3.5 w-3.5 text-slate-400" /><span>Dead stock items have no sales movement for 90+ days.</span></div>
-            <div className="flex items-center gap-1.75"><Database className="h-3.5 w-3.5 text-slate-400" /><span>Data Source: Xero Accounting API</span></div>
-          </div>
-          <div className="space-y-1.5 md:col-span-1">
-            <div className="flex items-center gap-1.75"><CheckCircle2 className="h-3.5 w-3.5 text-slate-400" /><span>Currency: {currencyCode}</span></div>
-            <div className="text-[10px] text-slate-400 font-medium italic mt-0.5">
-              "This report reflects inventory status as at the selected date."
-            </div>
-          </div>
-        </div>
-      </div>
     </PageContainer>
   );
 }

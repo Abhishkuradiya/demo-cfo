@@ -21,6 +21,9 @@ export interface ARInvoiceItem {
   statusColor: string;
   reference?: string;
   currencyCode?: string;
+  subTotal?: number;
+  totalTax?: number;
+  lineItems?: any[];
 }
 
 interface AccountReceivableBreakdownPanelProps {
@@ -78,9 +81,17 @@ export default function AccountReceivableBreakdownPanel({
         {
           id: `${inv.number}-${Date.now()}`,
           refNumber: inv.number,
+          contactName: inv.customer,
           date: inv.date,
+          dueDate: inv.dueDate,
           desc: `${inv.customer} - ${inv.reference || 'Accounts Receivable Invoice'}`,
           amount: inv.amount,
+          subTotal: inv.subTotal !== undefined ? inv.subTotal : Math.round((inv.amount / 1.2) * 100) / 100,
+          totalTax: inv.totalTax !== undefined ? inv.totalTax : Math.round((inv.amount - (inv.amount / 1.2)) * 100) / 100,
+          amountPaid: inv.amountPaid !== undefined ? inv.amountPaid : 0,
+          amountDue: inv.amountDue !== undefined ? inv.amountDue : inv.amount,
+          status: inv.status || 'Authorised',
+          lineItems: (inv as any).lineItems,
           x: startX,
           y: startY,
           width: winW,
@@ -254,7 +265,7 @@ export default function AccountReceivableBreakdownPanel({
                     </span>
                   </div>
                   <p className="text-xs font-medium text-slate-500 mt-0.5 flex items-center gap-1">
-                    <span className="font-semibold text-slate-700">MI Health Ltd</span>
+                    <span className="font-semibold text-slate-700">Organization</span>
                     <span>|</span>
                     <span>{formattedPeriodSub}</span>
                   </p>

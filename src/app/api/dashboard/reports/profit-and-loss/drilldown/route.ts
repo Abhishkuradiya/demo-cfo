@@ -12,8 +12,8 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const accountName = searchParams.get('account') || 'Amazon Sales';
-  const fromDateStr = searchParams.get('fromDate') || '2026-04-01';
-  const toDateStr = searchParams.get('toDate') || '2026-09-03';
+  const fromDateStr = searchParams.get('fromDate') || searchParams.get('from_date') || searchParams.get('startDate') || '2026-01-01';
+  const toDateStr = searchParams.get('toDate') || searchParams.get('to_date') || searchParams.get('endDate') || '2026-12-31';
   const targetValue = parseFloat(searchParams.get('value') || '0');
 
   try {

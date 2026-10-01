@@ -1195,8 +1195,9 @@ export default function RevenueBreakdownPanel({
         isOpen={!!selectedStreamForTransactions}
         onClose={() => setSelectedStreamForTransactions(null)}
         onBack={() => setSelectedStreamForTransactions(null)}
-        streamName={selectedStreamForTransactions?.name || ''}
+        streamName={selectedStreamForTransactions ? (selectedStreamForTransactions.code ? `${selectedStreamForTransactions.code} - ${selectedStreamForTransactions.name}` : selectedStreamForTransactions.name) : ''}
         totalRevenue={selectedStreamForTransactions?.revenue || 0}
+        salesData={salesData}
       />
     </>
   );

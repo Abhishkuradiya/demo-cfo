@@ -46,25 +46,17 @@ export default function TurnoverDrawerPanel({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, selectedStreamForTransactions, onClose]);
 
-  // Derive turnover streams strictly from salesData or fallback P&L structure
+  // Derive turnover streams strictly from salesData
   const activeStreams: SalesStreamItem[] = useMemo(() => {
-    if (salesData?.turnoverStreams && salesData.turnoverStreams.length > 0) {
+    if (salesData?.turnoverStreams && Array.isArray(salesData.turnoverStreams) && salesData.turnoverStreams.length > 0) {
       return salesData.turnoverStreams.map((s: any) => ({
         name: s.name || s.account_name || 'Turnover Account',
-        revenue: s.revenue || s.amount || 0
+        revenue: s.revenue || s.amount || 0,
+        code: s.code || s.account_code || s.accountCode || ''
       }));
     }
-    const tot = totalRevenue > 0 ? totalRevenue : (salesData?.salesSnapshot?.totalRevenue?.value || 3940810);
-    return [
-      { name: "Website Sales", revenue: Math.round(tot * 0.411) },
-      { name: "Amazon Sales", revenue: Math.round(tot * 0.385) },
-      { name: "Ebay sales", revenue: Math.round(tot * 0.105) },
-      { name: "Sales", revenue: Math.round(tot * 0.074) },
-      { name: "Inter company sales", revenue: Math.round(tot * 0.014) },
-      { name: "Groupon Sales", revenue: Math.round(tot * 0.007) },
-      { name: "SLA & Contract Income", revenue: Math.round(tot * 0.004) }
-    ];
-  }, [salesData, totalRevenue]);
+    return [];
+  }, [salesData]);
 
   const computedTotal = useMemo(() => {
     return activeStreams.reduce((acc, curr) => acc + curr.revenue, 0) || totalRevenue || 0;
@@ -134,22 +126,22 @@ export default function TurnoverDrawerPanel({
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.2, ease: "easeInOut" }}
-              className="absolute inset-0 bg-slate-900/40 backdrop-blur-xs cursor-pointer"
+              className="absolute inset-0 bg-slate-950/60 backdrop-blur-md cursor-pointer"
               onClick={onClose}
               aria-hidden="true"
             />
 
-            {/* Ultra Smooth Slide-Over Drawer ("Half Slider") */}
+            {/* Ultra Smooth Slide-Over Drawer - Full Screen Width */}
             <motion.div
               initial={{ x: "100%" }}
               animate={{ x: 0 }}
               exit={{ x: "100%" }}
               transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-              className="relative z-10 w-full max-w-xl bg-white shadow-2xl h-full flex flex-col border-l border-slate-200 text-slate-800 font-sans"
+              className="relative z-10 w-full max-w-xl bg-slate-50 dark:bg-slate-950 shadow-2xl h-full flex flex-col border-l border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-100 font-sans"
             >
 
               {/* Drawer Header */}
-              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50/90 shrink-0">
+              <div className="flex items-center justify-between px-8 py-5 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0 shadow-xs">
                 <div>
                   <div className="flex items-center gap-2">
                     <h3 className="text-base font-bold text-slate-900">
@@ -328,8 +320,12 @@ export default function TurnoverDrawerPanel({
                               idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'
                             } hover:bg-blue-50/60`}
                           >
-                            <td className="py-3.5 px-6 font-semibold text-slate-800 flex items-center gap-2">
-                              <span>{stream.name}</span>
+                            <td 
+                              onClick={() => setSelectedStreamForTransactions(stream)}
+                              className="py-3.5 px-6 font-semibold text-slate-800 flex items-center gap-2 cursor-pointer hover:text-blue-600 transition-colors"
+                              title={`Click to view Xero Account Transactions for ${stream.name}`}
+                            >
+                              <span className="hover:underline">{stream.name}</span>
                               {idx === 0 && (
                                 <span className="text-[9.5px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
                                   Top Stream
@@ -388,8 +384,9 @@ export default function TurnoverDrawerPanel({
         isOpen={!!selectedStreamForTransactions}
         onClose={() => setSelectedStreamForTransactions(null)}
         onBack={() => setSelectedStreamForTransactions(null)}
-        streamName={selectedStreamForTransactions?.name || ''}
+        streamName={selectedStreamForTransactions ? (selectedStreamForTransactions.code ? `${selectedStreamForTransactions.code} - ${selectedStreamForTransactions.name}` : selectedStreamForTransactions.name) : ''}
         totalRevenue={selectedStreamForTransactions?.revenue || 0}
+        salesData={salesData}
       />
     </>
   );

@@ -5,24 +5,24 @@ import { syncAmazonData } from '@/lib/amazon';
 
 // POST: Trigger Manual Live Amazon Data Sync
 export async function POST(req: NextRequest) {
-  let tenantId = await getTenantIdFromSession();
+  const tenantId = await getTenantIdFromSession();
   if (!tenantId) {
-    tenantId = 3;
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   try {
-    let credentials = await db.getCredentials(tenantId, 'amazon');
+    const credentials = await db.getCredentials(tenantId, 'amazon');
     if (!credentials || (!credentials.client_id && !credentials.refresh_token)) {
-      credentials = await db.getCredentials(3, 'amazon');
+      return NextResponse.json({ error: 'Amazon Seller Central is not connected for this tenant.' }, { status: 400 });
     }
 
     const syncResult = await syncAmazonData(tenantId, {
-      clientId: credentials?.client_id || 'amzn1.application-oa2-client.sandbox-test-1001',
-      clientSecret: credentials?.client_secret || 'sandbox-secret',
-      refreshToken: credentials?.refresh_token || 'sandbox-refresh-token',
-      sellerId: credentials?.tenant_identifier || 'A1F83G8C2ARO7P',
-      region: credentials?.region || 'eu-west-1',
-      marketplaceId: credentials?.marketplace_id || 'A1F83G8C2ARO7P',
+      clientId: credentials.client_id || '',
+      clientSecret: credentials.client_secret || '',
+      refreshToken: credentials.refresh_token || '',
+      sellerId: credentials.tenant_identifier || '',
+      region: credentials.region || 'eu-west-1',
+      marketplaceId: credentials.marketplace_id || 'A1F83G8C2ARO7P',
       environment: (credentials as any)?.environment || 'sandbox'
     });
 

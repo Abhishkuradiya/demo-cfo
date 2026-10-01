@@ -5,8 +5,14 @@ export interface ProfitAndLossSummary {
   cogs: number;
   grossProfit: number;
   operatingExpenses: number;
+  operatingProfit: number;
   otherIncome: number;
   otherExpenses: number;
+  depreciation: number | null;
+  amortization: number | null;
+  interest: number | null;
+  tax: number | null;
+  ebitda: number | null;
   netProfit: number;
 }
 
@@ -21,8 +27,14 @@ export class ProfitAndLossService {
       cogs: 0,
       grossProfit: 0,
       operatingExpenses: 0,
+      operatingProfit: 0,
       otherIncome: 0,
       otherExpenses: 0,
+      depreciation: null,
+      amortization: null,
+      interest: null,
+      tax: null,
+      ebitda: null,
       netProfit: 0
     };
 
@@ -68,21 +80,71 @@ export class ProfitAndLossService {
     ]);
     result.operatingExpenses = expensesVal !== null ? expensesVal : 0;
 
-    // 5. Extract Other Income
+    // 5. Operating Profit (EBIT)
+    const opVal = XeroReportParser.findRowValue(rows, [
+      'operating profit',
+      'net operating income',
+      'profit from operations',
+      'operating profit / (loss)'
+    ]);
+    result.operatingProfit = opVal !== null ? opVal : (result.grossProfit - result.operatingExpenses);
+
+    // 6. Extract Other Income
     const otherIncomeVal = XeroReportParser.findRowValue(rows, [
       'total other income',
       'other income'
     ]);
     result.otherIncome = otherIncomeVal !== null ? otherIncomeVal : 0;
 
-    // 6. Extract Other Expenses
+    // 7. Extract Other Expenses
     const otherExpensesVal = XeroReportParser.findRowValue(rows, [
       'total other expenses',
       'other expenses'
     ]);
     result.otherExpenses = otherExpensesVal !== null ? otherExpensesVal : 0;
 
-    // 7. Extract Net Profit
+    // 8. Extract Depreciation & Amortization if explicitly present
+    const depVal = XeroReportParser.findRowValue(rows, [
+      'total depreciation',
+      'depreciation',
+      'depreciation and amortisation',
+      'depreciation and amortization'
+    ]);
+    result.depreciation = depVal;
+
+    const amortVal = XeroReportParser.findRowValue(rows, [
+      'total amortisation',
+      'total amortization',
+      'amortisation',
+      'amortization'
+    ]);
+    result.amortization = amortVal;
+
+    // 9. Extract Interest & Tax if explicitly present
+    const interestVal = XeroReportParser.findRowValue(rows, [
+      'total interest expense',
+      'interest expense',
+      'interest paid',
+      'finance costs'
+    ]);
+    result.interest = interestVal;
+
+    const taxVal = XeroReportParser.findRowValue(rows, [
+      'taxation',
+      'income tax',
+      'corporation tax',
+      'tax expense'
+    ]);
+    result.tax = taxVal;
+
+    // EBITDA calculation: Only calculated when depreciation or amortization data is available
+    if (result.depreciation !== null || result.amortization !== null) {
+      result.ebitda = result.operatingProfit + (result.depreciation || 0) + (result.amortization || 0);
+    } else {
+      result.ebitda = null;
+    }
+
+    // 10. Extract Net Profit (prefer authoritative Xero P&L row, fallback to full P&L formula)
     const npVal = XeroReportParser.findRowValue(rows, [
       'net profit',
       'net profit / loss',

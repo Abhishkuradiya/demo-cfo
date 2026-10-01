@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useMemo, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, ArrowLeft, ChevronLeft, Download, Layers, ChevronDown, Search, ArrowUpAZ, ArrowDownZA, Filter } from 'lucide-react';
 import { toast } from 'sonner';
@@ -14,9 +15,13 @@ interface TransactionLine {
   currency: string;
   debitSource: string;
   creditSource: number;
-  debitGbp: string;
+  debitGbp: number;
   creditGbp: number;
   runningBalance: number;
+  grossGbp?: number;
+  taxGbp?: number;
+  rawInvoice?: any;
+  lineItems?: any[];
 }
 
 interface AccountTransactionsDrawerProps {
@@ -25,18 +30,47 @@ interface AccountTransactionsDrawerProps {
   onBack: () => void;
   streamName: string;
   totalRevenue: number;
+  salesData?: any;
+  dateLabel?: string;
 }
+
+export const getCurrencySymbol = (curr: string = "GBP") => {
+  switch (curr?.toUpperCase()) {
+    case 'GBP': return '£';
+    case 'USD': return '$';
+    case 'EUR': return '€';
+    case 'INR': return '₹';
+    case 'AUD': return 'A$';
+    case 'CAD': return 'C$';
+    default: return '£';
+  }
+};
+
+export const formatNum = (val: number) => {
+  if (typeof val !== 'number' || isNaN(val)) return '0.00';
+  return new Intl.NumberFormat('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val);
+};
 
 export default function AccountTransactionsDrawer({
   isOpen,
   onClose,
   onBack,
   streamName,
-  totalRevenue
+  totalRevenue,
+  salesData = null,
+  dateLabel = ""
 }: AccountTransactionsDrawerProps) {
+  const searchParams = useSearchParams();
+  const urlFromDate = searchParams?.get('from_date') || searchParams?.get('fromDate') || '';
+  const urlToDate = searchParams?.get('to_date') || searchParams?.get('toDate') || '';
+  const effectiveFromDate = (urlFromDate || salesData?.meta?.fromDate || '2026-04-01').split('T')[0];
+  const effectiveToDate = (urlToDate || salesData?.meta?.toDate || '2026-09-30').split('T')[0];
+
   // Preserve data during exit animation transition
   const [displayStreamName, setDisplayStreamName] = useState(streamName);
   const [displayTotalRevenue, setDisplayTotalRevenue] = useState(totalRevenue);
+  const [liveDbTransactions, setLiveDbTransactions] = useState<TransactionLine[] | null>(null);
+  const [isLoadingLedger, setIsLoadingLedger] = useState(false);
 
   // Excel Column Filtering & Sorting States
   const [filterSelections, setFilterSelections] = useState<Record<string, string[]>>({});
@@ -48,13 +82,20 @@ export default function AccountTransactionsDrawer({
   // 3rd Level Multi-Instance Floating Xero Invoice Windows
   const [openInvoices, setOpenInvoices] = useState<OpenInvoiceData[]>([]);
 
+  const activeStreamName = streamName || displayStreamName || "Sales";
+  const activeTotalRevenue = totalRevenue || displayTotalRevenue || 0;
+
   const handleOpenInvoice = (row: TransactionLine) => {
     setOpenInvoices(prev => {
-      const existing = prev.find(inv => inv.refNumber === row.ref);
+      const isReceiveMoney = row.source === 'Receive Money';
+      const refKey = row.ref || (isReceiveMoney ? `REC-${row.date.replace(/\s+/g, '')}` : `TXN-${Date.now()}`);
+      const displayRef = row.ref || (isReceiveMoney ? 'Receive Money' : 'INV-001');
+
+      const existing = prev.find(inv => inv.id.startsWith(refKey) || (row.ref && inv.refNumber === row.ref));
       if (existing) {
         const maxZ = Math.max(...prev.map(i => i.zIndex), 1000);
-        toast.info(`Invoice ${row.ref} is already open and brought to front!`);
-        return prev.map(inv => inv.refNumber === row.ref ? { ...inv, zIndex: maxZ + 1, isMinimized: false, isHighlighted: true } : inv);
+        toast.info(`Transaction ${displayRef} is already open and brought to front!`);
+        return prev.map(inv => inv.id === existing.id ? { ...inv, zIndex: maxZ + 1, isMinimized: false, isHighlighted: true } : inv);
       }
       const offset = (prev.length % 5) * 30;
       const maxZ = Math.max(...prev.map(i => i.zIndex), 1000);
@@ -63,14 +104,45 @@ export default function AccountTransactionsDrawer({
       const startX = typeof window !== 'undefined' ? Math.max(30, Math.round((window.innerWidth - winW) / 2) + offset) : 90;
       const startY = typeof window !== 'undefined' ? Math.max(30, Math.round((window.innerHeight - winH) / 2 - 30) + offset) : 50;
 
+      // Extract authentic contact name & invoice matching
+      const matchingInv = row.rawInvoice || (salesData?.allInvoices || []).find((inv: any) => 
+        (row.ref && (inv.number === row.ref || inv.reference === row.ref || inv.id === row.ref))
+      );
+
+      const contactName = matchingInv?.customer || (row.desc.includes('-') ? row.desc.split('-')[0].trim() : (row.desc || activeStreamName));
+      const amountVal = row.creditGbp || row.debitGbp || matchingInv?.amount || 0;
+
+      const grossTotalVal = matchingInv?.amount || (matchingInv?.subTotal && matchingInv?.totalTax ? matchingInv.subTotal + matchingInv.totalTax : amountVal);
+      const subTotalVal = matchingInv?.subTotal !== undefined ? matchingInv.subTotal : amountVal;
+      const totalTaxVal = matchingInv?.totalTax !== undefined ? matchingInv.totalTax : (grossTotalVal > subTotalVal ? grossTotalVal - subTotalVal : 0);
+      const paidVal = matchingInv?.amountPaid !== undefined ? matchingInv.amountPaid : grossTotalVal;
+      const dueVal = matchingInv?.amountDue !== undefined ? matchingInv.amountDue : 0;
+
       return [
         ...prev,
         {
-          id: `${row.ref}-${Date.now()}`,
-          refNumber: row.ref,
+          id: `${refKey}-${Date.now()}`,
+          refNumber: displayRef,
+          contactName: contactName,
           date: row.date,
+          dueDate: matchingInv?.dueDate || row.date,
+          paymentDate: matchingInv?.paymentDate || matchingInv?.fullyPaidOnDate || matchingInv?.Payments?.[0]?.Date || row.date,
           desc: row.desc,
-          amount: row.creditGbp,
+          amount: grossTotalVal,
+          subTotal: subTotalVal,
+          totalTax: totalTaxVal,
+          amountPaid: paidVal,
+          amountDue: dueVal,
+          status: matchingInv?.status || (isReceiveMoney ? 'Reconciled' : 'PAID'),
+          lineItems: matchingInv?.lineItems || row.lineItems || [
+            {
+              desc: row.desc.includes('-') ? row.desc.split('-').slice(1).join('-').trim() : row.desc,
+              account: `${activeStreamName}`,
+              taxRate: 'Zero Rated Income',
+              amountGbp: subTotalVal
+            }
+          ],
+          attachments: matchingInv?.attachments || matchingInv?.Attachments || [],
           x: startX,
           y: startY,
           width: winW,
@@ -99,6 +171,46 @@ export default function AccountTransactionsDrawer({
     setOpenInvoices(prev => prev.map(inv => inv.id === id ? { ...inv, ...updates } : inv));
   };
 
+  const handleOpenPaymentDoc = (doc: Partial<OpenInvoiceData>) => {
+    setOpenInvoices(prev => {
+      const maxZ = Math.max(...prev.map(i => i.zIndex), 1000);
+      const winW = typeof window !== 'undefined' ? Math.min(820, window.innerWidth - 60) : 820;
+      const winH = typeof window !== 'undefined' ? Math.min(520, window.innerHeight - 180) : 520;
+      const offset = (prev.length % 5) * 35;
+      const startX = typeof window !== 'undefined' ? Math.max(30, Math.round((window.innerWidth - winW) / 2) + offset) : 90;
+      const startY = typeof window !== 'undefined' ? Math.max(30, Math.round((window.innerHeight - winH) / 2 - 30) + offset) : 50;
+
+      return [
+        ...prev,
+        {
+          id: doc.id || `pay-${Date.now()}`,
+          refNumber: doc.refNumber || 'Receive Money',
+          contactName: doc.contactName || 'Client',
+          date: doc.date || '01 Apr 2026',
+          dueDate: doc.dueDate || doc.date || '01 Apr 2026',
+          paymentDate: doc.paymentDate || doc.date || '01 Apr 2026',
+          desc: doc.desc || 'Payment Document',
+          amount: doc.amount || 0,
+          subTotal: doc.subTotal || doc.amount || 0,
+          totalTax: 0,
+          amountPaid: doc.amount || 0,
+          amountDue: 0,
+          status: doc.status || 'Reconciled',
+          accountName: doc.accountName || '100 - Starling Business Account',
+          lineItems: doc.lineItems || [],
+          x: startX,
+          y: startY,
+          width: winW,
+          height: winH,
+          zIndex: maxZ + 1,
+          isMinimized: false,
+          isMaximized: false,
+          isHighlighted: true
+        }
+      ];
+    });
+  };
+
   useEffect(() => {
     if (isOpen) {
       if (streamName) {
@@ -111,11 +223,48 @@ export default function AccountTransactionsDrawer({
       setActiveFilterColumn(null);
       setSearchTerms({});
       setSortConfig(null);
-    }
-  }, [isOpen, streamName, totalRevenue]);
 
-  const activeStreamName = streamName || displayStreamName || "Sales";
-  const activeTotalRevenue = totalRevenue || displayTotalRevenue || 0;
+      // Async live fetch from PostgreSQL P&L drilldown API
+      const fromDate = effectiveFromDate;
+      const toDate = effectiveToDate;
+      const targetStream = streamName || displayStreamName;
+      
+      if (targetStream) {
+        setIsLoadingLedger(true);
+        fetch(`/api/dashboard/reports/profit-and-loss/drilldown?account=${encodeURIComponent(targetStream)}&fromDate=${fromDate}&toDate=${toDate}&value=${totalRevenue || 0}`)
+          .then(res => res.json())
+          .then(data => {
+            if (data && Array.isArray(data.transactions) && data.transactions.length > 0) {
+              const mapped: TransactionLine[] = data.transactions.map((t: any) => ({
+                date: t.date,
+                source: t.source || 'Receivable Invoice',
+                desc: t.description || t.desc || targetStream,
+                ref: t.reference || t.ref || (t.source === 'Receive Money' ? '' : 'INV-001'),
+                currency: t.currency || 'GBP',
+                debitSource: t.debit > 0 ? formatNum(t.debit) : '-',
+                creditSource: t.credit || 0,
+                debitGbp: t.debit || 0,
+                creditGbp: t.credit || 0,
+                runningBalance: t.runningBalance || 0,
+                grossGbp: t.gross || t.gross_amount || ((t.credit || t.debit || 0) + (t.tax || t.tax_amount || 0)),
+                taxGbp: t.tax || t.tax_amount || 0,
+                lineItems: t.lineItems,
+                rawInvoice: t.rawInvoice
+              }));
+              setLiveDbTransactions(mapped);
+            } else {
+              setLiveDbTransactions(null);
+            }
+          })
+          .catch(() => {
+            setLiveDbTransactions(null);
+          })
+          .finally(() => {
+            setIsLoadingLedger(false);
+          });
+      }
+    }
+  }, [isOpen, streamName, totalRevenue, effectiveFromDate, effectiveToDate]);
 
   // Close filter popover on click outside
   useEffect(() => {
@@ -144,101 +293,62 @@ export default function AccountTransactionsDrawer({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, activeFilterColumn, onClose]);
 
-  // Generate authentic Xero Account Transactions matching user screenshot
+  // Generate authentic Xero Account Transactions matching live data and exact stream total
   const transactionsData: TransactionLine[] = useMemo(() => {
-    const currentStream = activeStreamName.toLowerCase();
-    const isAmazon = currentStream.includes('amazon');
-    const isWebsite = currentStream.includes('web');
-    const isEbay = currentStream.includes('ebay');
+    if (liveDbTransactions && liveDbTransactions.length > 0) {
+      return liveDbTransactions;
+    }
 
-    const rawList = isAmazon ? [
-      { date: "02 Apr 2026", source: "Receivable Invoice", desc: "Amazon - Marketplace Settlement", ref: "26610293812", credit: 28450.00 },
-      { date: "05 Apr 2026", source: "Receivable Invoice", desc: "Amazon - Amazon Sales", ref: "26640192831", credit: 19820.50 },
-      { date: "10 Apr 2026", source: "Receivable Invoice", desc: "Amazon - FBA Disbursement", ref: "26681029381", credit: 32100.00 },
-      { date: "14 Apr 2026", source: "Receivable Invoice", desc: "Amazon - Amazon Sales", ref: "26701928301", credit: 15430.25 },
-      { date: "18 Apr 2026", source: "Receivable Invoice", desc: "Amazon - Amazon Sales", ref: "26718293019", credit: 22150.00 },
-      { date: "20 Apr 2026", source: "Receivable Invoice", desc: "Amazon - Amazon Sales", ref: "26722238172", credit: 120742.33 },
-      { date: "20 Apr 2026", source: "Receivable Invoice", desc: "Amazon - Amazon Sales", ref: "26722238172", credit: 7021.28 },
-      { date: "20 Apr 2026", source: "Receivable Invoice", desc: "Amazon - Amazon Sales", ref: "26722238172", credit: 6489.93 },
-      { date: "24 Apr 2026", source: "Receivable Invoice", desc: "Amazon - Amazon Sales", ref: "26812355232", credit: 177142.24 },
-      { date: "24 Apr 2026", source: "Receivable Invoice", desc: "Amazon - Amazon Sales", ref: "26812355232", credit: 4961.91 },
-      { date: "24 Apr 2026", source: "Receivable Invoice", desc: "Amazon - Amazon Sales", ref: "26812355232", credit: 18312.98 },
-      { date: "28 Apr 2026", source: "Receivable Invoice", desc: "Amazon - FBA Disbursement", ref: "26859102938", credit: 29400.00 },
-      { date: "02 May 2026", source: "Receivable Invoice", desc: "Amazon - Amazon Sales", ref: "26871029381", credit: 18250.00 },
-      { date: "05 May 2026", source: "Receivable Invoice", desc: "Amazon - Marketplace Settlement", ref: "26880192831", credit: 24100.00 },
-      { date: "08 May 2026", source: "Receivable Invoice", desc: "Amazon - Amazon Sales", ref: "26892820132", credit: 151974.68 },
-      { date: "08 May 2026", source: "Receivable Invoice", desc: "Amazon - Amazon Sales", ref: "26892820132", credit: 2287.86 },
-      { date: "08 May 2026", source: "Receivable Invoice", desc: "Amazon - Amazon Sales", ref: "26892820132", credit: 14265.66 },
-      { date: "12 May 2026", source: "Receivable Invoice", desc: "Amazon - Amazon Sales", ref: "26921029381", credit: 16800.00 },
-      { date: "16 May 2026", source: "Receivable Invoice", desc: "Amazon - FBA Disbursement", ref: "26950192831", credit: 21350.00 },
-      { date: "22 May 2026", source: "Receivable Invoice", desc: "Amazon - Amazon Sales", ref: "26981842802", credit: 128932.66 },
-      { date: "22 May 2026", source: "Receivable Invoice", desc: "Amazon - Amazon Sales", ref: "26981842802", credit: 1106.04 },
-      { date: "22 May 2026", source: "Receivable Invoice", desc: "Amazon - Amazon Sales", ref: "26981842802", credit: 8263.72 },
-      { date: "27 May 2026", source: "Receivable Invoice", desc: "Amazon - Marketplace Settlement", ref: "27010293819", credit: 25400.00 },
-      { date: "31 May 2026", source: "Receivable Invoice", desc: "Invoice 27065195232 Part 1", ref: "27065195232", credit: 118407.43 },
-      { date: "31 May 2026", source: "Receivable Invoice", desc: "Invoice 27065195232 Part 1", ref: "27065195232", credit: 938.75 },
-      { date: "31 May 2026", source: "Receivable Invoice", desc: "Invoice 27065195232 Part 1", ref: "27065195232", credit: 3863.60 },
-      { date: "01 Jun 2026", source: "Receivable Invoice", desc: "Invoice 27065195232 Part 2", ref: "27065195232", credit: 28.47 },
-      { date: "05 Jun 2026", source: "Receivable Invoice", desc: "Amazon - FBA Disbursement", ref: "27101928301", credit: 19800.00 },
-      { date: "10 Jun 2026", source: "Receivable Invoice", desc: "Amazon - Amazon Sales", ref: "27138102938", credit: 14200.00 },
-      { date: "14 Jun 2026", source: "Receivable Invoice", desc: "Amazon - Marketplace Settlement", ref: "27160192831", credit: 22600.00 },
-      { date: "19 Jun 2026", source: "Receivable Invoice", desc: "Amazon - Amazon Sales", ref: "19 June", credit: 92151.58 },
-      { date: "19 Jun 2026", source: "Receivable Invoice", desc: "Amazon - Amazon Sales", ref: "19 June", credit: 4403.96 },
-      { date: "19 Jun 2026", source: "Receivable Invoice", desc: "Amazon - Amazon Sales", ref: "19 June", credit: 16025.36 },
-      { date: "25 Jun 2026", source: "Receivable Invoice", desc: "Amazon - FBA Disbursement", ref: "27220192831", credit: 18900.00 },
-      { date: "03 Jul 2026", source: "Receivable Invoice", desc: "Amazon - Amazon Sales", ref: "19 June", credit: 69095.05 },
-      { date: "03 Jul 2026", source: "Receivable Invoice", desc: "Amazon - Amazon Sales", ref: "19 June", credit: 3901.36 },
-      { date: "03 Jul 2026", source: "Receivable Invoice", desc: "Amazon - Amazon Sales", ref: "19 June", credit: 4430.00 },
-      { date: "10 Jul 2026", source: "Receivable Invoice", desc: "Amazon - Marketplace Settlement", ref: "27310192831", credit: 21500.00 },
-      { date: "17 Jul 2026", source: "Receivable Invoice", desc: "Amazon - Amazon Sales", ref: "17 July", credit: 66057.45 },
-      { date: "17 Jul 2026", source: "Receivable Invoice", desc: "Amazon - Amazon Sales", ref: "17 July", credit: 3056.32 },
-      { date: "17 Jul 2026", source: "Receivable Invoice", desc: "Amazon - Amazon Sales", ref: "17 July", credit: 3462.33 },
-      { date: "24 Jul 2026", source: "Receivable Invoice", desc: "Amazon - FBA Disbursement", ref: "27410192831", credit: 17400.00 },
-      { date: "31 Jul 2026", source: "Receivable Invoice", desc: "Amazon - Amazon Sales", ref: "31 July", credit: 85764.91 },
-      { date: "31 Jul 2026", source: "Receivable Invoice", desc: "Amazon - Amazon Sales", ref: "31 July", credit: 8848.20 },
-      { date: "31 Jul 2026", source: "Receivable Invoice", desc: "Amazon - Amazon Sales", ref: "31 July", credit: 7269.89 },
-      { date: "07 Aug 2026", source: "Receivable Invoice", desc: "Amazon - Marketplace Settlement", ref: "27510192831", credit: 23100.00 },
-      { date: "14 Aug 2026", source: "Receivable Invoice", desc: "Amazon - Amazon Sales", ref: "14 Aug", credit: 206636.50 },
-      { date: "14 Aug 2026", source: "Receivable Invoice", desc: "Amazon - Amazon Sales", ref: "14 Aug", credit: 13527.67 },
-      { date: "14 Aug 2026", source: "Receivable Invoice", desc: "Amazon - Amazon Sales", ref: "14 Aug", credit: 10459.53 },
-      { date: "28 Aug 2026", source: "Receivable Invoice", desc: "Amazon - Amazon Sales", ref: "28 Aug", credit: 131629.33 }
-    ] : isWebsite ? [
-      { date: "02 Apr 2026", source: "Receivable Invoice", desc: "Website - Stripe Payment", ref: "INV-WEB-1001", credit: 145000.00 },
-      { date: "15 Apr 2026", source: "Receivable Invoice", desc: "Website - Online Checkout", ref: "INV-WEB-1002", credit: 210500.50 },
-      { date: "01 May 2026", source: "Receivable Invoice", desc: "Website - E-Commerce Sales", ref: "INV-WEB-1003", credit: 389780.00 },
-      { date: "20 May 2026", source: "Receivable Invoice", desc: "Website - Stripe Payment", ref: "INV-WEB-1004", credit: 175200.00 },
-      { date: "10 Jun 2026", source: "Receivable Invoice", desc: "Website - Online Store", ref: "INV-WEB-1005", credit: 298400.00 },
-      { date: "05 Jul 2026", source: "Receivable Invoice", desc: "Website - Online Checkout", ref: "INV-WEB-1006", credit: 184500.00 },
-      { date: "22 Aug 2026", source: "Receivable Invoice", desc: "Website - Stripe Payment", ref: "INV-WEB-1007", credit: 217468.50 }
-    ] : isEbay ? [
-      { date: "05 Apr 2026", source: "Receivable Invoice", desc: "eBay - Merchant Sales", ref: "EBAY-8801", credit: 54100.00 },
-      { date: "28 Apr 2026", source: "Receivable Invoice", desc: "eBay - Direct Payout", ref: "EBAY-8802", credit: 92400.00 },
-      { date: "18 May 2026", source: "Receivable Invoice", desc: "eBay - Merchant Sales", ref: "EBAY-8803", credit: 110500.00 },
-      { date: "14 Jun 2026", source: "Receivable Invoice", desc: "eBay - Direct Payout", ref: "EBAY-8804", credit: 86450.00 },
-      { date: "19 Jul 2026", source: "Receivable Invoice", desc: "eBay - Merchant Sales", ref: "EBAY-8805", credit: 72753.00 }
-    ] : [
-      { date: "10 Apr 2026", source: "Receivable Invoice", desc: `${activeStreamName} Entry`, ref: "INV-2001", credit: Math.round(activeTotalRevenue * 0.4) },
-      { date: "15 Jun 2026", source: "Receivable Invoice", desc: `${activeStreamName} Entry`, ref: "INV-2002", credit: Math.round(activeTotalRevenue * 0.35) },
-      { date: "20 Aug 2026", source: "Receivable Invoice", desc: `${activeStreamName} Entry`, ref: "INV-2003", credit: Math.round(activeTotalRevenue * 0.25) }
-    ];
+    // STRICT ZERO-DATA GUARD: If total revenue is 0 or less, NEVER output dummy rows!
+    if (activeTotalRevenue <= 0) {
+      return [];
+    }
 
-    let running = 0;
-    return rawList.map(item => {
-      running += item.credit;
-      return {
-        date: item.date,
-        source: item.source,
-        desc: item.desc,
-        ref: item.ref,
-        currency: "GBP",
-        debitSource: "-",
-        creditSource: item.credit,
-        debitGbp: "-",
-        creditGbp: item.credit,
-        runningBalance: running
-      };
-    });
-  }, [activeStreamName, activeTotalRevenue]);
+    // Secondary fallback: Map from salesData.allInvoices if available in client memory
+    if (salesData?.allInvoices && Array.isArray(salesData.allInvoices) && salesData.allInvoices.length > 0) {
+      const currentStream = activeStreamName.toLowerCase().trim();
+      const startRangeTs = new Date(`${effectiveFromDate.split('T')[0]}T00:00:00Z`).getTime();
+      const endRangeTs = new Date(`${effectiveToDate.split('T')[0]}T23:59:59Z`).getTime();
+
+      const matchedInvoices = salesData.allInvoices.filter((inv: any) => {
+        const cName = (inv.customer || inv.contactName || '').toLowerCase();
+        const ref = (inv.reference || inv.number || '').toLowerCase();
+        const desc = (inv.desc || '').toLowerCase();
+
+        const streamKeyword = currentStream.replace(/sales|income|trading/gi, '').trim() || currentStream;
+        const matches = cName.includes(streamKeyword) || ref.includes(streamKeyword) || desc.includes(streamKeyword);
+
+        if (!matches) return false;
+
+        const dTime = new Date(inv.date).getTime();
+        return !isNaN(dTime) ? (dTime >= startRangeTs && dTime <= endRangeTs) : true;
+      });
+
+      if (matchedInvoices.length > 0) {
+        let running = 0;
+        return matchedInvoices.map((inv: any) => {
+          const amt = inv.amount || 0;
+          running = Math.round((running + amt) * 100) / 100;
+          return {
+            date: inv.date,
+            source: 'Receivable Invoice',
+            desc: inv.desc || `${inv.customer || activeStreamName} - ${inv.reference || 'Sales'}`,
+            ref: inv.number || inv.reference || 'INV-001',
+            currency: inv.currencyCode || 'GBP',
+            debitSource: '-',
+            creditSource: amt,
+            debitGbp: 0,
+            creditGbp: amt,
+            runningBalance: running,
+            rawInvoice: inv,
+            lineItems: inv.lineItems
+          };
+        });
+      }
+    }
+
+    return [];
+  }, [activeStreamName, activeTotalRevenue, liveDbTransactions, salesData, effectiveFromDate, effectiveToDate]);
 
   const getColVal = (item: TransactionLine, colKey: string) => {
     if (colKey === 'date') return item.date;
@@ -246,9 +356,11 @@ export default function AccountTransactionsDrawer({
     if (colKey === 'desc') return item.desc;
     if (colKey === 'ref') return item.ref;
     if (colKey === 'currency') return item.currency;
-    if (colKey === 'debitGbp') return item.debitGbp;
-    if (colKey === 'creditGbp') return item.creditGbp.toString();
-    if (colKey === 'runningBalance') return item.runningBalance.toString();
+    if (colKey === 'debitGbp') return item.debitGbp > 0 ? formatNum(item.debitGbp) : '-';
+    if (colKey === 'creditGbp') return item.creditGbp > 0 ? formatNum(item.creditGbp) : '-';
+    if (colKey === 'runningBalance') return formatNum(item.runningBalance);
+    if (colKey === 'grossGbp') return item.grossGbp ? formatNum(item.grossGbp) : '-';
+    if (colKey === 'taxGbp') return item.taxGbp ? formatNum(item.taxGbp) : '-';
     return "";
   };
 
@@ -282,6 +394,8 @@ export default function AccountTransactionsDrawer({
         else if (colKey === 'debitGbp') { valA = a.debitGbp; valB = b.debitGbp; }
         else if (colKey === 'creditGbp') { valA = a.creditGbp; valB = b.creditGbp; }
         else if (colKey === 'runningBalance') { valA = a.runningBalance; valB = b.runningBalance; }
+        else if (colKey === 'grossGbp') { valA = a.grossGbp || 0; valB = b.grossGbp || 0; }
+        else if (colKey === 'taxGbp') { valA = a.taxGbp || 0; valB = b.taxGbp || 0; }
 
         if (valA < valB) return direction === 'asc' ? -1 : 1;
         if (valA > valB) return direction === 'asc' ? 1 : -1;
@@ -289,10 +403,14 @@ export default function AccountTransactionsDrawer({
       });
     }
 
+    // Determine if this account is predominantly an expense/COGS account
+    const isExpenseLedger = transactionsData.some(t => t.debitGbp > 0) && transactionsData.reduce((sum, t) => sum + t.debitGbp, 0) >= transactionsData.reduce((sum, t) => sum + t.creditGbp, 0);
+
     // Recalculate running balance
     let running = 0;
     return result.map(item => {
-      running += item.creditGbp;
+      const delta = isExpenseLedger ? (item.debitGbp - item.creditGbp) : (item.creditGbp - item.debitGbp);
+      running = Math.round((running + delta) * 100) / 100;
       return {
         ...item,
         runningBalance: running
@@ -300,32 +418,35 @@ export default function AccountTransactionsDrawer({
     });
   }, [transactionsData, filterSelections, sortConfig]);
 
-  const filteredTotalSum = useMemo(() => {
-    return processedData.reduce((acc, curr) => acc + curr.creditGbp, 0);
+  const filteredDebitSum = useMemo(() => {
+    return processedData.reduce((acc, curr) => acc + (curr.debitGbp || 0), 0);
   }, [processedData]);
 
-  const getCurrencySymbol = (curr: string = "GBP") => {
-    switch (curr.toUpperCase()) {
-      case 'GBP': return '£';
-      case 'USD': return '$';
-      case 'EUR': return '€';
-      case 'INR': return '₹';
-      case 'AUD': return 'A$';
-      case 'CAD': return 'C$';
-      default: return '£';
-    }
-  };
+  const filteredCreditSum = useMemo(() => {
+    return processedData.reduce((acc, curr) => acc + (curr.creditGbp || 0), 0);
+  }, [processedData]);
 
-  const formatNum = (val: number) => {
-    return new Intl.NumberFormat('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val);
-  };
+  const filteredGrossSum = useMemo(() => {
+    return processedData.reduce((acc, curr) => acc + (curr.grossGbp || 0), 0);
+  }, [processedData]);
+
+  const filteredTaxSum = useMemo(() => {
+    return processedData.reduce((acc, curr) => acc + (curr.taxGbp || 0), 0);
+  }, [processedData]);
+
+  const filteredNetBalance = useMemo(() => {
+    const isExpenseLedger = processedData.some(t => t.debitGbp > 0) && processedData.reduce((sum, t) => sum + t.debitGbp, 0) >= processedData.reduce((sum, t) => sum + t.creditGbp, 0);
+    return isExpenseLedger
+      ? Math.round((filteredDebitSum - filteredCreditSum) * 100) / 100
+      : Math.round((filteredCreditSum - filteredDebitSum) * 100) / 100;
+  }, [filteredCreditSum, filteredDebitSum, processedData]);
 
   const activeCurrencySymbol = getCurrencySymbol(processedData[0]?.currency || "GBP");
 
   const handleExportCSV = () => {
     try {
-      const headers = ["Date,Source,Description,Reference,Currency,Credit (GBP),Running Balance (GBP)"];
-      const rows = processedData.map(t => `"${t.date}","${t.source}","${t.desc}","${t.ref}","${t.currency}",${t.creditGbp},${t.runningBalance}`);
+      const headers = ["Date,Source,Description,Reference,Currency,Debit (GBP),Credit (GBP),Running Balance (GBP),Gross (GBP),Tax (GBP)"];
+      const rows = processedData.map(t => `"${t.date}","${t.source}","${t.desc}","${t.ref}","${t.currency}",${t.debitGbp || 0},${t.creditGbp || 0},${t.runningBalance},${t.grossGbp || 0},${t.taxGbp || 0}`);
       const csvContent = "data:text/csv;charset=utf-8," + [headers, ...rows].join("\n");
       const encodedUri = encodeURI(csvContent);
       const link = document.createElement("a");
@@ -590,7 +711,11 @@ export default function AccountTransactionsDrawer({
                     {activeStreamName} Transactions
                   </h2>
                   <div className="text-xs text-slate-500 font-medium mt-0.5">
-                    MI Health Ltd &nbsp;|&nbsp; For the period 1 April 2026 to 30 September 2026
+                    {salesData?.meta?.orgName || "Organization"} &nbsp;|&nbsp; {
+                      dateLabel && !dateLabel.includes("2026-") ? dateLabel :
+                      effectiveFromDate && effectiveToDate ? `For the period ${new Date(effectiveFromDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })} to ${new Date(effectiveToDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}` :
+                      "For the period 1 April 2026 to 30 September 2026"
+                    }
                   </div>
                 </div>
               </div>
@@ -623,50 +748,136 @@ export default function AccountTransactionsDrawer({
                     {renderColumnHeader('date', 'Date', 'center')}
                     {renderColumnHeader('source', 'Source', 'center')}
                     {renderColumnHeader('desc', 'Description', 'center')}
-                    {renderColumnHeader('ref', 'Reference', 'center')}
+                    {renderColumnHeader('ref', 'Reference / Invoice No.', 'center')}
                     {renderColumnHeader('currency', 'Currency', 'center')}
                     {renderColumnHeader('debitGbp', 'Debit', 'center')}
                     {renderColumnHeader('creditGbp', 'Credit', 'center')}
                     {renderColumnHeader('runningBalance', 'Running Balance', 'center')}
+                    {renderColumnHeader('grossGbp', 'Gross', 'center')}
+                    {renderColumnHeader('taxGbp', 'Tax', 'center')}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-slate-700 font-sans text-xs">
-                  {processedData.length === 0 ? (
+                  {isLoadingLedger ? (
+                    Array.from({ length: 6 }).map((_, sIdx) => (
+                      <tr key={`skel-${sIdx}`} className="animate-pulse border-b border-slate-100 bg-white">
+                        <td className="py-4 px-6"><div className="h-3.5 bg-slate-200/80 rounded-md w-20 mx-auto"></div></td>
+                        <td className="py-4 px-6"><div className="h-3.5 bg-slate-200/80 rounded-md w-24 mx-auto"></div></td>
+                        <td className="py-4 px-6"><div className="h-3.5 bg-slate-200/80 rounded-md w-48 mx-auto"></div></td>
+                        <td className="py-4 px-6"><div className="h-3.5 bg-slate-200/80 rounded-md w-20 mx-auto"></div></td>
+                        <td className="py-4 px-4"><div className="h-3.5 bg-slate-200/80 rounded-md w-10 mx-auto"></div></td>
+                        <td className="py-4 px-6"><div className="h-3.5 bg-slate-200/80 rounded-md w-16 mx-auto"></div></td>
+                        <td className="py-4 px-6"><div className="h-3.5 bg-slate-200/80 rounded-md w-16 mx-auto"></div></td>
+                        <td className="py-4 px-8"><div className="h-3.5 bg-slate-200/80 rounded-md w-20 mx-auto"></div></td>
+                        <td className="py-4 px-6"><div className="h-3.5 bg-slate-200/80 rounded-md w-16 mx-auto"></div></td>
+                        <td className="py-4 px-6"><div className="h-3.5 bg-slate-200/80 rounded-md w-16 mx-auto"></div></td>
+                      </tr>
+                    ))
+                  ) : processedData.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="py-12 text-center text-slate-400 italic font-medium">
+                      <td colSpan={10} className="py-12 text-center text-slate-400 italic font-medium">
                         No transactions match the selected filters
                       </td>
                     </tr>
                   ) : (
-                    processedData.map((row, idx) => (
-                      <tr 
-                        key={idx} 
-                        className={`transition-colors border-b border-slate-100 ${
-                          idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/70'
-                        } hover:bg-blue-50/70`}
-                      >
-                        <td className="py-3 px-6 text-center whitespace-nowrap text-slate-700 font-medium">{row.date}</td>
-                        <td className="py-3 px-6 text-center whitespace-nowrap text-slate-500">{row.source}</td>
-                        <td className="py-3 px-6 text-center font-semibold text-slate-900">{row.desc}</td>
-                        <td 
-                          className="py-3 px-6 text-center font-semibold text-blue-600 hover:text-blue-800 hover:underline cursor-pointer transition-colors" 
-                          title="Click to view full Xero invoice details & breakdown"
-                          onClick={() => handleOpenInvoice(row)}
+                    processedData.map((row, idx) => {
+                      const isBankTxn = row.source === 'Receive Money' || row.source === 'Spend Money';
+                      const isJournal = row.source === 'Manual Journal';
+                      const mainRef = row.ref || (isBankTxn ? row.source : '-');
+                      const actualInvNum = row.rawInvoice?.number || row.rawInvoice?.InvoiceNumber;
+                      const actualInvId = row.rawInvoice?.id || row.rawInvoice?.InvoiceID;
+                      
+                      let extraLabel: string | null = null;
+                      if (isBankTxn && actualInvId) {
+                        extraLabel = `Bank Txn ID: ${actualInvId}`;
+                      } else if (isJournal && actualInvId) {
+                        extraLabel = `Journal ID: ${actualInvId}`;
+                      } else if (actualInvNum && actualInvNum !== mainRef && mainRef !== '-') {
+                        extraLabel = (actualInvId && actualInvId !== actualInvNum && !mainRef.includes(actualInvId.toString()))
+                          ? `Inv #: ${actualInvNum} | Inv ID: ${actualInvId}`
+                          : `Inv #: ${actualInvNum}`;
+                      } else if (actualInvId && !mainRef.includes(actualInvId.toString())) {
+                        extraLabel = `Inv ID: ${actualInvId}`;
+                      }
+
+                      return (
+                        <tr 
+                          key={idx} 
+                          className={`transition-colors border-b border-slate-100 ${
+                            idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/70'
+                          } hover:bg-blue-50/70`}
                         >
-                          {row.ref}
-                        </td>
+                          <td className="py-3 px-6 text-center whitespace-nowrap text-slate-700 font-medium">{row.date}</td>
+                          <td className="py-3 px-6 text-center whitespace-nowrap text-slate-500">{row.source}</td>
+                          <td 
+                            className="py-3 px-6 text-center font-semibold text-slate-900 hover:text-blue-600 cursor-pointer transition-colors"
+                            onClick={() => handleOpenInvoice(row)}
+                            title="Click to view transaction details"
+                          >
+                            {row.desc}
+                          </td>
+                          <td 
+                            className="py-3 px-6 text-center font-semibold text-blue-600 hover:text-blue-800 hover:underline cursor-pointer transition-colors" 
+                            title="Click to view full Xero invoice details & breakdown"
+                            onClick={() => handleOpenInvoice(row)}
+                          >
+                            <div>{mainRef}</div>
+                            {extraLabel && (
+                              <div className="text-[10px] text-slate-500 font-mono font-normal flex items-center justify-center gap-1 mt-0.5">
+                                <span className="bg-blue-50/90 text-blue-700 border border-blue-200/70 px-1 py-0.2 rounded text-[9.5px]">
+                                  {extraLabel}
+                                </span>
+                              </div>
+                            )}
+                          </td>
                         <td className="py-3 px-4 text-center text-slate-400 text-[11px] font-medium">{row.currency}</td>
-                        <td className="py-3 px-6 text-center text-slate-300 font-normal">{row.debitGbp}</td>
+                        <td className="py-3 px-6 text-center text-slate-700 tabular-nums">
+                          {row.debitGbp > 0 ? (
+                            <span className="font-semibold text-red-600">
+                              <span className="text-slate-400 font-normal text-[11px] mr-1">{getCurrencySymbol(row.currency)}</span>
+                              {formatNum(row.debitGbp)}
+                            </span>
+                          ) : (
+                            <span className="text-slate-300">-</span>
+                          )}
+                        </td>
                         <td className="py-3 px-6 text-center font-semibold text-slate-900 tabular-nums">
-                          <span className="text-slate-400 font-normal text-[11px] mr-1">{getCurrencySymbol(row.currency)}</span>
-                          <span>{formatNum(row.creditGbp)}</span>
+                          {row.creditGbp > 0 ? (
+                            <>
+                              <span className="text-slate-400 font-normal text-[11px] mr-1">{getCurrencySymbol(row.currency)}</span>
+                              <span>{formatNum(row.creditGbp)}</span>
+                            </>
+                          ) : (
+                            <span className="text-slate-300 font-normal">-</span>
+                          )}
                         </td>
                         <td className="py-3 px-8 text-center font-bold text-slate-900 tabular-nums">
                           <span className="text-slate-400 font-normal text-[11px] mr-1">{getCurrencySymbol(row.currency)}</span>
                           <span>{formatNum(row.runningBalance)}</span>
                         </td>
+                        <td className="py-3 px-6 text-center font-semibold text-slate-900 tabular-nums">
+                          {row.grossGbp ? (
+                            <>
+                              <span className="text-slate-400 font-normal text-[11px] mr-1">{getCurrencySymbol(row.currency)}</span>
+                              <span>{formatNum(row.grossGbp)}</span>
+                            </>
+                          ) : (
+                            <span className="text-slate-300 font-normal">-</span>
+                          )}
+                        </td>
+                        <td className="py-3 px-6 text-center font-semibold text-slate-900 tabular-nums">
+                          {row.taxGbp ? (
+                            <>
+                              <span className="text-slate-400 font-normal text-[11px] mr-1">{getCurrencySymbol(row.currency)}</span>
+                              <span>{formatNum(row.taxGbp)}</span>
+                            </>
+                          ) : (
+                            <span className="text-slate-300 font-normal">-</span>
+                          )}
+                        </td>
                       </tr>
-                    ))
+                      );
+                    })
                   )}
                 </tbody>
 
@@ -676,14 +887,43 @@ export default function AccountTransactionsDrawer({
                     <td colSpan={5} className="py-4 px-6 text-center font-bold text-slate-800 uppercase tracking-wider text-xs">
                       Total {activeStreamName}
                     </td>
-                    <td className="py-4 px-6 text-center text-slate-400 font-normal">-</td>
+                    <td className="py-4 px-6 text-center font-extrabold text-red-600 tabular-nums text-sm">
+                      {filteredDebitSum > 0 ? (
+                        <>
+                          <span className="text-slate-500 font-bold text-xs mr-1">{activeCurrencySymbol}</span>
+                          <span>{formatNum(filteredDebitSum)}</span>
+                        </>
+                      ) : (
+                        <span className="text-slate-400 font-normal">-</span>
+                      )}
+                    </td>
                     <td className="py-4 px-6 text-center font-extrabold text-slate-900 tabular-nums text-sm">
                       <span className="text-slate-600 font-bold text-xs mr-1">{activeCurrencySymbol}</span>
-                      <span>{formatNum(filteredTotalSum)}</span>
+                      <span>{formatNum(filteredCreditSum)}</span>
                     </td>
                     <td className="py-4 px-8 text-center font-black text-slate-900 tabular-nums text-sm">
                       <span className="text-slate-600 font-bold text-xs mr-1">{activeCurrencySymbol}</span>
-                      <span>{formatNum(filteredTotalSum)}</span>
+                      <span>{formatNum(filteredNetBalance)}</span>
+                    </td>
+                    <td className="py-4 px-6 text-center font-extrabold text-slate-900 tabular-nums text-sm">
+                      {filteredGrossSum > 0 ? (
+                        <>
+                          <span className="text-slate-600 font-bold text-xs mr-1">{activeCurrencySymbol}</span>
+                          <span>{formatNum(filteredGrossSum)}</span>
+                        </>
+                      ) : (
+                        <span className="text-slate-400 font-normal">-</span>
+                      )}
+                    </td>
+                    <td className="py-4 px-6 text-center font-extrabold text-slate-900 tabular-nums text-sm">
+                      {filteredTaxSum > 0 ? (
+                        <>
+                          <span className="text-slate-600 font-bold text-xs mr-1">{activeCurrencySymbol}</span>
+                          <span>{formatNum(filteredTaxSum)}</span>
+                        </>
+                      ) : (
+                        <span className="text-slate-400 font-normal">-</span>
+                      )}
                     </td>
                   </tr>
                 </tfoot>
@@ -707,6 +947,7 @@ export default function AccountTransactionsDrawer({
       onCloseInvoice={handleCloseInvoice}
       onFocusInvoice={handleFocusInvoice}
       onUpdateInvoice={handleUpdateInvoice}
+      onOpenPayment={handleOpenPaymentDoc}
     />
     </>
   );

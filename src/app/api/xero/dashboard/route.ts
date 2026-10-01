@@ -48,8 +48,8 @@ export async function GET(req: NextRequest) {
     }
 
     // 4. Determine date parameters
-    const fromDateParam = searchParams.get('from_date');
-    const toDateParam = searchParams.get('to_date');
+    const fromDateParam = searchParams.get('from_date') || searchParams.get('fromDate');
+    const toDateParam = searchParams.get('to_date') || searchParams.get('toDate');
 
     let startDate: Date;
     let endDate: Date;
@@ -381,7 +381,27 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const bankAccounts = BankAccountMergeService.mergeAccounts(rawAccounts || [], balanceSheetAccounts);
+    let mergedBankAccounts = BankAccountMergeService.mergeAccounts(rawAccounts || [], balanceSheetAccounts);
+    if (mergedBankAccounts.length === 0 && balanceSheetAccounts.length > 0) {
+      mergedBankAccounts = balanceSheetAccounts.map((a, i) => ({
+        accountId: `BS-${i}`,
+        accountName: a.name,
+        accountCode: 'BANK',
+        currency: 'GBP',
+        balance: a.balance,
+        status: 'ACTIVE',
+        type: 'BANK'
+      }));
+    }
+
+    mergedBankAccounts = mergedBankAccounts.map((acc) => ({
+      ...acc,
+      balance: parseFloat((acc.balance || 0).toFixed(2))
+    }));
+
+    const computedNetTotalCash = mergedBankAccounts.reduce((sum, a) => sum + (a.balance || 0), 0);
+    const finalTotalCash = parseFloat(computedNetTotalCash.toFixed(2));
+    const bankAccounts = mergedBankAccounts;
 
     // 9b. Fetch and parse Contacts to calculate customers, suppliers, and total outstanding balances
     let rawContacts = await db.getReport(tenantId, 'Contacts');
@@ -527,6 +547,34 @@ export async function GET(req: NextRequest) {
     // Sort by most overdue first (highest days), then take top 5
     overdueList.sort((a, b) => b.days - a.days);
     const topOverdueInvoices = overdueList.slice(0, 5);
+
+    // 13b. Fetch & Calculate Credit Notes summary
+    let cachedCreditNotes = await db.getReport(tenantId, 'CreditNotes');
+    if (!cachedCreditNotes && isConnected) {
+      try {
+        const rawCN = await fetchXeroResource(accessToken, xeroTenantId, 'CreditNotes');
+        if (rawCN && Array.isArray(rawCN)) {
+          cachedCreditNotes = rawCN;
+          await db.saveReport(tenantId, 'CreditNotes', cachedCreditNotes);
+        }
+      } catch (err: any) {
+        console.error('Failed to sync CreditNotes for dashboard:', err.message);
+      }
+    }
+
+    let creditNotesCount = 0;
+    let creditNotesTotal = 0;
+    if (Array.isArray(cachedCreditNotes)) {
+      for (const cnItem of cachedCreditNotes) {
+        if (cnItem.Status !== 'DELETED' && cnItem.Status !== 'VOIDED') {
+          const cnDate = parseXeroDate(cnItem.Date);
+          if (cnDate && cnDate >= startDate && cnDate <= endDate) {
+            creditNotesCount++;
+            creditNotesTotal += (cnItem.Total || cnItem.RemainingCredit || 0);
+          }
+        }
+      }
+    }
 
     // Fetch cached organisation details
     let organisation = await db.getReport(tenantId, 'Organisation');
@@ -702,13 +750,15 @@ export async function GET(req: NextRequest) {
       grossProfit: plSummary.grossProfit,
       expenses: plSummary.operatingExpenses,
       plRevenue: plSummary.revenue,
+      creditNotesCount,
+      creditNotesTotal,
       ytdRevenue: ytdPlSummary.revenue,
       ytdExpenses: ytdPlSummary.operatingExpenses,
       ytdNetProfit: ytdPlSummary.netProfit,
       invoiceRevenueMTD,
       invoiceGrowthPercent,
       netProfitGrowthPercent,
-      totalCash,
+      totalCash: finalTotalCash,
       currentAssets,
       totalAssets,
       totalLiabilities,
