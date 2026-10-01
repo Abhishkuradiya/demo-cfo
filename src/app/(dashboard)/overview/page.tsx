@@ -944,22 +944,7 @@ export default function OverviewPage() {
         </div>
       </div>
 
-      {/* Time Period & Calculation Transparency Box */}
-      <div className="bg-cyan-950/30 border border-cyan-800/40 rounded-xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 text-xs">
-        <div className="flex items-center gap-2 text-cyan-200">
-          <LayoutDashboard className="h-4 w-4 text-[#00b7e2] shrink-0" />
-          <div>
-            <span className="font-bold text-white">Consolidated Reporting Window: </span>
-            <span className="text-cyan-300 font-semibold">Trailing 12 Months (TTM Cumulative Ledger)</span>
-            <span className="text-slate-400 ml-2">(Live AR/AP Invoices, Bank Cash Balances & Multi-Channel Connectors)</span>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 text-slate-300">
-          <span className="text-[11px] px-2.5 py-0.5 rounded-md bg-slate-900 border border-slate-700 text-slate-300 font-mono">
-            Source: Live Xero Accounting API & PostgreSQL Sync
-          </span>
-        </div>
-      </div>
+
 
       {/* 1. Metric Cards Row */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
