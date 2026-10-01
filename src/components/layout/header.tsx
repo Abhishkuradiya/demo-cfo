@@ -275,7 +275,7 @@ export function Header() {
       case '/overview':
       case '/':
         return {
-          title: "Xero Analytics",
+          title: "Dashboard Overview",
           subtitle: "Real-time overview of your Xero organization"
         };
       case '/sales':
@@ -619,7 +619,7 @@ export function Header() {
             )}
 
             {/* Date Range Picker for Overview / Reports (Hidden on pages with dedicated report date pickers like Balance Sheet, P&L, Trial Balance & Cash Flow) */}
-            {(pathname === '/overview' || isSales || (pathname.startsWith('/reports') && pathname !== '/reports/balance-sheet' && pathname !== '/reports/trial-balance' && pathname !== '/reports/profit-and-loss' && pathname !== '/reports/cash-flow')) && (
+            {(pathname === '/overview' || pathname === '/xero-dashboard' || isSales || (pathname.startsWith('/reports') && pathname !== '/reports/balance-sheet' && pathname !== '/reports/trial-balance' && pathname !== '/reports/profit-and-loss' && pathname !== '/reports/cash-flow')) && (
               <div className="relative shrink-0" ref={datePickerRef}>
                 <button
                   onClick={() => setShowDatePicker(!showDatePicker)}
