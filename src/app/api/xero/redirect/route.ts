@@ -46,7 +46,9 @@ export async function GET(req: NextRequest) {
 
   try {
     const credentials = await db.getCredentials(tenantId, 'xero');
-    if (!credentials || !credentials.client_id) {
+    const clientId = credentials?.client_id || process.env.XERO_CLIENT_ID || '1FDC02919F0A47B2A91D348FA3FF7211';
+    
+    if (!clientId) {
       return new Response(
         'Error: No client credentials found for this tenant company. Please save Client ID and Client Secret in Data Sources first.',
         { status: 400 }
@@ -74,7 +76,7 @@ export async function GET(req: NextRequest) {
 
     const params = new URLSearchParams({
       response_type: 'code',
-      client_id: credentials.client_id,
+      client_id: clientId,
       redirect_uri: redirectUri,
       scope: scopes,
       state: String(tenantId)

@@ -55,6 +55,7 @@ export default function DataSourcesPage() {
 
   // Xero Modal & Credentials Configuration States
   const [isXeroModalOpen, setIsXeroModalOpen] = useState(false);
+  const [xeroTab, setXeroTab] = useState<'oauth' | 'manual'>('oauth');
   const [showClientId, setShowClientId] = useState(false);
   const [showClientSecret, setShowClientSecret] = useState(false);
   const [oauthStep, setOauthStep] = useState<'idle' | 'redirecting'>('idle');
@@ -1324,105 +1325,157 @@ export default function DataSourcesPage() {
                   <img src="/xero_logo.svg" alt="Xero Logo" className="h-full w-full object-contain" />
                 </div>
                 <div>
-                  <h3 className="text-[14px] font-bold text-slate-800 leading-tight">Xero Developer Configuration</h3>
-                  <p className="text-[9.5px] text-slate-400 font-semibold mt-0.5">Setup application credentials to sync organisation records.</p>
+                  <h3 className="text-[14px] font-bold text-slate-800 leading-tight">Xero Integration Center</h3>
+                  <p className="text-[9.5px] text-slate-400 font-semibold mt-0.5">Authorize or configure application credentials to sync organisation records.</p>
                 </div>
               </div>
- 
-              {/* Fields */}
-              <div className="space-y-4 text-[10.5px] font-bold text-slate-700">
-                {/* Connections Badge count */}
-                <div className="bg-slate-50 border border-slate-100 rounded-lg p-2.5 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Info className="h-4 w-4 text-slate-400 shrink-0" />
-                    <span>Connection Status</span>
-                  </div>
-                  <span className="text-[9px] bg-slate-200 text-slate-650 px-2 py-0.5 rounded-full">
-                    {connectors.find(c => c.id === 'xero')?.status === 'Connected' ? '1 of 5 connections active' : '0 of 5 connections active'}
-                  </span>
-                </div>
- 
-                {/* Redirect URI (OAuth Callback) - READ-ONLY & COPYABLE */}
-                <div className="space-y-1.5">
-                  <div className="flex justify-between items-center">
-                    <span>Redirect URI (OAuth Callback)</span>
-                    <span className="text-[9px] text-[#0064eb] font-semibold">Copy this URL</span>
-                  </div>
-                  <div className="relative flex items-center">
-                    <input
-                      type="text"
-                      readOnly
-                      value={xeroConfig.redirectUri}
-                      className="w-full bg-slate-100 border border-slate-200 rounded-lg pl-3 pr-12 py-1.5 text-[10px] font-medium text-slate-500 focus:outline-none h-8 select-all"
-                    />
-                    <button 
-                      onClick={() => copyToClipboard(xeroConfig.redirectUri)}
-                      className="absolute right-1.5 p-1 text-slate-400 hover:text-slate-650 rounded cursor-pointer outline-none"
-                      title="Copy Redirect URI"
-                    >
-                      <Copy className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                  <p className="text-[8.5px] text-slate-400 font-semibold leading-normal">
-                    Copy this callback URL and paste it under **Redirect URIs** inside your Xero Developer Portal app settings.
-                  </p>
-                </div>
- 
-                {/* Client ID - USER INPUT */}
-                <div className="space-y-1.5">
-                  <span>Client ID</span>
-                  <div className="relative flex items-center">
-                    <input
-                      type={showClientId ? 'text' : 'password'}
-                      value={xeroConfig.clientId}
-                      onChange={(e) => setXeroConfig(prev => ({ ...prev, clientId: e.target.value }))}
-                      placeholder="Enter Client ID (obtained from Xero Developer Portal)"
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-3 pr-12 py-1.5 text-[10px] font-medium tracking-wide focus:outline-none focus:border-primary/50 h-8"
-                    />
-                    <button 
-                      onClick={() => setShowClientId(!showClientId)}
-                      className="absolute right-1.5 p-1 text-slate-400 hover:text-slate-650 rounded cursor-pointer outline-none"
-                    >
-                      {showClientId ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
-                  </div>
-                </div>
- 
-                {/* Client Secret - USER INPUT */}
-                <div className="space-y-1.5">
-                  <span>Client Secret</span>
-                  <div className="relative flex items-center">
-                    <input
-                      type={showClientSecret ? 'text' : 'password'}
-                      value={xeroConfig.clientSecret}
-                      onChange={(e) => setXeroConfig(prev => ({ ...prev, clientSecret: e.target.value }))}
-                      placeholder="Enter Client Secret (generated in Xero Developer Portal)"
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-3 pr-12 py-1.5 text-[10px] font-medium tracking-wide focus:outline-none focus:border-primary/50 h-8"
-                    />
-                    <button 
-                      onClick={() => setShowClientSecret(!showClientSecret)}
-                      className="absolute right-1.5 p-1 text-slate-400 hover:text-slate-650 rounded cursor-pointer outline-none"
-                    >
-                      {showClientSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
-                  </div>
-                </div>
- 
-                {/* Launcher Login URL (Optional) */}
-                <div className="space-y-1.5">
-                  <span>Login URL for launcher (optional)</span>
-                  <input
-                    type="text"
-                    value={xeroConfig.launcherUrl}
-                    onChange={(e) => setXeroConfig(prev => ({ ...prev, launcherUrl: e.target.value }))}
-                    placeholder="Enter launcher login redirection URL"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-[10px] font-medium focus:outline-none focus:border-primary/50 h-8"
-                  />
-                  <p className="text-[8.5px] text-slate-400 font-semibold mt-0.5 leading-none">
-                    URL will be used by launcher to log in to app. <span className="text-[#0064eb] cursor-pointer hover:underline">Find out about launcher</span>
-                  </p>
-                </div>
+
+              {/* Mode Switcher Tabs */}
+              <div className="flex bg-slate-100 p-1 rounded-xl text-xs font-bold text-slate-600">
+                <button
+                  type="button"
+                  onClick={() => setXeroTab('oauth')}
+                  className={cn(
+                    "flex-1 py-2 rounded-lg transition text-center cursor-pointer flex items-center justify-center gap-1.5",
+                    xeroTab === 'oauth' ? "bg-white text-blue-600 shadow-2xs" : "hover:text-slate-900"
+                  )}
+                >
+                  <Link2 className="h-3.5 w-3.5 text-blue-600" />
+                  <span>1-Click Direct OAuth</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setXeroTab('manual')}
+                  className={cn(
+                    "flex-1 py-2 rounded-lg transition text-center cursor-pointer flex items-center justify-center gap-1.5",
+                    xeroTab === 'manual' ? "bg-white text-blue-600 shadow-2xs" : "hover:text-slate-900"
+                  )}
+                >
+                  <Settings className="h-3.5 w-3.5" />
+                  <span>Custom App Credentials</span>
+                </button>
               </div>
+
+              {xeroTab === 'oauth' ? (
+                /* Mode 1: 1-Click OAuth Direct Connect Card */
+                <div className="bg-slate-50/80 border border-slate-200/90 rounded-2xl p-6 text-center space-y-5">
+                  <div className="flex items-center justify-center gap-3">
+                    <div className="h-12 w-12 rounded-2xl bg-white border border-slate-200 p-2 shadow-2xs flex items-center justify-center">
+                      <img src="/xero_logo.svg" alt="Xero" className="h-full w-full object-contain" />
+                    </div>
+                    <span className="text-slate-300 font-black text-lg">⇄</span>
+                    <div className="h-12 w-12 rounded-2xl bg-[#0064eb] text-white font-black flex items-center justify-center text-xs shadow-2xs">
+                      CFO
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <h4 className="text-sm font-black text-slate-900">Direct Xero OAuth Authorization</h4>
+                    <p className="text-xs text-slate-500 font-medium leading-relaxed max-w-md mx-auto">
+                      Click below to open Xero's official authorization page (<code className="text-blue-600 font-mono font-bold">login.xero.com</code>). Log in with your Xero account, choose your organization (e.g. <strong>MI Health Ltd</strong>), and click <strong>Allow Access</strong> to connect directly.
+                    </p>
+                  </div>
+
+                  <div className="pt-2 max-w-sm mx-auto space-y-2.5">
+                    <button
+                      type="button"
+                      onClick={quickReconnect}
+                      className="w-full py-3 px-5 rounded-xl bg-[#00b7e2] hover:bg-[#009ec3] text-white font-extrabold text-xs shadow-md shadow-blue-500/20 transition flex items-center justify-center gap-2 cursor-pointer active:scale-95"
+                    >
+                      <img src="/xero_logo.svg" alt="Xero" className="h-4 w-4 filter brightness-0 invert" />
+                      <span>Connect with Xero (OAuth 2.0)</span>
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </button>
+                    
+                    <p className="text-[10px] text-slate-400 font-semibold">
+                      ✓ Uses Official Xero OAuth 2.0 API • 256-bit Encrypted Token Storage
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                /* Mode 2: Custom App Credentials Form */
+                <div className="space-y-4 text-[10.5px] font-bold text-slate-700">
+                  {/* Connections Badge count */}
+                  <div className="bg-slate-50 border border-slate-100 rounded-lg p-2.5 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Info className="h-4 w-4 text-slate-400 shrink-0" />
+                      <span>Connection Status</span>
+                    </div>
+                    <span className="text-[9px] bg-slate-200 text-slate-650 px-2 py-0.5 rounded-full">
+                      {connectors.find(c => c.id === 'xero')?.status === 'Connected' ? '1 of 5 connections active' : '0 of 5 connections active'}
+                    </span>
+                  </div>
+
+                  {/* Redirect URI (OAuth Callback) - READ-ONLY & COPYABLE */}
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between items-center">
+                      <span>Redirect URI (OAuth Callback)</span>
+                      <span className="text-[9px] text-[#0064eb] font-semibold">Copy this URL</span>
+                    </div>
+                    <div className="relative flex items-center">
+                      <input
+                        type="text"
+                        readOnly
+                        value={xeroConfig.redirectUri}
+                        className="w-full bg-slate-100 border border-slate-200 rounded-lg pl-3 pr-12 py-1.5 text-[10px] font-medium text-slate-500 focus:outline-none h-8 select-all"
+                      />
+                      <button 
+                        type="button"
+                        onClick={() => copyToClipboard(xeroConfig.redirectUri)}
+                        className="absolute right-1.5 p-1 text-slate-400 hover:text-slate-650 rounded cursor-pointer outline-none"
+                        title="Copy Redirect URI"
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                    <p className="text-[8.5px] text-slate-400 font-semibold leading-normal">
+                      Copy this callback URL and paste it under **Redirect URIs** inside your Xero Developer Portal app settings.
+                    </p>
+                  </div>
+
+                  {/* Client ID - USER INPUT */}
+                  <div className="space-y-1.5">
+                    <span>Client ID</span>
+                    <div className="relative flex items-center">
+                      <input
+                        type={showClientId ? 'text' : 'password'}
+                        value={xeroConfig.clientId}
+                        onChange={(e) => setXeroConfig(prev => ({ ...prev, clientId: e.target.value }))}
+                        placeholder="Enter Client ID (obtained from Xero Developer Portal)"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-3 pr-12 py-1.5 text-[10px] font-medium tracking-wide focus:outline-none focus:border-primary/50 h-8"
+                      />
+                      <button 
+                        type="button"
+                        onClick={() => setShowClientId(!showClientId)}
+                        className="absolute right-1.5 p-1 text-slate-400 hover:text-slate-650 rounded cursor-pointer outline-none"
+                      >
+                        {showClientId ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Client Secret - USER INPUT */}
+                  <div className="space-y-1.5">
+                    <span>Client Secret</span>
+                    <div className="relative flex items-center">
+                      <input
+                        type={showClientSecret ? 'text' : 'password'}
+                        value={xeroConfig.clientSecret}
+                        onChange={(e) => setXeroConfig(prev => ({ ...prev, clientSecret: e.target.value }))}
+                        placeholder="Enter Client Secret (generated in Xero Developer Portal)"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-3 pr-12 py-1.5 text-[10px] font-medium tracking-wide focus:outline-none focus:border-primary/50 h-8"
+                      />
+                      <button 
+                        type="button"
+                        onClick={() => setShowClientSecret(!showClientSecret)}
+                        className="absolute right-1.5 p-1 text-slate-400 hover:text-slate-650 rounded cursor-pointer outline-none"
+                      >
+                        {showClientSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
  
             {/* Right Guide Column (40% width) */}
