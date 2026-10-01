@@ -29,8 +29,8 @@ export async function GET(req: NextRequest) {
  
   try {
     const credentials = await db.getCredentials(tenantId, 'xero');
-    const clientId = credentials?.client_id || process.env.XERO_CLIENT_ID || '1FDC02919F0A47B2A91D348FA3FF7211';
-    const clientSecret = credentials?.client_secret || process.env.XERO_CLIENT_SECRET || 'aY8K5J0Y0Q4K8L9M0N1P2Q3R4S5T6U7V';
+    const clientId = credentials?.client_id || process.env.XERO_CLIENT_ID || 'C930279BD01B4AB6AAEC93E6C24ABE73';
+    const clientSecret = credentials?.client_secret || process.env.XERO_CLIENT_SECRET || 'Fahq-95hnCZB0h4z3nbeFQ0p_86Kfm27m_h5UEZHg-hGohNZ';
 
     if (!clientId || !clientSecret) {
       return new Response('Error: Client credentials not found for this tenant.', { status: 400 });

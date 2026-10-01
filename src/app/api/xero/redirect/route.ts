@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const credentials = await db.getCredentials(tenantId, 'xero');
-    const clientId = credentials?.client_id || process.env.XERO_CLIENT_ID || '1FDC02919F0A47B2A91D348FA3FF7211';
+    const clientId = credentials?.client_id || process.env.XERO_CLIENT_ID || 'C930279BD01B4AB6AAEC93E6C24ABE73';
     
     if (!clientId) {
       return new Response(
