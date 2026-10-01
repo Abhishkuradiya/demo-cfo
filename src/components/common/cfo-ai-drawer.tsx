@@ -37,6 +37,77 @@ export function CFOAiDrawer() {
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [isAllowed, setIsAllowed] = useState<boolean>(true);
+
+  useEffect(() => {
+    const checkDrawerPermission = async () => {
+      if (typeof window === 'undefined') return;
+
+      // 1. Try reading from localStorage cache
+      try {
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && key.startsWith('cfo_menu_permissions_')) {
+            const userEmailFromKey = key.replace('cfo_menu_permissions_', '').trim();
+            if (userEmailFromKey === 'admin@virtualcfo.com') {
+              setIsAllowed(true);
+              return;
+            }
+            const val = localStorage.getItem(key);
+            if (val) {
+              const parsed = JSON.parse(val);
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                const drawerEntry = parsed.find((p: any) => p.menu_key === '/cfo-ai-drawer' || p.menu_key === 'cfo_ai_drawer');
+                if (drawerEntry !== undefined) {
+                  setIsAllowed(drawerEntry.is_enabled);
+                  return;
+                }
+              }
+            }
+          }
+        }
+      } catch (e) {}
+
+      // 2. Fetch from menu-permissions API
+      try {
+        const res = await fetch('/api/admin/menu-permissions');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.isSuperAdmin || data.userEmail === 'admin@virtualcfo.com') {
+            setIsAllowed(true);
+            return;
+          }
+          if (data.permissions && Array.isArray(data.permissions)) {
+            const userEmail = (data.userEmail || '').toLowerCase().trim();
+            const userPerms = data.permissions.filter((p: any) => p.role && p.role.toLowerCase().trim() === `user:${userEmail}`);
+            if (userPerms.length > 0) {
+              const drawerEntry = userPerms.find((p: any) => p.menu_key === '/cfo-ai-drawer' || p.menu_key === 'cfo_ai_drawer');
+              if (drawerEntry !== undefined) {
+                setIsAllowed(drawerEntry.is_enabled);
+                return;
+              }
+            }
+            const globalEntry = data.permissions.find((p: any) => p.role && p.role.toUpperCase() === 'ALL' && (p.menu_key === '/cfo-ai-drawer' || p.menu_key === 'cfo_ai_drawer'));
+            if (globalEntry !== undefined) {
+              setIsAllowed(globalEntry.is_enabled);
+              return;
+            }
+          }
+        }
+      } catch (e) {}
+    };
+
+    checkDrawerPermission();
+
+    const handlePermissionUpdate = () => {
+      checkDrawerPermission();
+    };
+
+    window.addEventListener('cfo-menu-permissions-updated', handlePermissionUpdate);
+    return () => {
+      window.removeEventListener('cfo-menu-permissions-updated', handlePermissionUpdate);
+    };
+  }, []);
 
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
@@ -146,6 +217,10 @@ export function CFOAiDrawer() {
     "Show summary of customer receipts",
     "What if we delay supplier payments?"
   ];
+
+  if (!isAllowed) {
+    return null;
+  }
 
   return (
     <>

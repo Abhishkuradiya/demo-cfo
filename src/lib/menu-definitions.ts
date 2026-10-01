@@ -112,6 +112,7 @@ export const SYSTEM_NAV_DEFINITIONS: MenuDefinitionSection[] = [
   {
     title: 'System & Automation',
     items: [
+      { name: 'CFO AI Assistant (Side Drawer)', href: '/cfo-ai-drawer' },
       { name: 'Automation Cockpit', href: '/automation' },
       { name: 'Subscription & Billing', href: '/subscription' },
       { name: 'Connectors & Sources', href: '/data-sources' },
