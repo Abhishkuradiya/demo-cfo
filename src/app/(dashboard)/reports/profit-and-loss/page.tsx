@@ -5,6 +5,7 @@ import Link from 'next/link';
 import dynamic from 'next/dynamic';
 
 import { FormattedDatePicker } from '@/components/ui/formatted-date-picker';
+import { FinancialDateRangePicker } from '@/components/ui/financial-date-range-picker';
 
 const ReactECharts = dynamic(() => import('echarts-for-react'), { ssr: false });
 import { 
@@ -1618,11 +1619,14 @@ export default function ProfitAndLossPage() {
               </button>
             </div>
 
-            <div className="flex items-center gap-1.5">
-              <FormattedDatePicker value={fromDate} onChange={setFromDate} label="From:" />
-              <span className="text-slate-400 text-xs font-bold">-</span>
-              <FormattedDatePicker value={toDate} onChange={setToDate} label="To:" />
-            </div>
+            <FinancialDateRangePicker
+              fromDate={fromDate}
+              toDate={toDate}
+              onChange={(newFrom, newTo) => {
+                setFromDate(newFrom);
+                setToDate(newTo);
+              }}
+            />
 
             <button
               onClick={fetchProfitAndLoss}

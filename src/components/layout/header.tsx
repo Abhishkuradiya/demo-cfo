@@ -329,6 +329,26 @@ export function Header() {
           title: "Financial Reports",
           subtitle: "Balance sheets, cash flow statements, and profit & loss logs"
         };
+      case '/reports/profit-and-loss':
+        return {
+          title: "Profit & Loss Statement",
+          subtitle: "Consolidated income statement, turnover, cost of sales, and operating expenses"
+        };
+      case '/reports/balance-sheet':
+        return {
+          title: "Balance Sheet",
+          subtitle: "Real-time view of assets, liabilities, and equity"
+        };
+      case '/reports/cash-flow':
+        return {
+          title: "Cash Flow Statement",
+          subtitle: "Operating, investing, and financing cash movement"
+        };
+      case '/reports/trial-balance':
+        return {
+          title: "Trial Balance",
+          subtitle: "Summary of debit and credit balances for all chart of accounts"
+        };
       case '/ai-insights':
         return {
           title: "AI CFO Insights",
