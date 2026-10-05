@@ -12,9 +12,11 @@ export async function GET(request: Request) {
     let userEmail = searchParams.get('user_email') || searchParams.get('userEmail') || undefined;
 
     let sessionUserEmail = '';
+    let isSuperAdmin = false;
     try {
       const cookieStore = await cookies();
-      const sessionToken = cookieStore.get('session_token')?.value || cookieStore.get('admin_session_token')?.value;
+      const adminToken = cookieStore.get('admin_session_token')?.value;
+      const sessionToken = cookieStore.get('session_token')?.value || adminToken;
       if (sessionToken) {
         const session = await db.getSession(sessionToken);
         if (session && session.email) {
@@ -22,13 +24,15 @@ export async function GET(request: Request) {
           if (!userEmail) {
             userEmail = sessionUserEmail;
           }
+          if (adminToken || (session as any)?.role === 'SUPERADMIN') {
+            isSuperAdmin = true;
+          }
         }
       }
     } catch (e) {}
 
     const permissions = await db.getMenuPermissions(role, userEmail);
     const effectiveEmail = (userEmail || sessionUserEmail || '').toLowerCase().trim();
-    const isSuperAdmin = effectiveEmail === 'admin@virtualcfo.com' || effectiveEmail.includes('rajan') || effectiveEmail.includes('iamrajan');
 
     return NextResponse.json({
       success: true,

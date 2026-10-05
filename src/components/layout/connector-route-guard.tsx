@@ -28,8 +28,9 @@ function getNormalizedMenuKey(href: string): string {
 }
 
 function isMenuAllowed(href: string, permissions: PermissionEntry[], userEmail: string, isSuperAdmin: boolean): boolean {
+  if (isSuperAdmin) return true;
+
   const email = (userEmail || '').toLowerCase().trim();
-  if (isSuperAdmin || email === 'admin@virtualcfo.com' || email.includes('rajan') || email.includes('iamrajan')) return true;
 
   // Normalize path (e.g. /settings/account-mappings -> /settings, /cfo-copilot/chat_123 -> /cfo-copilot)
   const normalizedHref = getNormalizedMenuKey(href);
@@ -40,12 +41,7 @@ function isMenuAllowed(href: string, permissions: PermissionEntry[], userEmail: 
     const roleLower = (p.role || '').toLowerCase().trim();
     if (!roleLower.startsWith('user:')) return false;
     const roleEmail = roleLower.replace('user:', '').trim();
-    if (!roleEmail) return false;
-    if (email) {
-      if (roleEmail === email) return true;
-      if (roleEmail.split('@')[0] === email.split('@')[0]) return true;
-    }
-    return false;
+    return roleEmail && email && roleEmail === email;
   });
 
   if (userPermissions.length > 0) {

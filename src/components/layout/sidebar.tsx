@@ -362,13 +362,8 @@ export function Sidebar() {
     const currentEmail = storeEmail || sessionEmail;
     const userRole = (user?.role || '').toUpperCase().trim();
 
-    // Superadmin users always see all menus (admin@virtualcfo.com or isSuperAdmin flag or rajan)
-    const isSuperAdminUser = isSuperAdmin || 
-      userRole === 'SUPERADMIN' || 
-      currentEmail === 'admin@virtualcfo.com' || 
-      currentEmail.includes('rajan') || 
-      currentEmail.includes('iamrajan');
-
+    // Superadmin users (from server session flag or SUPERADMIN role)
+    const isSuperAdminUser = isSuperAdmin || userRole === 'SUPERADMIN';
     if (isSuperAdminUser) return true;
 
     // IF PERMISSIONS ARE STILL LOADING & NO CACHE EXISTS:
@@ -380,18 +375,12 @@ export function Sidebar() {
       return true;
     }
 
-    // 1. User-specific lookup: match exact email OR email prefix (e.g., 'iamrajan0000')
+    // 1. User-specific lookup: match exact email
     const userPermissions = menuPermissions.filter(p => {
       const roleLower = p.role.toLowerCase().trim();
       if (!roleLower.startsWith('user:')) return false;
       const roleEmail = roleLower.replace('user:', '').trim();
-      if (!roleEmail) return false;
-
-      if (currentEmail) {
-        if (roleEmail === currentEmail) return true;
-        if (roleEmail.split('@')[0] === currentEmail.split('@')[0]) return true;
-      }
-      return false;
+      return roleEmail && currentEmail && roleEmail === currentEmail;
     });
 
     const normalizedHref = href.startsWith('/cfo-copilot') ? '/cfo-copilot' 
