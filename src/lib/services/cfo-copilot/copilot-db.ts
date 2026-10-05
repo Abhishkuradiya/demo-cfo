@@ -26,6 +26,47 @@ export interface ChatSession {
   lastMessage?: string;
 }
 
+export interface CfoConversationContext {
+  conversationId: string;
+  tenantId: string | number;
+  userId?: string;
+  recentUserMessages: string[];
+  recentAssistantResponses: string[];
+  activeTopic?: string;
+  activeMetrics?: string[];
+  activeEntities?: {
+    customers?: string[];
+    vendors?: string[];
+    invoices?: string[];
+    accounts?: string[];
+    glCategories?: string[];
+    bankAccounts?: string[];
+  };
+  activePeriods?: {
+    startDate: string;
+    endDate: string;
+    label: string;
+  };
+  activeComparisonPeriod?: {
+    startDate: string;
+    endDate: string;
+    label: string;
+  };
+  relevantFacts: string[];
+  relevantCalculations: string[];
+  activeHypotheses: Array<{
+    id: string;
+    statement: string;
+    status: 'TESTING' | 'SUPPORTED' | 'REJECTED';
+    evidence: string[];
+  }>;
+  unresolvedQuestions: string[];
+  lastToolResultsSummary?: string;
+  lastConfidence?: 'HIGH' | 'MEDIUM' | 'LOW';
+  dataQuality?: 'COMPLETE' | 'PARTIAL' | 'NO_DATA' | 'ZERO_CONFIRMED';
+  updatedAt: string;
+}
+
 const DB_PATH = path.join(process.cwd(), 'src', 'data', 'copilot_db.json');
 
 function ensureDbFile(): void {
@@ -37,7 +78,8 @@ function ensureDbFile(): void {
     if (!fs.existsSync(DB_PATH)) {
       const initialData = {
         sessions: [],
-        messages: []
+        messages: [],
+        contexts: []
       };
       fs.writeFileSync(DB_PATH, JSON.stringify(initialData, null, 2), 'utf8');
     }
@@ -46,22 +88,23 @@ function ensureDbFile(): void {
   }
 }
 
-function readCopilotDb(): { sessions: ChatSession[]; messages: ChatMessage[] } {
+function readCopilotDb(): { sessions: ChatSession[]; messages: ChatMessage[]; contexts?: CfoConversationContext[] } {
   ensureDbFile();
   try {
     const content = fs.readFileSync(DB_PATH, 'utf8');
     const parsed = JSON.parse(content);
     return {
       sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [],
-      messages: Array.isArray(parsed.messages) ? parsed.messages : []
+      messages: Array.isArray(parsed.messages) ? parsed.messages : [],
+      contexts: Array.isArray(parsed.contexts) ? parsed.contexts : []
     };
   } catch (err) {
     console.error('[Copilot DB] Error reading db:', err);
-    return { sessions: [], messages: [] };
+    return { sessions: [], messages: [], contexts: [] };
   }
 }
 
-function writeCopilotDb(data: { sessions: ChatSession[]; messages: ChatMessage[] }): void {
+function writeCopilotDb(data: { sessions: ChatSession[]; messages: ChatMessage[]; contexts?: CfoConversationContext[] }): void {
   ensureDbFile();
   try {
     fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2), 'utf8');
@@ -159,3 +202,28 @@ export function saveChatMessage(
   writeCopilotDb(db);
   return message;
 }
+
+export function getConversationContext(chatId: string, tenantId: string | number): CfoConversationContext | undefined {
+  const db = readCopilotDb();
+  const ctx = (db.contexts || []).find(c => c.conversationId === chatId);
+  if (!ctx) return undefined;
+  if (String(ctx.tenantId) !== String(tenantId)) {
+    const err = new Error(`403: Forbidden - Access denied to conversation context of tenant ${ctx.tenantId} for user of tenant ${tenantId}.`);
+    (err as any).statusCode = 403;
+    throw err;
+  }
+  return ctx;
+}
+
+export function saveConversationContext(context: CfoConversationContext): void {
+  const db = readCopilotDb();
+  if (!db.contexts) db.contexts = [];
+  const idx = db.contexts.findIndex(c => c.conversationId === context.conversationId);
+  if (idx >= 0) {
+    db.contexts[idx] = context;
+  } else {
+    db.contexts.push(context);
+  }
+  writeCopilotDb(db);
+}
+

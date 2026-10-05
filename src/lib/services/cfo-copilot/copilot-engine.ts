@@ -1,5 +1,5 @@
 import { executeCfoTool, getCfoTool, getLlmToolsSchema, ToolAliases, ToolExecutionContext } from './copilot-tools';
-import { saveChatMessage, getChatMessages } from './copilot-db';
+import { saveChatMessage, getChatMessages, getConversationContext, saveConversationContext, CfoConversationContext } from './copilot-db';
 import { db } from '@/lib/db';
 import fs from 'fs';
 import path from 'path';
@@ -13,6 +13,39 @@ export interface ToolActivityLog {
 }
 
 const LOCAL_SETTINGS_FILE = path.join(process.cwd(), 'src', 'data', 'system_settings.json');
+
+export function formatContextSummary(ctx: CfoConversationContext): string {
+  const parts: string[] = [];
+  parts.push(`==================================================`);
+  parts.push(`CFO CONVERSATION CONTEXT & FINANCIAL MEMORY (Prior Turns)`);
+  parts.push(`==================================================`);
+  if (ctx.activeTopic) parts.push(`• Active Topic: ${ctx.activeTopic}`);
+  if (ctx.activeMetrics && ctx.activeMetrics.length > 0) parts.push(`• Active Financial Metrics: ${ctx.activeMetrics.join(', ')}`);
+  if (ctx.activePeriods) parts.push(`• Active Period: ${ctx.activePeriods.label} (${ctx.activePeriods.startDate} to ${ctx.activePeriods.endDate})`);
+  if (ctx.activeComparisonPeriod) parts.push(`• Active Comparison Period: ${ctx.activeComparisonPeriod.label} (${ctx.activeComparisonPeriod.startDate} to ${ctx.activeComparisonPeriod.endDate})`);
+
+  if (ctx.activeEntities) {
+    const ent: string[] = [];
+    if (ctx.activeEntities.customers?.length) ent.push(`Customers: ${ctx.activeEntities.customers.join(', ')}`);
+    if (ctx.activeEntities.vendors?.length) ent.push(`Vendors: ${ctx.activeEntities.vendors.join(', ')}`);
+    if (ctx.activeEntities.invoices?.length) ent.push(`Invoices: ${ctx.activeEntities.invoices.join(', ')}`);
+    if (ctx.activeEntities.accounts?.length) ent.push(`Accounts: ${ctx.activeEntities.accounts.join(', ')}`);
+    if (ent.length > 0) parts.push(`• Active Entities: ${ent.join(' | ')}`);
+  }
+
+  if (ctx.relevantFacts && ctx.relevantFacts.length > 0) {
+    parts.push(`• Established Context Facts:\n  - ${ctx.relevantFacts.slice(-6).join('\n  - ')}`);
+  }
+
+  if (ctx.activeHypotheses && ctx.activeHypotheses.length > 0) {
+    const hypList = ctx.activeHypotheses.map(h => `[${h.status}] ${h.statement}`).join('; ');
+    parts.push(`• Active Hypotheses: ${hypList}`);
+  }
+
+  if (ctx.lastConfidence) parts.push(`• Prior Data Quality: ${ctx.dataQuality || 'COMPLETE'} | Confidence: ${ctx.lastConfidence}`);
+  parts.push(`==================================================`);
+  return parts.join('\n');
+}
 
 export function parseDatesFromPrompt(msg: string): { startDate: string; endDate: string; periodLabel: string } {
   const defaultDates = {
@@ -190,7 +223,7 @@ NEVER present an unverified hypothesis as a confirmed fact.
 - Select tools to test each hypothesis. Reject unsupported hypotheses and present evidence for supported ones.
 
 4. PERIOD COMPARISON:
-- Understand relative periods ("last 6 months", "this quarter", "versus prior period", "year over year").
+- Understand relative periods ("last 6 months", "this quarter", "versus prior period", "year over year", "previous year").
 - When analyzing changes or trends, compare the current period against a logical prior comparison period.
 - Always explicitly state the exact start and end dates analyzed.
 
@@ -207,7 +240,29 @@ NEVER present an unverified hypothesis as a confirmed fact.
 - MEDIUM: Conclusion supported but secondary evidence incomplete.
 - LOW: Inferential or required data unavailable.
 
-8. CFO RESPONSE STRUCTURE (For complex analysis):
+==================================================
+MULTI-TURN CONVERSATION MEMORY & FOLLOW-UP RESOLUTION
+==================================================
+
+8. ANAPHORA & PRONOUN RESOLUTION:
+- Users will ask follow-up questions using relative pronouns and references ("it", "that", "this", "them", "those", "same period", "previous period", "that expense", "that customer", "that invoice", "the decline", "the increase", "they").
+- You MUST resolve these references using the CFO CONVERSATION CONTEXT & FINANCIAL MEMORY supplied in the system prompt.
+- Example: If previous turn analyzed profit drop and user asks "Which expense caused it?", resolve "it" = profit drop, and select relevant tools to analyze expenses.
+- Example: If previous turn discussed Customer A overdue invoices and user asks "How much did they pay last month?", resolve "they" = Customer A.
+
+9. PERIOD & ENTITY CONTINUITY:
+- Retain active period and active entities (customers, vendors, accounts, invoices) from previous turns unless the user explicitly provides a new period or entity.
+- If user asks "Compare that with the previous year", shift the active period start and end dates by -1 year.
+
+10. TOPIC SWITCHING DETECTION:
+- If user asks a question about a different financial domain (e.g. switching from profit analysis to cash balance, or from overdue invoices to revenue growth), recognize that a new topic has started.
+- Do NOT inherit topic-specific hypotheses from the previous topic into the new topic.
+
+11. MINIMAL TOOL CALLING & DATA FRESHNESS:
+- For follow-ups, select ONLY the tool(s) required for the follow-up question. Do NOT blindly repeat all prior tool calls.
+- If user asks for current/updated data ("What is cash now?"), ALWAYS execute the tool again to obtain fresh financial data.
+
+12. CFO RESPONSE STRUCTURE (For complex analysis):
 ### Executive Answer
 [Concise 1-2 sentence direct answer]
 
@@ -228,6 +283,53 @@ NEVER present an unverified hypothesis as a confirmed fact.
 
 (For simple direct questions like "What is our current cash balance?", provide a concise direct answer).`;
 
+function detectTopic(msg: string): string {
+  const m = msg.toLowerCase();
+  if (m.includes('profit') || m.includes('opex') || m.includes('expense') || m.includes('cogs') || m.includes('revenue') || m.includes('margin')) {
+    return 'Profitability & Operating Performance';
+  }
+  if (m.includes('cash') || m.includes('bank') || m.includes('liquidity') || m.includes('reserve')) {
+    return 'Cash Flow & Liquidity';
+  }
+  if (m.includes('invoice') || m.includes('customer') || m.includes('overdue') || m.includes('receivable') || m.includes('ar')) {
+    return 'Accounts Receivable & Customer Collections';
+  }
+  if (m.includes('vendor') || m.includes('payable') || m.includes('bill') || m.includes('ap')) {
+    return 'Accounts Payable & Vendor Expenses';
+  }
+  return 'General Financial Intelligence';
+}
+
+function extractEntitiesFromToolOutputs(toolsData: Record<string, any>, msg: string): { customers: string[]; vendors: string[]; invoices: string[]; accounts: string[] } {
+  const customers: string[] = [];
+  const vendors: string[] = [];
+  const invoices: string[] = [];
+  const accounts: string[] = [];
+
+  const custMatch = msg.match(/customer\s+([a-zA-Z0-9_\-\s]+)/i);
+  if (custMatch && custMatch[1]) customers.push(custMatch[1].trim());
+
+  if (toolsData['search_invoices_and_bills']?.records) {
+    for (const rec of toolsData['search_invoices_and_bills'].records) {
+      if (rec.contactName) customers.push(rec.contactName);
+      if (rec.invoiceNumber) invoices.push(rec.invoiceNumber);
+    }
+  }
+
+  if (toolsData['search_contacts']?.records) {
+    for (const rec of toolsData['search_contacts'].records) {
+      if (rec.name || rec.contactName) customers.push(rec.name || rec.contactName);
+    }
+  }
+
+  return {
+    customers: Array.from(new Set(customers)),
+    vendors: Array.from(new Set(vendors)),
+    invoices: Array.from(new Set(invoices)),
+    accounts: Array.from(new Set(accounts))
+  };
+}
+
 export async function runCopilotInvestigation(opts: {
   chatId: string;
   tenantId: string | number;
@@ -239,15 +341,62 @@ export async function runCopilotInvestigation(opts: {
   const numTenantId = Number(tenantId) || 1;
   const debugActivities: ToolActivityLog[] = [];
 
+  // Phase 6: Retrieve conversation context with Tenant Security Check
+  let existingContext: CfoConversationContext | undefined;
+  try {
+    existingContext = getConversationContext(chatId, numTenantId);
+  } catch (err: any) {
+    if (err.statusCode === 403 || err.message?.includes('403')) {
+      throw err;
+    }
+  }
+
+  const qLower = message.toLowerCase();
+  const currentTopic = detectTopic(message);
+  const isTopicSwitched = Boolean(
+    existingContext?.activeTopic &&
+    currentTopic !== 'General Financial Intelligence' &&
+    existingContext.activeTopic !== currentTopic &&
+    !qLower.includes('it') &&
+    !qLower.includes('that') &&
+    !qLower.includes('they') &&
+    !qLower.includes('them') &&
+    !qLower.includes('this') &&
+    !qLower.includes('those')
+  );
+
   const extractedPeriod = parseDatesFromPrompt(message);
+  let activePeriod = {
+    startDate: extractedPeriod.startDate,
+    endDate: extractedPeriod.endDate,
+    label: extractedPeriod.periodLabel
+  };
+
+  let activeComparisonPeriod = existingContext?.activeComparisonPeriod;
+
+  if (existingContext?.activePeriods) {
+    if (extractedPeriod.startDate === '2026-04-01' && extractedPeriod.endDate === '2026-09-30' && !qLower.includes('2026')) {
+      activePeriod = existingContext.activePeriods;
+    }
+
+    if (qLower.includes('previous year') || qLower.includes('prior year') || qLower.includes('last year')) {
+      const sYr = parseInt(activePeriod.startDate.substring(0, 4), 10) - 1;
+      const eYr = parseInt(activePeriod.endDate.substring(0, 4), 10) - 1;
+      const prevStart = `${sYr}${activePeriod.startDate.substring(4)}`;
+      const prevEnd = `${eYr}${activePeriod.endDate.substring(4)}`;
+      activeComparisonPeriod = {
+        startDate: prevStart,
+        endDate: prevEnd,
+        label: `${prevStart} to ${prevEnd}`
+      };
+    }
+  }
+
   const reasoningState: CfoReasoningState = {
     originalQuestion: message,
     tenantId: numTenantId,
-    currentPeriod: {
-      startDate: extractedPeriod.startDate,
-      endDate: extractedPeriod.endDate,
-      label: extractedPeriod.periodLabel
-    },
+    currentPeriod: activePeriod,
+    comparisonPeriod: activeComparisonPeriod,
     factsCollected: [],
     calculations: [],
     hypotheses: [],
@@ -283,7 +432,10 @@ export async function runCopilotInvestigation(opts: {
   if (llmSettings.apiKey.trim()) {
     try {
       const endpoint = `${llmSettings.baseUrl}/v1/messages`;
-      const systemPrompt = COPILOT_SYSTEM_PROMPT;
+      let systemPrompt = COPILOT_SYSTEM_PROMPT;
+      if (existingContext) {
+        systemPrompt += '\n\n' + formatContextSummary(existingContext);
+      }
 
       // Build conversation messages array for Anthropic API
       const apiMessages: Array<{ role: string; content: any }> = [];
@@ -522,6 +674,59 @@ export async function runCopilotInvestigation(opts: {
 
   // Save Assistant Message to DB
   saveChatMessage(chatId, tenantId, 'assistant', finalAnswer, debugActivities);
+
+  // Save Phase 6 CFO Conversation Context
+  const newEntities = extractEntitiesFromToolOutputs(toolOutputs, message);
+  const updatedContext: CfoConversationContext = {
+    conversationId: chatId,
+    tenantId: numTenantId,
+    recentUserMessages: [
+      ...(existingContext?.recentUserMessages || []),
+      message
+    ].slice(-5),
+    recentAssistantResponses: [
+      ...(existingContext?.recentAssistantResponses || []),
+      finalAnswer.substring(0, 300)
+    ].slice(-5),
+    activeTopic: currentTopic !== 'General Financial Intelligence' ? currentTopic : (existingContext?.activeTopic || 'General Financial Intelligence'),
+    activeMetrics: Array.from(new Set([
+      ...(isTopicSwitched ? [] : (existingContext?.activeMetrics || [])),
+      ...reasoningState.factsCollected.map(f => f.metric)
+    ])).slice(-8),
+    activeEntities: {
+      customers: Array.from(new Set([
+        ...(isTopicSwitched ? [] : (existingContext?.activeEntities?.customers || [])),
+        ...newEntities.customers
+      ])).slice(-10),
+      vendors: Array.from(new Set([
+        ...(isTopicSwitched ? [] : (existingContext?.activeEntities?.vendors || [])),
+        ...newEntities.vendors
+      ])).slice(-10),
+      invoices: Array.from(new Set([
+        ...(isTopicSwitched ? [] : (existingContext?.activeEntities?.invoices || [])),
+        ...newEntities.invoices
+      ])).slice(-10),
+      accounts: Array.from(new Set([
+        ...(isTopicSwitched ? [] : (existingContext?.activeEntities?.accounts || [])),
+        ...newEntities.accounts
+      ])).slice(-10)
+    },
+    activePeriods: activePeriod,
+    activeComparisonPeriod: activeComparisonPeriod,
+    relevantFacts: Array.from(new Set([
+      ...(isTopicSwitched ? [] : (existingContext?.relevantFacts || [])),
+      ...debugActivities.map(a => `${a.toolName}: ${a.resultSummary}`)
+    ])).slice(-8),
+    relevantCalculations: reasoningState.calculations.map(c => `${c.formula} = ${c.result}`),
+    activeHypotheses: isTopicSwitched ? [] : (reasoningState.hypotheses.length > 0 ? reasoningState.hypotheses : (existingContext?.activeHypotheses || [])),
+    unresolvedQuestions: reasoningState.unresolvedQuestions || [],
+    lastToolResultsSummary: debugActivities.map(a => `${a.toolName}: ${a.resultSummary}`).join('; '),
+    lastConfidence: reasoningState.confidence,
+    dataQuality: reasoningState.dataQuality,
+    updatedAt: new Date().toISOString()
+  };
+
+  saveConversationContext(updatedContext);
 
   sendSSE({ type: 'done', chatId, tenantId, debugActivities, reasoningState });
 
