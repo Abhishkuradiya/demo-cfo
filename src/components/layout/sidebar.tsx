@@ -362,11 +362,9 @@ export function Sidebar() {
     const currentEmail = storeEmail || sessionEmail;
     const userRole = (user?.role || '').toUpperCase().trim();
 
-    // Superadmin, Owner, or Admin users always see all menus (including iamrajan0000)
+    // Superadmin users always see all menus (admin@virtualcfo.com or isSuperAdmin flag or rajan)
     const isSuperAdminUser = isSuperAdmin || 
       userRole === 'SUPERADMIN' || 
-      userRole === 'ADMIN' || 
-      userRole === 'OWNER' || 
       currentEmail === 'admin@virtualcfo.com' || 
       currentEmail.includes('rajan') || 
       currentEmail.includes('iamrajan');

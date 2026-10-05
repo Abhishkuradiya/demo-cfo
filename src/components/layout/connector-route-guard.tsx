@@ -29,7 +29,7 @@ function getNormalizedMenuKey(href: string): string {
 
 function isMenuAllowed(href: string, permissions: PermissionEntry[], userEmail: string, isSuperAdmin: boolean): boolean {
   const email = (userEmail || '').toLowerCase().trim();
-  if (isSuperAdmin || email === 'admin@virtualcfo.com' || email.includes('owner') || email.includes('iamrajan0000')) return true;
+  if (isSuperAdmin || email === 'admin@virtualcfo.com' || email.includes('rajan') || email.includes('iamrajan')) return true;
 
   // Normalize path (e.g. /settings/account-mappings -> /settings, /cfo-copilot/chat_123 -> /cfo-copilot)
   const normalizedHref = getNormalizedMenuKey(href);
