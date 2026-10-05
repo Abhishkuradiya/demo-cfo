@@ -149,16 +149,115 @@ async function getLlmSettings() {
   return settings;
 }
 
+export interface CfoReasoningState {
+  originalQuestion: string;
+  tenantId: number;
+  currentPeriod?: { startDate: string; endDate: string; label: string };
+  comparisonPeriod?: { startDate: string; endDate: string; label: string };
+  factsCollected: Array<{ sourceTool: string; metric: string; value: any; period?: string }>;
+  calculations: Array<{ formula: string; result: any; description: string }>;
+  hypotheses: Array<{ id: string; statement: string; status: 'TESTING' | 'SUPPORTED' | 'REJECTED'; evidence: string[] }>;
+  evidence: string[];
+  unresolvedQuestions: string[];
+  toolCalls: Array<{ round: number; toolName: string; args: any; success: boolean; resultSummary: string }>;
+  toolRounds: number;
+  finalConclusion?: string;
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+  dataQuality: 'COMPLETE' | 'PARTIAL' | 'NO_DATA' | 'ZERO_CONFIRMED';
+}
+
+export const COPILOT_SYSTEM_PROMPT = `You are the Autonomous Virtual CFO Executive AI Engine for MI Health Ltd.
+Your primary role is to provide authoritative, evidence-grounded financial intelligence using your canonical CFO tools.
+
+==================================================
+AUTONOMOUS CFO REASONING DIRECTIVES
+==================================================
+
+1. FACT vs CALCULATION vs HYPOTHESIS vs RECOMMENDATION:
+- FACT: Directly returned from financial tool results (e.g. Revenue = £4,019,440.84).
+- CALCULATION: Deterministic calculation derived from facts (e.g. Revenue grew +12.4% vs prior period).
+- HYPOTHESIS: A possible explanation that requires tool evidence to confirm or reject (e.g. "Receivables growth may be absorbing operating cash").
+- RECOMMENDATION: Suggested action ONLY after tool evidence confirms the diagnosis.
+NEVER present an unverified hypothesis as a confirmed fact.
+
+2. MINIMUM SUFFICIENT EVIDENCE PRINCIPLE:
+- For simple questions ("What is our current cash balance?"), select ONLY the single tool needed (e.g. get_cash_flow_balance). Do NOT call unrelated tools like balance sheet, contacts, or invoices unless specifically required.
+- For complex "why" questions ("Why is cash falling while revenue grows?"), perform multi-step evidence gathering (e.g. check P&L, check Cash Flow drivers, check Working Capital/Receivables).
+- Do NOT automatically call every tool. Prefer the minimum sufficient evidence.
+
+3. EVIDENCED HYPOTHESIS TESTING:
+- When asked WHY something changed, generate plausible hypotheses (e.g. H1: Receivables grew, H2: OpEx/COGS increased, H3: Debt/Tax/CapEx payments).
+- Select tools to test each hypothesis. Reject unsupported hypotheses and present evidence for supported ones.
+
+4. PERIOD COMPARISON:
+- Understand relative periods ("last 6 months", "this quarter", "versus prior period", "year over year").
+- When analyzing changes or trends, compare the current period against a logical prior comparison period.
+- Always explicitly state the exact start and end dates analyzed.
+
+5. FINANCIAL DRIVER ANALYSIS & MATERIALITY:
+- Prioritize major drivers over minor/immaterial changes.
+- Calculate absolute variances, percentage changes, and percentage contribution to overall change where relevant.
+
+6. DATA QUALITY & ZERO vs NO DATA:
+- If a tool returns no records, empty arrays, NULL, or DATA_NOT_AVAILABLE, distinguish "NO DATA" from confirmed "ZERO".
+- If data is unavailable, explicitly state: "No accounting records were returned for the requested period, so I cannot establish the actual value" — NEVER claim the business has £0 revenue or £0 cash unless tools confirm zero is the authoritative balance.
+
+7. CONFIDENCE CLASSIFICATION:
+- HIGH: Primary financial tool data directly supports conclusion.
+- MEDIUM: Conclusion supported but secondary evidence incomplete.
+- LOW: Inferential or required data unavailable.
+
+8. CFO RESPONSE STRUCTURE (For complex analysis):
+### Executive Answer
+[Concise 1-2 sentence direct answer]
+
+### What the Data Shows
+[Key factual metrics with exact currency & figures]
+
+### Why It Happened (Drivers)
+[Evidence-supported drivers comparing periods]
+
+### Supporting Calculations
+[Percentages, variances, margin contributions]
+
+### CFO Interpretation & Recommendation
+[Actionable next steps ONLY if supported by data]
+
+### Data Confidence & Limitations
+[Confidence: HIGH/MEDIUM/LOW and data quality note]
+
+(For simple direct questions like "What is our current cash balance?", provide a concise direct answer).`;
+
 export async function runCopilotInvestigation(opts: {
   chatId: string;
   tenantId: string | number;
   message: string;
   selectedModel?: string;
   onSSEEvent?: (event: { type: string; [key: string]: any }) => void;
-}): Promise<{ finalAnswer: string; debugActivities: ToolActivityLog[] }> {
+}): Promise<{ finalAnswer: string; debugActivities: ToolActivityLog[]; reasoningState: CfoReasoningState }> {
   const { chatId, tenantId, message, selectedModel, onSSEEvent } = opts;
   const numTenantId = Number(tenantId) || 1;
   const debugActivities: ToolActivityLog[] = [];
+
+  const extractedPeriod = parseDatesFromPrompt(message);
+  const reasoningState: CfoReasoningState = {
+    originalQuestion: message,
+    tenantId: numTenantId,
+    currentPeriod: {
+      startDate: extractedPeriod.startDate,
+      endDate: extractedPeriod.endDate,
+      label: extractedPeriod.periodLabel
+    },
+    factsCollected: [],
+    calculations: [],
+    hypotheses: [],
+    evidence: [],
+    unresolvedQuestions: [],
+    toolCalls: [],
+    toolRounds: 0,
+    confidence: 'HIGH',
+    dataQuality: 'COMPLETE'
+  };
 
   const sendSSE = (evt: { type: string; [key: string]: any }) => {
     if (onSSEEvent) {
@@ -184,10 +283,7 @@ export async function runCopilotInvestigation(opts: {
   if (llmSettings.apiKey.trim()) {
     try {
       const endpoint = `${llmSettings.baseUrl}/v1/messages`;
-      const systemPrompt = `You are the Virtual CFO Executive AI Copilot for MI Health Ltd.
-Your primary role is to provide authoritative, data-driven financial intelligence using your available CFO tools.
-When answering financial questions, choose the appropriate CFO tools to fetch real accounting data.
-Always provide precise numerical metrics, clear explanations, and actionable financial insights.`;
+      const systemPrompt = COPILOT_SYSTEM_PROMPT;
 
       // Build conversation messages array for Anthropic API
       const apiMessages: Array<{ role: string; content: any }> = [];
@@ -209,25 +305,36 @@ Always provide precise numerical metrics, clear explanations, and actionable fin
       sendSSE({ type: 'investigation_status', status: 'GATHERING_EVIDENCE' });
 
       for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-        const response = await fetch(endpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': llmSettings.apiKey,
-            'Authorization': `Bearer ${llmSettings.apiKey}`
-          },
-          body: JSON.stringify({
-            model: targetModel,
-            max_tokens: llmSettings.maxTokens,
-            system: systemPrompt,
-            messages: apiMessages,
-            tools: llmToolsSchema
-          })
-        });
+        let response: Response | null = null;
+        let retries = 0;
+        while (retries < 3) {
+          try {
+            response = await fetch(endpoint, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': llmSettings.apiKey,
+                'Authorization': `Bearer ${llmSettings.apiKey}`
+              },
+              body: JSON.stringify({
+                model: targetModel,
+                max_tokens: llmSettings.maxTokens,
+                system: systemPrompt,
+                messages: apiMessages,
+                tools: llmToolsSchema
+              })
+            });
+            if (response.ok || response.status < 500) {
+              break;
+            }
+          } catch (e) {}
+          retries++;
+          await new Promise(r => setTimeout(r, 2000));
+        }
 
-        if (!response.ok) {
-          const errText = await response.text();
-          console.warn(`LLM API returned HTTP ${response.status}: ${errText}`);
+        if (!response || !response.ok) {
+          const errText = response ? await response.text() : 'No response from LLM server';
+          console.warn(`LLM API returned HTTP ${response?.status || 500}: ${errText.substring(0, 100)}`);
           break;
         }
 
@@ -285,6 +392,32 @@ Always provide precise numerical metrics, clear explanations, and actionable fin
               recordsCount
             };
             debugActivities.push(activity);
+
+            reasoningState.toolCalls.push({
+              round: round + 1,
+              toolName: toolDef ? toolDef.name : requestedToolName,
+              args: modelArgs,
+              success: status === 'SUCCESS',
+              resultSummary: summary
+            });
+            reasoningState.toolRounds = round + 1;
+
+            if (resultData) {
+              if (Array.isArray(resultData) && resultData.length === 0) {
+                reasoningState.dataQuality = 'NO_DATA';
+              } else if (resultData.records && Array.isArray(resultData.records) && resultData.records.length === 0) {
+                reasoningState.dataQuality = 'NO_DATA';
+              } else if (resultData.error || resultData.status === 'NO_DATA') {
+                reasoningState.dataQuality = 'NO_DATA';
+              } else {
+                reasoningState.dataQuality = 'COMPLETE';
+                reasoningState.factsCollected.push({
+                  sourceTool: toolDef ? toolDef.name : requestedToolName,
+                  metric: 'Records',
+                  value: recordsCount
+                });
+              }
+            }
 
             sendSSE({
               type: 'tool_done',
@@ -369,6 +502,12 @@ Always provide precise numerical metrics, clear explanations, and actionable fin
     finalAnswer = "⚠️ **Virtual CFO Copilot Notice**: Unable to execute native LLM tool calling. Please verify that your LLM API service is configured and active in system settings.";
   }
 
+  reasoningState.finalConclusion = finalAnswer;
+  reasoningState.confidence = nativeLlmToolCallingSucceeded 
+    ? (reasoningState.dataQuality === 'NO_DATA' ? 'LOW' : 'HIGH') 
+    : 'LOW';
+
+  sendSSE({ type: 'reasoning_state', state: reasoningState });
   sendSSE({ type: 'investigation_status', status: 'COMPLETED' });
 
   // Stream Tokens
@@ -384,9 +523,9 @@ Always provide precise numerical metrics, clear explanations, and actionable fin
   // Save Assistant Message to DB
   saveChatMessage(chatId, tenantId, 'assistant', finalAnswer, debugActivities);
 
-  sendSSE({ type: 'done', chatId, tenantId, debugActivities });
+  sendSSE({ type: 'done', chatId, tenantId, debugActivities, reasoningState });
 
-  return { finalAnswer, debugActivities };
+  return { finalAnswer, debugActivities, reasoningState };
 }
 
 function generateFinancialSynthesis(
