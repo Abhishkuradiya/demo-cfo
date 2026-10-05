@@ -2509,6 +2509,66 @@ export const db = {
     return (json.bank_transactions || []).filter(x => x.tenant_id === tenantId);
   },
 
+  getContacts: async (tenantId: number): Promise<any[]> => {
+    if (isPgConnected) {
+      try {
+        const { rows } = await pgPool.query('SELECT * FROM contacts WHERE tenant_id = $1', [tenantId]);
+        if (rows.length > 0) {
+          return rows.map(r => ({
+            ...r,
+            contactId: r.external_id || String(r.id),
+            ContactID: r.external_id || String(r.id),
+            name: r.name,
+            Name: r.name,
+            isCustomer: r.is_customer !== false,
+            isSupplier: r.is_supplier === true,
+            email: r.email || '',
+            phone: r.phone || ''
+          }));
+        }
+      } catch (e) {
+        console.error("Database query failed in getContacts:", e);
+      }
+    }
+    const report = await db.getReport(tenantId, 'Contacts');
+    if (report && Array.isArray(report) && report.length > 0) {
+      return report.map(c => ({
+        ...c,
+        contactId: c.ContactID || c.contact_id || c.id,
+        ContactID: c.ContactID || c.contact_id || c.id,
+        name: c.Name || c.name || '',
+        Name: c.Name || c.name || '',
+        isCustomer: c.IsCustomer !== false,
+        isSupplier: c.IsSupplier === true,
+        email: c.EmailAddress || c.email || '',
+        phone: c.Phones?.[0]?.PhoneNumber || c.phone || ''
+      }));
+    }
+    const json = readJsonDb();
+    const jsonContacts = (json.contacts || []).filter(x => x.tenant_id === tenantId);
+    if (jsonContacts.length > 0) return jsonContacts;
+
+    // Fallback: build contacts list from invoices
+    const invoices = await db.getInvoices(tenantId);
+    const contactMap = new Map<string, any>();
+    for (const inv of invoices) {
+      const cName = inv.ContactName || inv.contact_name || inv.Contact?.Name;
+      if (cName && !contactMap.has(cName)) {
+        contactMap.set(cName, {
+          contactId: 'c_' + Math.abs(cName.split('').reduce((a: number, b: string)=>{a=((a<<5)-a)+b.charCodeAt(0);return a|0},0)),
+          ContactID: 'c_' + Math.abs(cName.split('').reduce((a: number, b: string)=>{a=((a<<5)-a)+b.charCodeAt(0);return a|0},0)),
+          name: cName,
+          Name: cName,
+          isCustomer: inv.Type === 'ACCREC' || inv.type === 'ACCREC',
+          isSupplier: inv.Type === 'ACCPAY' || inv.type === 'ACCPAY',
+          email: '',
+          phone: ''
+        });
+      }
+    }
+    return Array.from(contactMap.values());
+  },
+
   getPrepayments: async (tenantId: number): Promise<any[]> => {
     if (isPgConnected) {
       try {

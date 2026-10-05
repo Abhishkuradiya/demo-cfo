@@ -440,15 +440,23 @@ export function Header() {
 
     try {
       const res = await fetch('/api/xero', { method: 'POST' });
+      const contentType = res.headers.get('content-type') || '';
+      
       if (res.ok) {
         toast.success("Xero sync completed successfully!", { id: "sync-toast" });
         setSyncTime("Just now");
         window.dispatchEvent(new CustomEvent('xero-sync-complete'));
+      } else if (res.status === 504 || contentType.includes('text/html')) {
+        toast.error("Live server proxy timed out (HTTP 504). background sync is continuing.", { id: "sync-toast" });
       } else {
-        toast.error("Xero sync failed. Please check credentials.", { id: "sync-toast" });
+        let errData: any = null;
+        try {
+          errData = await res.json();
+        } catch (e) {}
+        toast.error(errData?.message || "Xero sync failed. Please check credentials or try again.", { id: "sync-toast" });
       }
-    } catch (err) {
-      toast.error("Error triggering Xero sync.", { id: "sync-toast" });
+    } catch (err: any) {
+      toast.error(err?.message || "Error triggering Xero sync.", { id: "sync-toast" });
     } finally {
       setIsSyncing(false);
     }

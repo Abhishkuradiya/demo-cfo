@@ -36,6 +36,7 @@ export const SYSTEM_NAV_DEFINITIONS: MenuDefinitionSection[] = [
   {
     title: 'CFO Intelligence',
     items: [
+      { name: 'AI Financial Copilot', href: '/cfo-copilot', connectorId: 'xero', badge: 'AI' },
       { name: 'CFO Command Center', href: '/cfo', connectorId: 'xero' },
       { name: 'Executive Overview', href: '/xero-dashboard', connectorId: 'xero' },
       { name: 'Management Accounts', href: '/management-accounts', connectorId: 'xero' },

@@ -213,6 +213,8 @@ export default function APARAnalyticsDashboard() {
   const [webMatrixWeekEndDay, setWebMatrixWeekEndDay] = useState<number>(0);
   const [webMatrixBankId, setWebMatrixBankId] = useState<string>('ALL');
   const [expandedContacts, setExpandedContacts] = useState<Record<string, boolean>>({});
+  const [isArSectionExpanded, setIsArSectionExpanded] = useState<boolean>(false);
+  const [isApSectionExpanded, setIsApSectionExpanded] = useState<boolean>(false);
   const [matrixSearchTerm, setMatrixSearchTerm] = useState<string>('');
 
   const toggleExpandContact = (cName: string) => {
@@ -625,6 +627,8 @@ export default function APARAnalyticsDashboard() {
   }, [rawInvoicesList, fromDate, toDate, asOnDate, webMatrixViewMode, webMatrixWeekMode, webMatrixWeekEndDay, webMatrixBankId, availableBankAccounts, matrixSearchTerm]);
 
   const expandAllContacts = () => {
+    setIsArSectionExpanded(true);
+    setIsApSectionExpanded(true);
     const next: Record<string, boolean> = {};
     webMatrixData.arContacts.forEach(c => { next[`AR-${c.contactName}`] = true; });
     webMatrixData.apContacts.forEach(c => { next[`AP-${c.contactName}`] = true; });
@@ -632,6 +636,8 @@ export default function APARAnalyticsDashboard() {
   };
 
   const collapseAllContacts = () => {
+    setIsArSectionExpanded(false);
+    setIsApSectionExpanded(false);
     setExpandedContacts({});
   };
 
@@ -2147,208 +2153,269 @@ export default function APARAnalyticsDashboard() {
                   {/* ========================================== */}
                   {/* SECTION 1: CASH IN - CUSTOMERS (RECEIVABLES) */}
                   {/* ========================================== */}
-                  <tr className="bg-gradient-to-r from-emerald-800 via-teal-800 to-emerald-900 text-white font-bold tracking-wide shadow-xs">
-                    <td colSpan={webMatrixData.timeCols.length + 2} className="py-2.5 px-4">
-                      <div className="flex items-center justify-between text-xs font-extrabold tracking-wider uppercase">
-                        <span className="flex items-center gap-2">
-                          <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                          CASH IN — CUSTOMERS (RECEIVABLES)
-                        </span>
-                        <span className="text-[10px] bg-emerald-950/60 px-2.5 py-0.5 rounded-full font-mono font-bold text-emerald-200 border border-emerald-700/50">
-                          {webMatrixData.arContacts.length} Customers
-                        </span>
-                      </div>
-                    </td>
-                  </tr>
-
-                  {webMatrixData.arContacts.map((group: any) => {
-                    const cKey = `AR-${group.contactName}`;
-                    const isExpanded = Boolean(expandedContacts[cKey]);
+                  {(() => {
+                    const isArExpanded = isArSectionExpanded || Boolean(matrixSearchTerm.trim());
+                    const isApExpanded = isApSectionExpanded || Boolean(matrixSearchTerm.trim());
 
                     return (
-                      <React.Fragment key={cKey}>
-                        {/* Parent Contact Summary Row */}
-                        <tr className="bg-emerald-50/50 hover:bg-emerald-100/70 transition-colors font-bold border-b border-emerald-200/60">
-                          <td className="py-2.5 px-4 sticky left-0 bg-emerald-50/95 z-10 border-r border-slate-200 shadow-2xs">
-                            <div className="flex items-center gap-2">
-                              <button
-                                onClick={() => toggleExpandContact(cKey)}
-                                className="h-5 w-5 rounded-md bg-emerald-200/90 hover:bg-emerald-300 text-emerald-950 flex items-center justify-center text-xs font-black shrink-0 transition cursor-pointer shadow-2xs"
-                              >
-                                {isExpanded ? '−' : '+'}
-                              </button>
-                              <ContactAvatar name={group.contactName} type="AR" />
-                              <span className="font-bold text-slate-900 truncate">{group.contactName}</span>
-                              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-200/70 text-emerald-950 font-bold shrink-0">
-                                {group.invoices.length} Inv
+                      <>
+                        <tr 
+                          onClick={() => setIsArSectionExpanded(!isArSectionExpanded)}
+                          className="bg-gradient-to-r from-emerald-800 via-teal-800 to-emerald-900 text-white font-bold tracking-wide shadow-xs cursor-pointer select-none hover:brightness-110 transition-all"
+                        >
+                          <td className="py-2.5 px-4 sticky left-0 bg-emerald-900 z-20 border-r border-emerald-700 shadow-r">
+                            <div className="flex items-center justify-between text-xs font-extrabold tracking-wider uppercase">
+                              <span className="flex items-center gap-2">
+                                <span className="h-5 w-5 rounded-md bg-emerald-700/80 hover:bg-emerald-600 text-emerald-100 flex items-center justify-center text-xs shrink-0 transition">
+                                  {isArExpanded ? <ChevronDown className="h-3.5 w-3.5 text-white" /> : <ChevronRight className="h-3.5 w-3.5 text-white" />}
+                                </span>
+                                <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                                <span>CASH IN — CUSTOMERS (RECEIVABLES)</span>
+                              </span>
+                              <span className="text-[10px] bg-emerald-950/60 px-2 py-0.5 rounded-full font-mono font-bold text-emerald-200 border border-emerald-700/50">
+                                {webMatrixData.arContacts.length} Customers
                               </span>
                             </div>
                           </td>
 
                           {webMatrixData.timeCols.map((col) => {
-                            const val = group.totalColVals[col.key] || 0;
+                            const val = webMatrixData.arTotals[col.key] || 0;
                             return (
-                              <td key={col.key} className="py-2.5 px-3 text-right border-r border-slate-200 font-bold text-slate-900 whitespace-nowrap">
+                              <td key={col.key} className="py-2.5 px-3 text-right border-r border-emerald-700/60 font-black whitespace-nowrap text-emerald-100 text-xs">
                                 {val > 0 ? formatAmount(val, orgCurrency) : '—'}
                               </td>
                             );
                           })}
 
-                          <td className="py-2.5 px-4 text-right font-black text-emerald-900 bg-emerald-100/80 whitespace-nowrap">
-                            {formatAmount(group.total, orgCurrency)}
+                          <td className="py-2.5 px-4 text-right font-black text-white bg-emerald-950/80 whitespace-nowrap text-xs">
+                            {formatAmount(webMatrixData.arGrandTotal, orgCurrency)}
                           </td>
                         </tr>
 
-                        {/* Indented Individual Invoice Sub-Rows */}
-                        {isExpanded && group.invoices.map((sub: any, idx: number) => {
-                          const isLast = idx === group.invoices.length - 1;
-                          const prefix = isLast ? '└── ' : '├── ';
+                        {isArExpanded && (
+                          <>
+                            {webMatrixData.arContacts.map((group: any) => {
+                              const cKey = `AR-${group.contactName}`;
+                              const isExpanded = Boolean(expandedContacts[cKey]);
 
-                          return (
-                            <tr key={idx} className="bg-slate-50/90 hover:bg-slate-100/90 transition-colors text-slate-600 text-[11px]">
-                              <td className="py-1.5 px-4 pl-10 sticky left-0 bg-slate-50/95 z-10 border-r border-slate-200 font-mono italic">
-                                <span className="text-slate-400 font-normal">{prefix}</span>
-                                <span className="font-bold text-slate-800">{sub.invoiceLabel}</span>
+                              return (
+                                <React.Fragment key={cKey}>
+                                  {/* Parent Contact Summary Row */}
+                                  <tr className="bg-emerald-50/50 hover:bg-emerald-100/70 transition-colors font-bold border-b border-emerald-200/60">
+                                    <td className="py-2.5 px-4 sticky left-0 bg-emerald-50/95 z-10 border-r border-slate-200 shadow-2xs">
+                                      <div className="flex items-center gap-2">
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            toggleExpandContact(cKey);
+                                          }}
+                                          className="h-5 w-5 rounded-md bg-emerald-200/90 hover:bg-emerald-300 text-emerald-950 flex items-center justify-center text-xs font-black shrink-0 transition cursor-pointer shadow-2xs"
+                                        >
+                                          {isExpanded ? '−' : '+'}
+                                        </button>
+                                        <ContactAvatar name={group.contactName} type="AR" />
+                                        <span className="font-bold text-slate-900 truncate">{group.contactName}</span>
+                                        <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-200/70 text-emerald-950 font-bold shrink-0">
+                                          {group.invoices.length} Inv
+                                        </span>
+                                      </div>
+                                    </td>
+
+                                    {webMatrixData.timeCols.map((col) => {
+                                      const val = group.totalColVals[col.key] || 0;
+                                      return (
+                                        <td key={col.key} className="py-2.5 px-3 text-right border-r border-slate-200 font-bold text-slate-900 whitespace-nowrap">
+                                          {val > 0 ? formatAmount(val, orgCurrency) : '—'}
+                                        </td>
+                                      );
+                                    })}
+
+                                    <td className="py-2.5 px-4 text-right font-black text-emerald-900 bg-emerald-100/80 whitespace-nowrap">
+                                      {formatAmount(group.total, orgCurrency)}
+                                    </td>
+                                  </tr>
+
+                                  {/* Indented Individual Invoice Sub-Rows */}
+                                  {isExpanded && group.invoices.map((sub: any, idx: number) => {
+                                    const isLast = idx === group.invoices.length - 1;
+                                    const prefix = isLast ? '└── ' : '├── ';
+
+                                    return (
+                                      <tr key={idx} className="bg-slate-50/90 hover:bg-slate-100/90 transition-colors text-slate-600 text-[11px]">
+                                        <td className="py-1.5 px-4 pl-10 sticky left-0 bg-slate-50/95 z-10 border-r border-slate-200 font-mono italic">
+                                          <span className="text-slate-400 font-normal">{prefix}</span>
+                                          <span className="font-bold text-slate-800">{sub.invoiceLabel}</span>
+                                        </td>
+
+                                        {webMatrixData.timeCols.map((col) => {
+                                          const val = sub.colVals[col.key] || 0;
+                                          return (
+                                            <td key={col.key} className="py-1.5 px-3 text-right border-r border-slate-200 whitespace-nowrap font-semibold">
+                                              {val > 0 ? formatAmount(val, sub.currency || orgCurrency) : '—'}
+                                            </td>
+                                          );
+                                        })}
+
+                                        <td className="py-1.5 px-4 text-right font-bold text-slate-700 bg-slate-100 whitespace-nowrap">
+                                          {formatAmount(sub.total, sub.currency || orgCurrency)}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </React.Fragment>
+                              );
+                            })}
+
+                            {/* TOTAL CASH IN (AR) ROW */}
+                            <tr className="bg-gradient-to-r from-emerald-100 via-teal-100 to-emerald-100 font-extrabold text-emerald-950 text-xs border-t-2 border-b-2 border-emerald-400 shadow-2xs">
+                              <td className="py-3 px-4 sticky left-0 bg-emerald-100 z-10 border-r border-emerald-300 font-black tracking-wider uppercase">
+                                TOTAL CASH IN (AR)
                               </td>
 
-                              {webMatrixData.timeCols.map((col) => {
-                                const val = sub.colVals[col.key] || 0;
-                                return (
-                                  <td key={col.key} className="py-1.5 px-3 text-right border-r border-slate-200 whitespace-nowrap font-semibold">
-                                    {val > 0 ? formatAmount(val, sub.currency || orgCurrency) : '—'}
-                                  </td>
-                                );
-                              })}
+                              {webMatrixData.timeCols.map((col) => (
+                                <td key={col.key} className="py-3 px-3 text-right border-r border-emerald-300 font-black whitespace-nowrap text-emerald-950">
+                                  {webMatrixData.arTotals[col.key] > 0 ? formatAmount(webMatrixData.arTotals[col.key], orgCurrency) : '—'}
+                                </td>
+                              ))}
 
-                              <td className="py-1.5 px-4 text-right font-bold text-slate-700 bg-slate-100 whitespace-nowrap">
-                                {formatAmount(sub.total, sub.currency || orgCurrency)}
+                              <td className="py-3 px-4 text-right font-black text-emerald-950 bg-emerald-200/90 text-sm whitespace-nowrap">
+                                {formatAmount(webMatrixData.arGrandTotal, orgCurrency)}
                               </td>
                             </tr>
-                          );
-                        })}
-                      </React.Fragment>
-                    );
-                  })}
+                          </>
+                        )}
 
-                  {/* TOTAL CASH IN (AR) ROW */}
-                  <tr className="bg-gradient-to-r from-emerald-100 via-teal-100 to-emerald-100 font-extrabold text-emerald-950 text-xs border-t-2 border-b-2 border-emerald-400 shadow-2xs">
-                    <td className="py-3 px-4 sticky left-0 bg-emerald-100 z-10 border-r border-emerald-300 font-black tracking-wider uppercase">
-                      TOTAL CASH IN (AR)
-                    </td>
-
-                    {webMatrixData.timeCols.map((col) => (
-                      <td key={col.key} className="py-3 px-3 text-right border-r border-emerald-300 font-black whitespace-nowrap text-emerald-950">
-                        {webMatrixData.arTotals[col.key] > 0 ? formatAmount(webMatrixData.arTotals[col.key], orgCurrency) : '—'}
-                      </td>
-                    ))}
-
-                    <td className="py-3 px-4 text-right font-black text-emerald-950 bg-emerald-200/90 text-sm whitespace-nowrap">
-                      {formatAmount(webMatrixData.arGrandTotal, orgCurrency)}
-                    </td>
-                  </tr>
-
-                  {/* ========================================== */}
-                  {/* SECTION 2: CASH OUT - VENDORS (PAYABLES) */}
-                  {/* ========================================== */}
-                  <tr className="bg-gradient-to-r from-rose-800 via-pink-800 to-rose-900 text-white font-bold tracking-wide shadow-xs">
-                    <td colSpan={webMatrixData.timeCols.length + 2} className="py-2.5 px-4">
-                      <div className="flex items-center justify-between text-xs font-extrabold tracking-wider uppercase">
-                        <span className="flex items-center gap-2">
-                          <span className="h-2 w-2 rounded-full bg-rose-400 animate-pulse"></span>
-                          CASH OUT — VENDORS (PAYABLES)
-                        </span>
-                        <span className="text-[10px] bg-rose-950/60 px-2.5 py-0.5 rounded-full font-mono font-bold text-rose-200 border border-rose-700/50">
-                          {webMatrixData.apContacts.length} Vendors
-                        </span>
-                      </div>
-                    </td>
-                  </tr>
-
-                  {webMatrixData.apContacts.map((group: any) => {
-                    const cKey = `AP-${group.contactName}`;
-                    const isExpanded = Boolean(expandedContacts[cKey]);
-
-                    return (
-                      <React.Fragment key={cKey}>
-                        {/* Parent Contact Summary Row */}
-                        <tr className="bg-rose-50/50 hover:bg-rose-100/70 transition-colors font-bold border-b border-rose-200/60">
-                          <td className="py-2.5 px-4 sticky left-0 bg-rose-50/95 z-10 border-r border-slate-200 shadow-2xs">
-                            <div className="flex items-center gap-2">
-                              <button
-                                onClick={() => toggleExpandContact(cKey)}
-                                className="h-5 w-5 rounded-md bg-rose-200/90 hover:bg-rose-300 text-rose-950 flex items-center justify-center text-xs font-black shrink-0 transition cursor-pointer shadow-2xs"
-                              >
-                                {isExpanded ? '−' : '+'}
-                              </button>
-                              <ContactAvatar name={group.contactName} type="AP" />
-                              <span className="font-bold text-slate-900 truncate">{group.contactName}</span>
-                              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-rose-200/70 text-rose-950 font-bold shrink-0">
-                                {group.invoices.length} Bills
+                        {/* ========================================== */}
+                        {/* SECTION 2: CASH OUT - VENDORS (PAYABLES) */}
+                        {/* ========================================== */}
+                        <tr 
+                          onClick={() => setIsApSectionExpanded(!isApSectionExpanded)}
+                          className="bg-gradient-to-r from-rose-800 via-pink-800 to-rose-900 text-white font-bold tracking-wide shadow-xs cursor-pointer select-none hover:brightness-110 transition-all"
+                        >
+                          <td className="py-2.5 px-4 sticky left-0 bg-rose-900 z-20 border-r border-rose-700 shadow-r">
+                            <div className="flex items-center justify-between text-xs font-extrabold tracking-wider uppercase">
+                              <span className="flex items-center gap-2">
+                                <span className="h-5 w-5 rounded-md bg-rose-700/80 hover:bg-rose-600 text-rose-100 flex items-center justify-center text-xs shrink-0 transition">
+                                  {isApExpanded ? <ChevronDown className="h-3.5 w-3.5 text-white" /> : <ChevronRight className="h-3.5 w-3.5 text-white" />}
+                                </span>
+                                <span className="h-2 w-2 rounded-full bg-rose-400 animate-pulse"></span>
+                                <span>CASH OUT — VENDORS (PAYABLES)</span>
+                              </span>
+                              <span className="text-[10px] bg-rose-950/60 px-2 py-0.5 rounded-full font-mono font-bold text-rose-200 border border-rose-700/50">
+                                {webMatrixData.apContacts.length} Vendors
                               </span>
                             </div>
                           </td>
 
                           {webMatrixData.timeCols.map((col) => {
-                            const val = group.totalColVals[col.key] || 0;
+                            const val = webMatrixData.apTotals[col.key] || 0;
                             return (
-                              <td key={col.key} className="py-2.5 px-3 text-right border-r border-slate-200 font-bold text-rose-700 whitespace-nowrap">
+                              <td key={col.key} className="py-2.5 px-3 text-right border-r border-rose-700/60 font-black whitespace-nowrap text-rose-100 text-xs">
                                 {val > 0 ? formatAmount(val, orgCurrency) : '—'}
                               </td>
                             );
                           })}
 
-                          <td className="py-2.5 px-4 text-right font-black text-rose-900 bg-rose-100/80 whitespace-nowrap">
-                            {formatAmount(group.total, orgCurrency)}
+                          <td className="py-2.5 px-4 text-right font-black text-white bg-rose-950/80 whitespace-nowrap text-xs">
+                            {formatAmount(webMatrixData.apGrandTotal, orgCurrency)}
                           </td>
                         </tr>
 
-                        {/* Indented Individual Bill Sub-Rows */}
-                        {isExpanded && group.invoices.map((sub: any, idx: number) => {
-                          const isLast = idx === group.invoices.length - 1;
-                          const prefix = isLast ? '└── ' : '├── ';
+                        {isApExpanded && (
+                          <>
+                            {webMatrixData.apContacts.map((group: any) => {
+                              const cKey = `AP-${group.contactName}`;
+                              const isExpanded = Boolean(expandedContacts[cKey]);
 
-                          return (
-                            <tr key={idx} className="bg-slate-50/90 hover:bg-slate-100/90 transition-colors text-slate-600 text-[11px]">
-                              <td className="py-1.5 px-4 pl-10 sticky left-0 bg-slate-50/95 z-10 border-r border-slate-200 font-mono italic">
-                                <span className="text-slate-400 font-normal">{prefix}</span>
-                                <span className="font-bold text-slate-800">{sub.invoiceLabel}</span>
+                              return (
+                                <React.Fragment key={cKey}>
+                                  {/* Parent Contact Summary Row */}
+                                  <tr className="bg-rose-50/50 hover:bg-rose-100/70 transition-colors font-bold border-b border-rose-200/60">
+                                    <td className="py-2.5 px-4 sticky left-0 bg-rose-50/95 z-10 border-r border-slate-200 shadow-2xs">
+                                      <div className="flex items-center gap-2">
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            toggleExpandContact(cKey);
+                                          }}
+                                          className="h-5 w-5 rounded-md bg-rose-200/90 hover:bg-rose-300 text-rose-950 flex items-center justify-center text-xs font-black shrink-0 transition cursor-pointer shadow-2xs"
+                                        >
+                                          {isExpanded ? '−' : '+'}
+                                        </button>
+                                        <ContactAvatar name={group.contactName} type="AP" />
+                                        <span className="font-bold text-slate-900 truncate">{group.contactName}</span>
+                                        <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-rose-200/70 text-rose-950 font-bold shrink-0">
+                                          {group.invoices.length} Bills
+                                        </span>
+                                      </div>
+                                    </td>
+
+                                    {webMatrixData.timeCols.map((col) => {
+                                      const val = group.totalColVals[col.key] || 0;
+                                      return (
+                                        <td key={col.key} className="py-2.5 px-3 text-right border-r border-slate-200 font-bold text-rose-700 whitespace-nowrap">
+                                          {val > 0 ? formatAmount(val, orgCurrency) : '—'}
+                                        </td>
+                                      );
+                                    })}
+
+                                    <td className="py-2.5 px-4 text-right font-black text-rose-900 bg-rose-100/80 whitespace-nowrap">
+                                      {formatAmount(group.total, orgCurrency)}
+                                    </td>
+                                  </tr>
+
+                                  {/* Indented Individual Bill Sub-Rows */}
+                                  {isExpanded && group.invoices.map((sub: any, idx: number) => {
+                                    const isLast = idx === group.invoices.length - 1;
+                                    const prefix = isLast ? '└── ' : '├── ';
+
+                                    return (
+                                      <tr key={idx} className="bg-slate-50/90 hover:bg-slate-100/90 transition-colors text-slate-600 text-[11px]">
+                                        <td className="py-1.5 px-4 pl-10 sticky left-0 bg-slate-50/95 z-10 border-r border-slate-200 font-mono italic">
+                                          <span className="text-slate-400 font-normal">{prefix}</span>
+                                          <span className="font-bold text-slate-800">{sub.invoiceLabel}</span>
+                                        </td>
+
+                                        {webMatrixData.timeCols.map((col) => {
+                                          const val = sub.colVals[col.key] || 0;
+                                          return (
+                                            <td key={col.key} className="py-1.5 px-3 text-right border-r border-slate-200 whitespace-nowrap font-semibold text-rose-600">
+                                              {val > 0 ? formatAmount(val, sub.currency || orgCurrency) : '—'}
+                                            </td>
+                                          );
+                                        })}
+
+                                        <td className="py-1.5 px-4 text-right font-bold text-slate-700 bg-slate-100 whitespace-nowrap">
+                                          {formatAmount(sub.total, sub.currency || orgCurrency)}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </React.Fragment>
+                              );
+                            })}
+
+                            {/* TOTAL CASH OUT (AP) ROW */}
+                            <tr className="bg-gradient-to-r from-rose-100 via-pink-100 to-rose-100 font-extrabold text-rose-950 text-xs border-t-2 border-b-2 border-rose-400 shadow-2xs">
+                              <td className="py-3 px-4 sticky left-0 bg-rose-100 z-10 border-r border-rose-300 font-black tracking-wider uppercase">
+                                TOTAL CASH OUT (AP)
                               </td>
 
-                              {webMatrixData.timeCols.map((col) => {
-                                const val = sub.colVals[col.key] || 0;
-                                return (
-                                  <td key={col.key} className="py-1.5 px-3 text-right border-r border-slate-200 whitespace-nowrap font-semibold text-rose-600">
-                                    {val > 0 ? formatAmount(val, sub.currency || orgCurrency) : '—'}
-                                  </td>
-                                );
-                              })}
+                              {webMatrixData.timeCols.map((col) => (
+                                <td key={col.key} className="py-3 px-3 text-right border-r border-rose-300 font-black whitespace-nowrap text-rose-950">
+                                  {webMatrixData.apTotals[col.key] > 0 ? formatAmount(webMatrixData.apTotals[col.key], orgCurrency) : '—'}
+                                </td>
+                              ))}
 
-                              <td className="py-1.5 px-4 text-right font-bold text-slate-700 bg-slate-100 whitespace-nowrap">
-                                {formatAmount(sub.total, sub.currency || orgCurrency)}
+                              <td className="py-3 px-4 text-right font-black text-rose-950 bg-rose-200/90 text-sm whitespace-nowrap">
+                                {formatAmount(webMatrixData.apGrandTotal, orgCurrency)}
                               </td>
                             </tr>
-                          );
-                        })}
-                      </React.Fragment>
+                          </>
+                        )}
+                      </>
                     );
-                  })}
-
-                  {/* TOTAL CASH OUT (AP) ROW */}
-                  <tr className="bg-gradient-to-r from-rose-100 via-pink-100 to-rose-100 font-extrabold text-rose-950 text-xs border-t-2 border-b-2 border-rose-400 shadow-2xs">
-                    <td className="py-3 px-4 sticky left-0 bg-rose-100 z-10 border-r border-rose-300 font-black tracking-wider uppercase">
-                      TOTAL CASH OUT (AP)
-                    </td>
-
-                    {webMatrixData.timeCols.map((col) => (
-                      <td key={col.key} className="py-3 px-3 text-right border-r border-rose-300 font-black whitespace-nowrap text-rose-950">
-                        {webMatrixData.apTotals[col.key] > 0 ? formatAmount(webMatrixData.apTotals[col.key], orgCurrency) : '—'}
-                      </td>
-                    ))}
-
-                    <td className="py-3 px-4 text-right font-black text-rose-950 bg-rose-200/90 text-sm whitespace-nowrap">
-                      {formatAmount(webMatrixData.apGrandTotal, orgCurrency)}
-                    </td>
-                  </tr>
+                  })()}
 
                   {/* ========================================== */}
                   {/* SECTION 3: NET CASH FLOW POSITION */}

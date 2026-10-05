@@ -5,11 +5,28 @@ import { Sidebar } from './sidebar';
 import { Header } from './header';
 import { ConnectorRouteGuard } from './connector-route-guard';
 
+import { usePathname } from 'next/navigation';
+
 interface AppLayoutProps {
   children: React.ReactNode;
 }
 
 export function AppLayout({ children }: AppLayoutProps) {
+  const pathname = usePathname();
+  const isCopilotRoute = pathname?.startsWith('/cfo-copilot');
+
+  if (isCopilotRoute) {
+    return (
+      <div className="h-screen w-screen overflow-hidden bg-[#090d16]">
+        <Suspense fallback={<div className="h-screen w-screen bg-[#090d16] flex items-center justify-center text-slate-400 font-mono text-sm">Loading CFO Copilot...</div>}>
+          <ConnectorRouteGuard>
+            {children}
+          </ConnectorRouteGuard>
+        </Suspense>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-background">
       {/* Sidebar navigation */}

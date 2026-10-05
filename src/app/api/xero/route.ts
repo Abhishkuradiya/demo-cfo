@@ -219,40 +219,71 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Execute live fetches from Xero APIs in parallel and write cache
+    // Execute fast live fetches from Xero APIs in parallel batches to stay well under Nginx 60s timeout
     try {
-      const contacts = await fetchXeroResource(accessToken, xeroTenantId, 'Contacts');
-      await db.saveCachedRecords(tenantId, 'contacts', contacts || []);
-      // Cache raw contacts payload as report for dashboard metrics (Balances, IsCustomer, IsSupplier)
-      await db.saveReport(tenantId, 'Contacts', contacts || []);
-      counts.contacts = contacts?.length || 0;
-    } catch(e){}
- 
-    try {
-      const payments = await fetchXeroResource(accessToken, xeroTenantId, 'Payments');
-      await db.saveCachedRecords(tenantId, 'payments', payments || []);
-      counts.payments = payments?.length || 0;
-    } catch(e){}
- 
-    try {
-      const accounts = await fetchXeroResource(accessToken, xeroTenantId, 'Accounts');
-      await db.saveCachedRecords(tenantId, 'accounts', accounts || []);
-      counts.accounts = accounts?.length || 0;
-    } catch(e){}
+      const [
+        contactsRes,
+        paymentsRes,
+        accountsRes,
+        itemsRes,
+        taxRatesRes,
+        prepaymentsRes,
+        overpaymentsRes,
+        orgsRes,
+        plRes
+      ] = await Promise.allSettled([
+        fetchXeroResource(accessToken, xeroTenantId, 'Contacts'),
+        fetchXeroResource(accessToken, xeroTenantId, 'Payments'),
+        fetchXeroResource(accessToken, xeroTenantId, 'Accounts'),
+        fetchXeroResource(accessToken, xeroTenantId, 'Items'),
+        fetchXeroResource(accessToken, xeroTenantId, 'TaxRates'),
+        fetchXeroResource(accessToken, xeroTenantId, 'Prepayments'),
+        fetchXeroResource(accessToken, xeroTenantId, 'Overpayments'),
+        fetchXeroResource(accessToken, xeroTenantId, 'Organisations'),
+        fetchXeroReport(accessToken, xeroTenantId, 'ProfitAndLoss')
+      ]);
 
-    // Sync Items for Inventory Dashboard
-    try {
-      const items = await fetchXeroResource(accessToken, xeroTenantId, 'Items');
-      await db.saveInventoryItems(tenantId, items || []);
-      counts.items = items?.length || 0;
-    } catch(e) {
-      console.error('Failed to sync Xero Items:', e);
+      if (contactsRes.status === 'fulfilled' && contactsRes.value) {
+        await db.saveCachedRecords(tenantId, 'contacts', contactsRes.value);
+        await db.saveReport(tenantId, 'Contacts', contactsRes.value);
+        counts.contacts = contactsRes.value.length;
+      }
+      if (paymentsRes.status === 'fulfilled' && paymentsRes.value) {
+        await db.saveCachedRecords(tenantId, 'payments', paymentsRes.value);
+        counts.payments = paymentsRes.value.length;
+      }
+      if (accountsRes.status === 'fulfilled' && accountsRes.value) {
+        await db.saveCachedRecords(tenantId, 'accounts', accountsRes.value);
+        counts.accounts = accountsRes.value.length;
+      }
+      if (itemsRes.status === 'fulfilled' && itemsRes.value) {
+        await db.saveInventoryItems(tenantId, itemsRes.value);
+        counts.items = itemsRes.value.length;
+      }
+      if (taxRatesRes.status === 'fulfilled' && taxRatesRes.value) {
+        await db.saveReport(tenantId, 'TaxRates', taxRatesRes.value);
+      }
+      if (prepaymentsRes.status === 'fulfilled' && prepaymentsRes.value) {
+        await db.saveReport(tenantId, 'Prepayments', prepaymentsRes.value);
+        counts.prepayments = prepaymentsRes.value.length;
+      }
+      if (overpaymentsRes.status === 'fulfilled' && overpaymentsRes.value) {
+        await db.saveReport(tenantId, 'Overpayments', overpaymentsRes.value);
+        counts.overpayments = overpaymentsRes.value.length;
+      }
+      if (orgsRes.status === 'fulfilled' && orgsRes.value?.[0]) {
+        await db.saveReport(tenantId, 'Organisation', orgsRes.value[0]);
+      }
+      if (plRes.status === 'fulfilled' && plRes.value) {
+        await db.saveReport(tenantId, 'ProfitAndLoss', plRes.value);
+      }
+    } catch (e) {
+      console.error('[Sync] Error in master parallel batch:', e);
     }
 
     // Sync Fixed Assets
     try {
       await XeroFixedAssetsService.syncFixedAssets(tenantId);
-      // Clear fixed assets dashboard summary cache to force reload
       await db.saveFixedAssetsCache(tenantId, 'FixedAssetsDashboardSummary', null, 0);
     } catch (e) {
       console.error('Failed to sync Fixed Assets:', e);
@@ -261,21 +292,18 @@ export async function POST(req: NextRequest) {
     // Sync General Ledger
     try {
       await XeroGeneralLedgerService.syncGeneralLedger(tenantId);
-      // Clear general ledger dashboard cache
       await db.saveGlCache(tenantId, 'GeneralLedgerDashboardSummary', null, 0);
     } catch (e) {
       console.error('Failed to sync General Ledger:', e);
     }
 
-    // Sync detailed Invoice Line Items for inventory sales history and tax calculations (fully paginated)
+    // Sync detailed Invoice Line Items for inventory sales history and tax calculations
     try {
       const allInvoicesWithLines: any[] = [];
       let page = 1;
       let hasMore = true;
-      while (hasMore && page <= 100) { // Limit to 100 pages max to prevent infinite loop
+      while (hasMore && page <= 20) { // Limit to 20 pages max for fast response
         try {
-          // Pause 250ms to stay within Xero's 5 requests/sec rate limits
-          await new Promise(resolve => setTimeout(resolve, 250));
           const pageData = await fetchXeroResource(
             accessToken, 
             xeroTenantId, 
@@ -298,7 +326,6 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Overwrite raw caches and reports with detailed line-item invoices
       if (allInvoicesWithLines.length > 0) {
         await db.saveCachedRecords(tenantId, 'invoices', allInvoicesWithLines);
         await db.saveReport(tenantId, 'Invoices', allInvoicesWithLines);
@@ -339,10 +366,8 @@ export async function POST(req: NextRequest) {
       const allCreditNotes: any[] = [];
       let page = 1;
       let hasMore = true;
-      while (hasMore && page <= 10) {
+      while (hasMore && page <= 5) {
         try {
-          // Pause 250ms to stay within Xero's 5 requests/sec rate limits
-          await new Promise(resolve => setTimeout(resolve, 250));
           const pageData = await fetchXeroResource(accessToken, xeroTenantId, 'CreditNotes', `page=${page}`);
           if (pageData && pageData.length > 0) {
             allCreditNotes.push(...pageData);
@@ -364,14 +389,6 @@ export async function POST(req: NextRequest) {
       console.error('Failed to sync CreditNotes:', e);
     }
 
-    // Sync TaxRates master data
-    try {
-      const taxRates = await fetchXeroResource(accessToken, xeroTenantId, 'TaxRates');
-      await db.saveReport(tenantId, 'TaxRates', taxRates || []);
-    } catch (e) {
-      console.error('Failed to sync TaxRates:', e);
-    }
-
     // Trigger normalization/sync of tax transactions
     try {
       await TaxSyncService.syncTaxTransactions(tenantId);
@@ -379,11 +396,9 @@ export async function POST(req: NextRequest) {
       console.error('Failed to process TaxSyncService:', e);
     }
 
-    // ── Cash Flow Sources ─────────────────────────────────────────
-    // BankTransactions: Contains RECEIVE/SPEND money transactions.
-    // Used by the Cash In engine to capture non-invoice cash receipts.
+    // Cash Flow Sources
     try {
-      const bankTxns = await fetchXeroResourcePaginated(accessToken, xeroTenantId, 'BankTransactions');
+      const bankTxns = await fetchXeroResourcePaginated(accessToken, xeroTenantId, 'BankTransactions', 10);
       await db.saveReport(tenantId, 'BankTransactions', bankTxns || []);
       counts.bankTransactions = bankTxns?.length || 0;
     } catch(e) {
@@ -391,50 +406,12 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-      const manualJournals = await fetchXeroResourcePaginated(accessToken, xeroTenantId, 'ManualJournals');
+      const manualJournals = await fetchXeroResourcePaginated(accessToken, xeroTenantId, 'ManualJournals', 5);
       await db.saveReport(tenantId, 'ManualJournals', manualJournals || []);
     } catch(e) {
       console.error('Failed to sync ManualJournals:', e);
     }
 
-    // Prepayments: Customer advance payments before invoice issuance.
-    // Only RECEIVE-PREPAYMENT type contributes to Cash In.
-    try {
-      const prepayments = await fetchXeroResource(accessToken, xeroTenantId, 'Prepayments');
-      await db.saveReport(tenantId, 'Prepayments', prepayments || []);
-      counts.prepayments = prepayments?.length || 0;
-    } catch(e) {
-      console.error('Failed to sync Prepayments:', e);
-    }
-
-    // Overpayments: Customer payments exceeding invoice amount.
-    // Only RECEIVE-OVERPAYMENT type contributes to Cash In.
-    try {
-      const overpayments = await fetchXeroResource(accessToken, xeroTenantId, 'Overpayments');
-      await db.saveReport(tenantId, 'Overpayments', overpayments || []);
-      counts.overpayments = overpayments?.length || 0;
-    } catch(e) {
-      console.error('Failed to sync Overpayments:', e);
-    }
-
-    try {
-      const organisations = await fetchXeroResource(accessToken, xeroTenantId, 'Organisations');
-      if (organisations && organisations.length > 0) {
-        await db.saveReport(tenantId, 'Organisation', organisations[0]);
-      }
-    } catch(e) {
-      console.error('Failed to sync Organisation details:', e);
-    }
- 
-    try {
-      const plReport = await fetchXeroReport(accessToken, xeroTenantId, 'ProfitAndLoss');
-      if (plReport) {
-        await db.saveReport(tenantId, 'ProfitAndLoss', plReport);
-      }
-    } catch(e){
-      console.error('Failed to sync ProfitAndLoss report:', e);
-    }
- 
     // Clear derived dashboard page caches so that fresh sync data is calculated and displayed
     try {
       await db.clearDerivedCaches(tenantId);

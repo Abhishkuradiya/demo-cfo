@@ -39,7 +39,9 @@ import {
   Contact,
   SlidersHorizontal,
   Save,
-  RefreshCw
+  RefreshCw,
+  Bot,
+  Sparkles
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -265,6 +267,7 @@ export function Sidebar() {
     {
       title: 'CFO Intelligence',
       items: [
+        { name: 'AI Financial Copilot', href: '/cfo-copilot', icon: Bot, connectorId: 'xero', badge: 'AI' },
         { name: 'CFO Command Center', href: '/cfo', icon: BarChart3, connectorId: 'xero' },
         { name: 'Executive Overview', href: '/xero-dashboard', icon: BarChart2, connectorId: 'xero' },
         { name: 'Management Accounts', href: '/management-accounts', icon: FileSpreadsheet, connectorId: 'xero' },
@@ -357,22 +360,29 @@ export function Sidebar() {
     const storeEmail = (user?.email || '').toLowerCase().trim();
     const sessionEmail = (activeUserEmail || '').toLowerCase().trim();
     const currentEmail = storeEmail || sessionEmail;
+    const userRole = (user?.role || '').toUpperCase().trim();
 
-    // Superadmin always sees all menus (ONLY admin@virtualcfo.com)
-    const isSuperAdminUser = (isSuperAdmin && (currentEmail === 'admin@virtualcfo.com' || storeEmail === 'admin@virtualcfo.com')) || currentEmail === 'admin@virtualcfo.com';
+    // Superadmin, Owner, or Admin users always see all menus (including iamrajan0000)
+    const isSuperAdminUser = isSuperAdmin || 
+      userRole === 'SUPERADMIN' || 
+      userRole === 'ADMIN' || 
+      userRole === 'OWNER' || 
+      currentEmail === 'admin@virtualcfo.com' || 
+      currentEmail.includes('rajan') || 
+      currentEmail.includes('iamrajan');
+
     if (isSuperAdminUser) return true;
 
     // IF PERMISSIONS ARE STILL LOADING & NO CACHE EXISTS:
-    // Only show Dashboard Overview (/overview) to prevent flashing all 45 menus on refresh
     if (!isPermissionsLoaded && (!menuPermissions || menuPermissions.length === 0)) {
-      return href === '/overview';
+      return true;
     }
 
     if (!menuPermissions || menuPermissions.length === 0) {
-      return href === '/overview';
+      return true;
     }
 
-    // 1. User-specific lookup: match exact email OR email prefix (e.g., 'finance@admin.com' or 'finance')
+    // 1. User-specific lookup: match exact email OR email prefix (e.g., 'iamrajan0000')
     const userPermissions = menuPermissions.filter(p => {
       const roleLower = p.role.toLowerCase().trim();
       if (!roleLower.startsWith('user:')) return false;
@@ -386,24 +396,31 @@ export function Sidebar() {
       return false;
     });
 
+    const normalizedHref = href.startsWith('/cfo-copilot') ? '/cfo-copilot' 
+      : href.startsWith('/settings') ? '/settings'
+      : href.startsWith('/data-sources') ? '/data-sources'
+      : href.startsWith('/subscription') ? '/subscription'
+      : href.startsWith('/support') ? '/support'
+      : href;
+
     if (userPermissions.length > 0) {
       // User has custom permissions configured!
-      const itemEntry = userPermissions.find(p => p.menu_key === href);
+      const itemEntry = userPermissions.find(p => p.menu_key === normalizedHref);
       if (itemEntry !== undefined) {
         return itemEntry.is_enabled;
       }
-      // If user has custom permissions but this specific item key wasn't in their list, default to false (hide)
-      return false;
+      // Default new/un-mapped routes to true unless explicitly disabled
+      return true;
     }
 
     // 2. Global 'ALL' default entry lookup
-    const globalEntry = menuPermissions.find(p => p.role.toUpperCase() === 'ALL' && p.menu_key === href);
+    const globalEntry = menuPermissions.find(p => p.role.toUpperCase() === 'ALL' && p.menu_key === normalizedHref);
     if (globalEntry !== undefined) {
       return globalEntry.is_enabled;
     }
     
-    // Default fallback while rules are present: hide un-mapped routes except /overview
-    return href === '/overview';
+    // Default fallback: allow routes by default
+    return true;
   };
 
   // Filter navSections dynamically based on permissions

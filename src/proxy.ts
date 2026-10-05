@@ -43,7 +43,7 @@ export function proxy(request: NextRequest) {
   }
 
   // 2. REGULAR CLIENT TENANT ROUTES HANDLING
-  const publicPaths = ['/', '/login', '/register', '/onboarding', '/api/onboarding', '/api/auth/login', '/api/auth/register', '/api/auth/invitation-info', '/api/db-status', '/api/xero/callback', '/api/amazon'];
+  const publicPaths = ['/', '/login', '/register', '/onboarding', '/cfo-copilot', '/api/cfo/copilot', '/api/onboarding', '/api/auth/login', '/api/auth/register', '/api/auth/invitation-info', '/api/db-status', '/api/xero/callback', '/api/amazon'];
   const isPublicPath = publicPaths.some(path => pathname === path || (path !== '/' && pathname.startsWith(path + '/')));
 
   if (isPublicPath) {

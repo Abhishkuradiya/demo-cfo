@@ -1,6 +1,16 @@
 import { db } from '../db';
 import { CanonicalMetricEngine } from './CanonicalMetricEngine';
 
+export function extractMetricNumber(metric: any): number | null {
+  if (metric === null || metric === undefined) return null;
+  if (typeof metric === 'number') return metric;
+  if (typeof metric === 'object') {
+    if (typeof metric.value === 'number') return metric.value;
+    if (metric.value === null || metric.value === undefined) return null;
+  }
+  return null;
+}
+
 export interface DerivedMetric<T = number | null> {
   value: T;
   sourceMetrics: string[];
@@ -233,6 +243,8 @@ export class CFOIntelligenceEngine {
       prevStartDate && prevEndDate ? { startDate: prevStartDate, endDate: prevEndDate } : undefined
     );
 
+    const revNumber = extractMetricNumber(currentFinancials.metrics.revenue) || 0;
+
     // 3. Expense Intelligence
     const expenses = await this.calculateExpenseIntelligence(
       tenantId,
@@ -240,7 +252,7 @@ export class CFOIntelligenceEngine {
       endDate,
       prevStartDate,
       prevEndDate,
-      currentFinancials.metrics.revenue || 0
+      revNumber
     );
 
     // 4. Revenue Intelligence
@@ -273,7 +285,7 @@ export class CFOIntelligenceEngine {
     const metrics: Record<string, DerivedMetric> = {
       ...profitability,
       cash: {
-        value: currentFinancials.metrics.cash,
+        value: extractMetricNumber(currentFinancials.metrics.cashBalance) ?? extractMetricNumber(currentFinancials.metrics.cash),
         sourceMetrics: ['cashBalance'],
         formula: 'Balance Sheet Total Cash',
         period: { startDate, endDate },
@@ -329,30 +341,31 @@ export class CFOIntelligenceEngine {
     currency: string,
     hasPrevData: boolean
   ): Record<string, DerivedMetric> {
-    const m = current.metrics;
-    const pM = prev ? prev.metrics : null;
+    const m = current.metrics || {};
+    const pM = prev ? (prev.metrics || {}) : null;
 
-    const rev = m.revenue ?? null;
-    const prevRev = pM ? (pM.revenue ?? null) : null;
+    const rev = extractMetricNumber(m.revenue);
+    const prevRev = pM ? extractMetricNumber(pM.revenue) : null;
+    const cogs = extractMetricNumber(m.cogs ?? m.costOfSales);
 
     let revGrowth: number | null = null;
     if (rev !== null && prevRev !== null && prevRev !== 0) {
       revGrowth = ((rev - prevRev) / Math.abs(prevRev)) * 100;
     }
 
-    const gp = m.grossProfit ?? (rev !== null && m.cogs !== null ? rev - m.cogs : null);
+    const gp = extractMetricNumber(m.grossProfit) ?? (rev !== null && cogs !== null ? rev - cogs : null);
     const grossMarginPct = rev !== null && rev > 0 && gp !== null ? (gp / rev) * 100 : null;
 
-    const opex = m.operatingExpenses ?? null;
+    const opex = extractMetricNumber(m.operatingExpenses);
     const opexPct = rev !== null && rev > 0 && opex !== null ? (opex / rev) * 100 : null;
 
-    const opProfit = m.operatingProfit ?? (gp !== null && opex !== null ? gp - opex : null);
+    const opProfit = extractMetricNumber(m.operatingProfit) ?? (gp !== null && opex !== null ? gp - opex : null);
     const opMarginPct = rev !== null && rev > 0 && opProfit !== null ? (opProfit / rev) * 100 : null;
 
-    const netProfit = m.netProfit ?? null;
+    const netProfit = extractMetricNumber(m.netProfit);
     const netMarginPct = rev !== null && rev > 0 && netProfit !== null ? (netProfit / rev) * 100 : null;
 
-    const ebitda = m.ebitda !== undefined ? m.ebitda : null;
+    const ebitda = extractMetricNumber(m.ebitda);
     const ebitdaMarginPct = ebitda !== null && rev !== null && rev > 0 ? (ebitda / rev) * 100 : null;
 
     const baseMeta = {
@@ -360,7 +373,7 @@ export class CFOIntelligenceEngine {
       currency,
       dataCoverage: current.dataCoverageStatus || 'DATA_COMPLETE',
       mappingCoverage: `${current.mappingCoveragePct}%`,
-      confidence: current.mappingCoveragePct >= 90 ? 1.0 : 0.8
+      confidence: (current.mappingCoveragePct || 100) >= 90 ? 1.0 : 0.8
     };
 
     return {
@@ -392,8 +405,8 @@ export class CFOIntelligenceEngine {
     const res: Record<string, PeriodComparison> = {};
 
     for (const key of keys) {
-      const curVal = current?.metrics?.[key] !== undefined ? current.metrics[key] : null;
-      const prevVal = prev?.metrics?.[key] !== undefined ? prev.metrics[key] : null;
+      const curVal = extractMetricNumber(current?.metrics?.[key]);
+      const prevVal = extractMetricNumber(prev?.metrics?.[key]);
 
       let absDiff: number | null = null;
       let pctDiff: number | null = null;
