@@ -12,6 +12,11 @@ import { XeroBudgetService } from '@/lib/budgetService';
 import { XeroTaxService } from '@/lib/taxService';
 import { XeroGeneralLedgerService } from '@/lib/generalLedgerService';
 
+import { getDefaultDateRange } from '@/lib/date-defaults';
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export async function GET(req: NextRequest) {
   const tenantId = await getTenantIdFromSession();
   if (tenantId === null) {
@@ -19,6 +24,7 @@ export async function GET(req: NextRequest) {
   }
   const { searchParams } = new URL(req.url);
   const view = (searchParams.get('view') || 'monthly').toLowerCase();
+  const forceSync = searchParams.get('force_sync') === 'true' || searchParams.get('refresh') === 'true';
 
   try {
     // 1. Check Xero connection status
@@ -59,28 +65,10 @@ export async function GET(req: NextRequest) {
       endDate = new Date(toDateParam);
       endDate.setHours(23, 59, 59, 999);
     } else {
-      // Find latest invoice date in the database to see if we should fallback
-      let latestInvoiceDate: Date | null = null;
-      for (const inv of cachedInvoices) {
-        if (inv.Type !== 'ACCREC' || (inv.Status !== 'AUTHORISED' && inv.Status !== 'PAID')) continue;
-        const invDate = parseXeroDate(inv.Date);
-        if (invDate && (!latestInvoiceDate || invDate > latestInvoiceDate)) {
-          latestInvoiceDate = invDate;
-        }
-      }
-
-      if (latestInvoiceDate) {
-        // Last 6 months ending in the latest invoice date's month
-        const endYear = latestInvoiceDate.getFullYear();
-        const endMonth = latestInvoiceDate.getMonth();
-        endDate = new Date(endYear, endMonth + 1, 0, 23, 59, 59, 999);
-        startDate = new Date(endYear, endMonth - 5, 1, 0, 0, 0, 0);
-      } else {
-        // Fallback to last 6 months from today
-        const now = new Date();
-        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-        startDate = new Date(now.getFullYear(), now.getMonth() - 5, 1, 0, 0, 0, 0);
-      }
+      const defaultDates = getDefaultDateRange();
+      startDate = new Date(defaultDates.startDate);
+      endDate = new Date(defaultDates.endDate);
+      endDate.setHours(23, 59, 59, 999);
     }
 
     // Dynamic Comparison Period (preceding period of equal duration)
@@ -172,20 +160,32 @@ export async function GET(req: NextRequest) {
 
     const chartLabels: string[] = [];
     const chartRevenue: number[] = [];
+    const chartCompRevenue: number[] = [];
 
     if (view === 'daily') {
       const curr = new Date(startDate);
       while (curr <= endDate) {
         chartLabels.push(curr.toLocaleDateString('en-US', { day: '2-digit', month: 'short' }));
         let daySum = 0;
+        let compDaySum = 0;
+
+        const compCurr = new Date(curr);
+        compCurr.setFullYear(curr.getFullYear() - 1);
+
         for (const inv of cachedInvoices) {
           if (inv.Type !== 'ACCREC' || (inv.Status !== 'AUTHORISED' && inv.Status !== 'PAID')) continue;
           const d = parseXeroDate(inv.Date);
-          if (d && d.getFullYear() === curr.getFullYear() && d.getMonth() === curr.getMonth() && d.getDate() === curr.getDate()) {
-            daySum += inv.Total || 0;
+          if (d) {
+            if (d.getFullYear() === curr.getFullYear() && d.getMonth() === curr.getMonth() && d.getDate() === curr.getDate()) {
+              daySum += inv.Total || 0;
+            }
+            if (d.getFullYear() === compCurr.getFullYear() && d.getMonth() === compCurr.getMonth() && d.getDate() === compCurr.getDate()) {
+              compDaySum += inv.Total || 0;
+            }
           }
         }
         chartRevenue.push(parseFloat(daySum.toFixed(2)));
+        chartCompRevenue.push(parseFloat(compDaySum.toFixed(2)));
         curr.setDate(curr.getDate() + 1);
       }
     } else if (view === 'weekly') {
@@ -200,15 +200,27 @@ export async function GET(req: NextRequest) {
         const label = `${curr.toLocaleDateString('en-US', { day: '2-digit', month: 'short' })} - ${weekEnd.toLocaleDateString('en-US', { day: '2-digit', month: 'short' })}`;
         chartLabels.push(label);
 
+        const compCurr = new Date(curr);
+        compCurr.setFullYear(curr.getFullYear() - 1);
+        const compWeekEnd = new Date(weekEnd);
+        compWeekEnd.setFullYear(weekEnd.getFullYear() - 1);
+
         let weekSum = 0;
+        let compWeekSum = 0;
         for (const inv of cachedInvoices) {
           if (inv.Type !== 'ACCREC' || (inv.Status !== 'AUTHORISED' && inv.Status !== 'PAID')) continue;
           const d = parseXeroDate(inv.Date);
-          if (d && d >= curr && d <= weekEnd) {
-            weekSum += inv.Total || 0;
+          if (d) {
+            if (d >= curr && d <= weekEnd) {
+              weekSum += inv.Total || 0;
+            }
+            if (d >= compCurr && d <= compWeekEnd) {
+              compWeekSum += inv.Total || 0;
+            }
           }
         }
         chartRevenue.push(parseFloat(weekSum.toFixed(2)));
+        chartCompRevenue.push(parseFloat(compWeekSum.toFixed(2)));
         curr.setDate(curr.getDate() + 7);
       }
     } else {
@@ -216,15 +228,6 @@ export async function GET(req: NextRequest) {
       const monthsRange = getMonthsInRange(startDate, endDate);
       for (const m of monthsRange) {
         chartLabels.push(m.label);
-        let mSum = 0;
-        for (const inv of cachedInvoices) {
-          if (inv.Type !== 'ACCREC' || (inv.Status !== 'AUTHORISED' && inv.Status !== 'PAID')) continue;
-          const d = parseXeroDate(inv.Date);
-          if (d && d.getFullYear() === m.year && d.getMonth() === m.month) {
-            mSum += inv.Total || 0;
-          }
-        }
-        chartRevenue.push(parseFloat(mSum.toFixed(2)));
       }
     }
 
@@ -232,9 +235,12 @@ export async function GET(req: NextRequest) {
     const pad = (n: number) => String(n).padStart(2, '0');
     const fromDateStr = `${startDate.getFullYear()}-${pad(startDate.getMonth() + 1)}-01`;
     const toDateStr = `${endDate.getFullYear()}-${pad(endDate.getMonth() + 1)}-${pad(endDate.getDate())}`;
-    const queryParams = `fromDate=${fromDateStr}&toDate=${toDateStr}`;
 
-    const reportCacheKey = `ProfitAndLoss_${fromDateStr}_${toDateStr}`;
+    const monthsRange = getMonthsInRange(startDate, endDate);
+    const periodsCount = Math.max(0, monthsRange.length - 1);
+    const queryParams = `fromDate=${fromDateStr}&toDate=${toDateStr}&timeframe=MONTH&periods=${periodsCount}`;
+
+    const reportCacheKey = `ProfitAndLoss_Multi_${fromDateStr}_${toDateStr}`;
     let plReport = await db.getReport(tenantId, reportCacheKey);
 
     if (!plReport && isConnected) {
@@ -249,17 +255,19 @@ export async function GET(req: NextRequest) {
     }
 
     const plSummary = ProfitAndLossService.parseReport(plReport);
+    const currentMonthRevenueMap = ProfitAndLossService.parseMultiPeriodRevenue(plReport);
 
     // 6. Fetch and parse comparison Profit & Loss report (for preceding period of equal duration)
     const compFromStr = `${compStartDate.getFullYear()}-${pad(compStartDate.getMonth() + 1)}-01`;
     const compToStr = `${compEndDate.getFullYear()}-${pad(compEndDate.getMonth() + 1)}-${pad(compEndDate.getDate())}`;
 
-    const compReportCacheKey = `ProfitAndLoss_${compFromStr}_${compToStr}`;
+    const compQueryParams = `fromDate=${compFromStr}&toDate=${compToStr}&timeframe=MONTH&periods=${periodsCount}`;
+    const compReportCacheKey = `ProfitAndLoss_Multi_${compFromStr}_${compToStr}`;
     let compPlReport = await db.getReport(tenantId, compReportCacheKey);
 
     if (!compPlReport && isConnected) {
       try {
-        compPlReport = await fetchXeroReport(accessToken, xeroTenantId, 'ProfitAndLoss', `fromDate=${compFromStr}&toDate=${compToStr}`);
+        compPlReport = await fetchXeroReport(accessToken, xeroTenantId, 'ProfitAndLoss', compQueryParams);
         if (compPlReport) {
           await db.saveReport(tenantId, compReportCacheKey, compPlReport);
         }
@@ -269,6 +277,43 @@ export async function GET(req: NextRequest) {
     }
 
     const compPlSummary = ProfitAndLossService.parseReport(compPlReport);
+    const compMonthRevenueMap = ProfitAndLossService.parseMultiPeriodRevenue(compPlReport);
+
+    if (view === 'monthly') {
+      for (const m of monthsRange) {
+        const monthKey = `${m.year}-${pad(m.month + 1)}`;
+        const compMonthKey = `${m.year - 1}-${pad(m.month + 1)}`;
+
+        let mRevenue = currentMonthRevenueMap[monthKey];
+        if (mRevenue === undefined) {
+          let mSum = 0;
+          for (const inv of cachedInvoices) {
+            if (inv.Type !== 'ACCREC' || (inv.Status !== 'AUTHORISED' && inv.Status !== 'PAID')) continue;
+            const d = parseXeroDate(inv.Date);
+            if (d && d.getFullYear() === m.year && d.getMonth() === m.month) {
+              mSum += inv.Total || 0;
+            }
+          }
+          mRevenue = mSum;
+        }
+
+        let compMRevenue = compMonthRevenueMap[compMonthKey];
+        if (compMRevenue === undefined) {
+          let compMSum = 0;
+          for (const inv of cachedInvoices) {
+            if (inv.Type !== 'ACCREC' || (inv.Status !== 'AUTHORISED' && inv.Status !== 'PAID')) continue;
+            const d = parseXeroDate(inv.Date);
+            if (d && d.getFullYear() === (m.year - 1) && d.getMonth() === m.month) {
+              compMSum += inv.Total || 0;
+            }
+          }
+          compMRevenue = compMSum;
+        }
+
+        chartRevenue.push(parseFloat(mRevenue.toFixed(2)));
+        chartCompRevenue.push(parseFloat(compMRevenue.toFixed(2)));
+      }
+    }
 
     // 6b. Fetch and parse Year-To-Date (YTD) Profit & Loss report
     const ytdStartDateStr = `${endDate.getFullYear()}-01-01`;
@@ -478,7 +523,6 @@ export async function GET(req: NextRequest) {
     if (isNaN(apGrowthPercent)) apGrowthPercent = 0;
 
     // 12. Calculate monthly trend data sets for sparklines
-    const monthsRange = getMonthsInRange(startDate, endDate);
     const chartCash: number[] = [];
     const chartAR: number[] = [];
     const chartAP: number[] = [];
@@ -634,12 +678,23 @@ export async function GET(req: NextRequest) {
     let inventoryValue = 0;
     let inventoryLowStock = 0;
     let inventoryDeadStock = 0;
+    let inventoryMode = 'TRACKED';
+    let inventoryOpeningStock = 0;
+    let inventoryClosingStock = 0;
+    let inventoryNetStockChange = 0;
+
     if (isConnected) {
       try {
-        const invSummary = await XeroInventoryService.getDashboard(tenantId);
+        const startStr = startDate ? (startDate instanceof Date ? startDate.toISOString().split('T')[0] : String(startDate)) : undefined;
+        const endStr = endDate ? (endDate instanceof Date ? endDate.toISOString().split('T')[0] : String(endDate)) : undefined;
+        const invSummary = await XeroInventoryService.getDashboard(tenantId, 90, startStr, endStr, forceSync);
         inventoryValue = invSummary.inventory_value;
         inventoryLowStock = invSummary.low_stock_items;
         inventoryDeadStock = invSummary.dead_stock_items;
+        inventoryMode = invSummary.mode || 'TRACKED';
+        inventoryOpeningStock = invSummary.opening_stock || 0;
+        inventoryClosingStock = invSummary.closing_stock || 0;
+        inventoryNetStockChange = invSummary.net_stock_change || 0;
       } catch (e) {
         console.error('Failed to parse inventory for dashboard summary:', e);
       }
@@ -651,7 +706,7 @@ export async function GET(req: NextRequest) {
     let fixedAssetsNetBook = 0;
     if (isConnected) {
       try {
-        const faSummary = await XeroFixedAssetsService.getDashboard(tenantId);
+        const faSummary = await XeroFixedAssetsService.getDashboard(tenantId, forceSync);
         fixedAssetsTotal = faSummary.total_assets;
         fixedAssetsAccumDeprec = faSummary.accumulated_depreciation;
         fixedAssetsNetBook = faSummary.net_book_value;
@@ -710,6 +765,10 @@ export async function GET(req: NextRequest) {
       inventoryValue,
       inventoryLowStock,
       inventoryDeadStock,
+      inventoryMode,
+      inventoryOpeningStock,
+      inventoryClosingStock,
+      inventoryNetStockChange,
       fixedAssetsTotal,
       fixedAssetsAccumDeprec,
       fixedAssetsNetBook,
@@ -743,8 +802,11 @@ export async function GET(req: NextRequest) {
       currency: finalCurrency,
       startDate: fromDateStr,
       endDate: toDateStr,
+      compStartDate: compFromStr,
+      compEndDate: compToStr,
       chartLabels,
       chartRevenue,
+      chartCompRevenue,
       netProfit,
       cogs: plSummary.cogs,
       grossProfit: plSummary.grossProfit,

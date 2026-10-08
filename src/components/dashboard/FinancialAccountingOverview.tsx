@@ -74,6 +74,11 @@ export function FinancialAccountingOverview({ data, loading }: FinancialAccounti
   const invValue = data?.inventoryValue || 0;
   const invLowStock = data?.inventoryLowStock || 0;
   const invDeadStock = data?.inventoryDeadStock || 0;
+  const invMode = data?.inventoryMode || (data?.inventoryOpeningStock > 0 || data?.inventoryClosingStock > 0 ? 'COA_PERIODIC' : 'TRACKED');
+  const invOpening = data?.inventoryOpeningStock || 0;
+  const invClosing = data?.inventoryClosingStock || 0;
+  const invNetChange = data?.inventoryNetStockChange !== undefined ? data.inventoryNetStockChange : (invClosing - invOpening);
+  const isCoaInventory = invMode === 'COA_PERIODIC' || (invValue === 0 && (invOpening > 0 || invClosing > 0));
 
   const faAssets = data?.fixedAssetsTotal || 0;
   const faDeprec = data?.fixedAssetsAccumDeprec || 0;
@@ -189,12 +194,16 @@ export function FinancialAccountingOverview({ data, loading }: FinancialAccounti
     },
     {
       title: "Inventory",
-      description: "Track stock levels, value and movement.",
+      description: isCoaInventory ? "Track opening stock, closing stock and movement." : "Track stock levels, value and movement.",
       icon: Package,
       iconBg: "bg-amber-50 border border-amber-100/50 text-amber-600",
       action: "View Inventory",
       url: "/products",
-      metrics: [
+      metrics: isCoaInventory ? [
+        { label: "Opening Stock", value: formatVal(invOpening) },
+        { label: "Closing Stock", value: formatVal(invClosing) },
+        { label: "Net Stock Change", value: formatVal(invNetChange), valueClass: invNetChange >= 0 ? "text-emerald-600 font-bold" : "text-amber-600 font-bold" }
+      ] : [
         { label: "Inventory Value", value: formatVal(invValue) },
         { label: "Low Stock Items", value: formatVal(invLowStock, false), valueClass: "text-red-500 font-bold" },
         { label: "Dead Stock Items", value: formatVal(invDeadStock, false), valueClass: "text-red-500 font-bold" }

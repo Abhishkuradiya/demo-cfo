@@ -3,6 +3,7 @@ import { db, parseXeroDate } from '@/lib/db';
 import { getXeroAccessToken, fetchXeroReport } from '@/lib/xero';
 import { BalanceSheetParser } from '@/lib/services/BalanceSheetParser';
 import { getTenantIdFromSession } from '@/lib/auth';
+import { getDefaultDateRange } from '@/lib/date-defaults';
 
 function findCurrentLiabilities(rows: any[]): number {
   return BalanceSheetParser.findSummary(rows, 'total current liabilities') ||
@@ -45,26 +46,10 @@ export async function GET(req: NextRequest) {
       endDate = new Date(toDateParam);
       endDate.setHours(23, 59, 59, 999);
     } else {
-      // Find latest invoice date in the database to see if we should fallback
-      let latestInvoiceDate: Date | null = null;
-      for (const inv of cachedInvoices) {
-        if (inv.Type !== 'ACCREC' || (inv.Status !== 'AUTHORISED' && inv.Status !== 'PAID')) continue;
-        const invDate = parseXeroDate(inv.Date);
-        if (invDate && (!latestInvoiceDate || invDate > latestInvoiceDate)) {
-          latestInvoiceDate = invDate;
-        }
-      }
-
-      if (latestInvoiceDate) {
-        const endYear = latestInvoiceDate.getFullYear();
-        const endMonth = latestInvoiceDate.getMonth();
-        endDate = new Date(endYear, endMonth + 1, 0, 23, 59, 59, 999);
-        startDate = new Date(endYear, endMonth - 5, 1, 0, 0, 0, 0);
-      } else {
-        const now = new Date();
-        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-        startDate = new Date(now.getFullYear(), now.getMonth() - 5, 1, 0, 0, 0, 0);
-      }
+      const defaultDates = getDefaultDateRange();
+      startDate = new Date(defaultDates.startDate);
+      endDate = new Date(defaultDates.endDate);
+      endDate.setHours(23, 59, 59, 999);
     }
 
     const toDateStr = `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, '0')}-${String(endDate.getDate()).padStart(2, '0')}`;

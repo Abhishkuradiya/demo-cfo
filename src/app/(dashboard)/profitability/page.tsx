@@ -296,7 +296,7 @@ export default function ProfitabilityAnalysisPage() {
           name: 'Net Profit',
           type: 'bar',
           data: nps,
-          itemStyle: { color: '#a855f7', borderRadius: [3, 3, 0, 0] }
+          itemStyle: { color: '#6366f1', borderRadius: [3, 3, 0, 0] }
         },
         {
           name: 'Gross Margin %',
@@ -306,8 +306,8 @@ export default function ProfitabilityAnalysisPage() {
           smooth: true,
           symbol: 'circle',
           symbolSize: 6,
-          itemStyle: { color: '#a855f7' },
-          lineStyle: { width: 2.5, color: '#a855f7' }
+          itemStyle: { color: '#0d9488' },
+          lineStyle: { width: 2.5, color: '#0d9488' }
         }
       ]
     };

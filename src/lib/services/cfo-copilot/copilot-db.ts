@@ -26,6 +26,18 @@ export interface ChatSession {
   lastMessage?: string;
 }
 
+export interface EvidenceSnapshot {
+  tenantId: string | number;
+  retrievedAt: string;
+  sourceTools: string[];
+  period?: { startDate: string; endDate: string; label: string };
+  toolOutputs: Record<string, any>;
+  authoritativeFacts?: any[];
+  validatedCalculations?: any[];
+  dataQuality: 'COMPLETE' | 'PARTIAL' | 'NO_DATA' | 'ZERO_CONFIRMED' | 'INCOMPLETE_DATA' | 'CONFLICTING';
+  lastAnswerText?: string;
+}
+
 export interface CfoConversationContext {
   conversationId: string;
   tenantId: string | number;
@@ -63,7 +75,8 @@ export interface CfoConversationContext {
   unresolvedQuestions: string[];
   lastToolResultsSummary?: string;
   lastConfidence?: 'HIGH' | 'MEDIUM' | 'LOW';
-  dataQuality?: 'COMPLETE' | 'PARTIAL' | 'NO_DATA' | 'ZERO_CONFIRMED';
+  dataQuality?: 'COMPLETE' | 'PARTIAL' | 'NO_DATA' | 'ZERO_CONFIRMED' | 'INCOMPLETE_DATA' | 'CONFLICTING';
+  lastEvidenceSnapshot?: EvidenceSnapshot;
   updatedAt: string;
 }
 
@@ -107,7 +120,14 @@ function readCopilotDb(): { sessions: ChatSession[]; messages: ChatMessage[]; co
 function writeCopilotDb(data: { sessions: ChatSession[]; messages: ChatMessage[]; contexts?: CfoConversationContext[] }): void {
   ensureDbFile();
   try {
-    fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2), 'utf8');
+    const raw = JSON.stringify(data, null, 2);
+    try {
+      const tmpPath = DB_PATH + '.tmp';
+      fs.writeFileSync(tmpPath, raw, 'utf8');
+      fs.renameSync(tmpPath, DB_PATH);
+    } catch (e) {
+      fs.writeFileSync(DB_PATH, raw, 'utf8');
+    }
   } catch (err) {
     console.error('[Copilot DB] Error writing db:', err);
   }

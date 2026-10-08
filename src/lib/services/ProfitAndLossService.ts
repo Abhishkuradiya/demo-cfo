@@ -157,4 +157,58 @@ export class ProfitAndLossService {
 
     return result;
   }
+
+  /**
+   * Parses multi-period P&L report headers & rows to extract month-by-month revenue.
+   * Returns map of "YYYY-MM" -> revenue number.
+   */
+  static parseMultiPeriodRevenue(report: any): Record<string, number> {
+    const monthRevenueMap: Record<string, number> = {};
+    if (!report || !report.Rows || !Array.isArray(report.Rows)) return monthRevenueMap;
+
+    const headerRow = report.Rows.find((row: any) => row.RowType === 'Header');
+    if (!headerRow || !headerRow.Cells) return monthRevenueMap;
+
+    const colIndexToMonthKey: Record<number, string> = {};
+    headerRow.Cells.forEach((cell: any, idx: number) => {
+      if (idx === 0 || !cell.Value) return;
+      const d = new Date(cell.Value);
+      if (!isNaN(d.getTime())) {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        colIndexToMonthKey[idx] = `${y}-${m}`;
+      }
+    });
+
+    const findSummaryRowCells = (rows: any[]): any[] | null => {
+      for (const row of rows) {
+        if (row.RowType === 'SummaryRow' || row.RowType === 'Row') {
+          const firstCell = (row.Cells?.[0]?.Value || '').toLowerCase().trim();
+          if (['total turnover', 'turnover', 'total trading income', 'total revenue', 'total income', 'revenue', 'sales', 'gross sales'].includes(firstCell)) {
+            return row.Cells;
+          }
+        }
+        if (row.Rows && Array.isArray(row.Rows)) {
+          const subRes = findSummaryRowCells(row.Rows);
+          if (subRes) return subRes;
+        }
+      }
+      return null;
+    };
+
+    const revenueCells = findSummaryRowCells(report.Rows);
+    if (revenueCells) {
+      revenueCells.forEach((cell: any, idx: number) => {
+        const monthKey = colIndexToMonthKey[idx];
+        if (monthKey && cell.Value !== undefined) {
+          const val = parseFloat(String(cell.Value).replace(/,/g, ''));
+          if (!isNaN(val)) {
+            monthRevenueMap[monthKey] = val;
+          }
+        }
+      });
+    }
+
+    return monthRevenueMap;
+  }
 }

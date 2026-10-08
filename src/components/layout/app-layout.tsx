@@ -17,8 +17,8 @@ export function AppLayout({ children }: AppLayoutProps) {
 
   if (isCopilotRoute) {
     return (
-      <div className="h-screen w-screen overflow-hidden bg-[#090d16]">
-        <Suspense fallback={<div className="h-screen w-screen bg-[#090d16] flex items-center justify-center text-slate-400 font-mono text-sm">Loading CFO Copilot...</div>}>
+      <div className="h-screen w-screen overflow-hidden bg-slate-50 text-slate-900 antialiased">
+        <Suspense fallback={<div className="h-screen w-screen bg-slate-50 flex items-center justify-center text-slate-500 font-sans text-sm">Loading Virtual CFO Copilot...</div>}>
           <ConnectorRouteGuard>
             {children}
           </ConnectorRouteGuard>

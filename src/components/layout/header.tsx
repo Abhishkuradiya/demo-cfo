@@ -9,6 +9,7 @@ import { toast } from 'sonner';
 import { DateRangePicker } from '../ui/date-range-picker';
 import { CFOAiDrawer } from '../common/cfo-ai-drawer';
 import { cn } from '@/lib/utils';
+import { getDefaultDateRange } from '@/lib/date-defaults';
 
 function formatTimeAgo(dateStr: string | null | undefined): string {
   if (!dateStr) return "Never synced";
@@ -104,16 +105,11 @@ export function Header() {
     return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   };
 
-  const now = new Date();
-  const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
-  const currentMonthEnd = now.toISOString().slice(0, 10);
+  const defaults = getDefaultDateRange();
+  const activeStart = fromDate || defaultStart || defaults.startDate;
+  const activeEnd = toDate || defaultEnd || defaults.endDate;
 
-  const activeStart = fromDate || defaultStart || currentMonthStart;
-  const activeEnd = toDate || defaultEnd || currentMonthEnd;
-
-  const dateRangeLabel = (activeStart && activeEnd)
-    ? `${formatDateLabel(activeStart)} – ${formatDateLabel(activeEnd)}`
-    : `${formatDateLabel(currentMonthStart)} – ${formatDateLabel(currentMonthEnd)}`;
+  const dateRangeLabel = `${formatDateLabel(activeStart)} – ${formatDateLabel(activeEnd)}`;
 
   const formatYMD = (d: Date) => {
     const y = d.getFullYear();
@@ -186,7 +182,7 @@ export function Header() {
 
   const fetchSyncStatus = async () => {
     try {
-      const res = await fetch('/api/xero');
+      const res = await fetch('/api/xero', { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         if (data.connected) {
@@ -441,7 +437,7 @@ export function Header() {
     try {
       const res = await fetch('/api/xero', { method: 'POST' });
       const contentType = res.headers.get('content-type') || '';
-      
+
       if (res.ok) {
         toast.success("Xero sync completed successfully!", { id: "sync-toast" });
         setSyncTime("Just now");
@@ -452,7 +448,7 @@ export function Header() {
         let errData: any = null;
         try {
           errData = await res.json();
-        } catch (e) {}
+        } catch (e) { }
         toast.error(errData?.message || "Xero sync failed. Please check credentials or try again.", { id: "sync-toast" });
       }
     } catch (err: any) {
@@ -464,11 +460,11 @@ export function Header() {
 
   const handleClearCache = async () => {
     setIsClearingCache(true);
-    toast.loading("Clearing dashboard caches...", { id: "cache-toast" });
+    toast.loading("Purging local report cache...", { id: "cache-toast" });
     try {
       const res = await fetch('/api/xero/clear-cache', { method: 'POST' });
       if (res.ok) {
-        toast.success("Cache cleared successfully! Pulling fresh data...", { id: "cache-toast" });
+        toast.success("Cache purged successfully! Pulling fresh data from Live Xero API...", { id: "cache-toast" });
         window.dispatchEvent(new CustomEvent('xero-sync-complete'));
         router.refresh();
       } else {
@@ -504,103 +500,103 @@ export function Header() {
 
       <div className="w-full px-4 md:px-6 flex h-20 items-center justify-between">
         <div className="flex items-center gap-4 min-w-0">
-        {/* Responsive Hamburger / Sidebar Toggle Menu Button */}
-        <button
-          onClick={() => {
-            if (typeof window !== 'undefined' && window.innerWidth < 768) {
-              setOpenMobile(true);
-            } else {
-              toggleSidebar();
-            }
-          }}
-          className={cn(
-            "flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer outline-none transition shrink-0 shadow-2xs",
-            isCollapsed
-              ? "md:flex bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100 hover:text-blue-700 dark:bg-blue-950/50 dark:text-blue-400 dark:border-blue-800"
-              : "md:hidden"
-          )}
-          aria-label="Toggle navigation menu"
-          title={isCollapsed ? "Expand Sidebar (Ctrl+B)" : "Collapse Sidebar (Ctrl+B)"}
-        >
-          <Menu className="h-5 w-5" />
-        </button>
-
-        {isAmazon ? (
-          /* Amazon Command Center Title Block */
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-9 h-9 md:w-10 md:h-10 rounded-xl bg-white p-1.5 flex items-center justify-center shadow-xs border border-slate-200 dark:border-slate-700 shrink-0">
-              <img
-                src="/Amazon_icon.png"
-                alt="Amazon Logo"
-                className="w-full h-full object-contain"
-                onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
-              />
-            </div>
-            <div className="flex flex-col select-none min-w-0">
-              <h1 className="text-lg md:text-xl font-bold tracking-tight text-slate-900 dark:text-slate-100 leading-tight truncate">
-                Amazon Dashboard
-              </h1>
-              <p className="text-[11.5px] md:text-xs text-slate-400 font-normal mt-0.5 truncate">
-                Complete view of your Amazon business — Sales, Orders, Inventory, Fulfillment, Finances and more.
-              </p>
-            </div>
-          </div>
-        ) : isStripe ? (
-          /* Stripe Command Center Title Block */
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-9 h-9 md:w-10 md:h-10 rounded-xl bg-white p-1.5 flex items-center justify-center shadow-xs border border-slate-200 dark:border-slate-700 shrink-0">
-              <img
-                src="/stripe-com-logo.png"
-                alt="Stripe Logo"
-                className="w-full h-full object-contain"
-                onError={(e) => { (e.target as HTMLImageElement).src = '/stripe_logo.png'; }}
-              />
-            </div>
-            <div className="flex flex-col select-none min-w-0">
-              <h1 className="text-lg md:text-xl font-bold tracking-tight text-slate-900 dark:text-slate-100 leading-tight truncate">
-                Stripe Command Center
-              </h1>
-              <p className="text-[11.5px] md:text-xs text-slate-400 font-normal mt-0.5 truncate">
-                Complete financial intelligence for your Stripe business — Revenue, Subscriptions, Payouts & Disputes
-              </p>
-            </div>
-          </div>
-        ) : (
-          /* Dynamic Title and Subtitle */
-          <div className="flex flex-col select-none">
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl md:text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100 leading-tight">
-                {title}
-              </h1>
-              {isSales && (
-                <button className="outline-none">
-                  <Star className="h-[15px] w-[15px] text-slate-350 hover:text-amber-400 cursor-pointer transition fill-none" />
-                </button>
-              )}
-            </div>
-            <p className="text-[12px] md:text-xs text-slate-400 font-normal mt-0.5">
-              {subtitle}
-            </p>
-          </div>
-        )}
-      </div>
-
-      {(isAmazon || isStripe) ? (
-        /* Amazon & Stripe Header Right Section: Bell + User Menu */
-        <div className="flex items-center gap-3 shrink-0">
-          <button className="relative flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 text-slate-650 cursor-pointer outline-none transition shadow-2xs">
-            <Bell className="h-3.5 w-3.5 text-slate-500" />
-            <span className="absolute -top-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-red-500 text-[7.5px] font-bold text-white border border-white">
-              5
-            </span>
+          {/* Responsive Hamburger / Sidebar Toggle Menu Button */}
+          <button
+            onClick={() => {
+              if (typeof window !== 'undefined' && window.innerWidth < 768) {
+                setOpenMobile(true);
+              } else {
+                toggleSidebar();
+              }
+            }}
+            className={cn(
+              "flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer outline-none transition shrink-0 shadow-2xs",
+              isCollapsed
+                ? "md:flex bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100 hover:text-blue-700 dark:bg-blue-950/50 dark:text-blue-400 dark:border-blue-800"
+                : "md:hidden"
+            )}
+            aria-label="Toggle navigation menu"
+            title={isCollapsed ? "Expand Sidebar (Ctrl+B)" : "Collapse Sidebar (Ctrl+B)"}
+          >
+            <Menu className="h-5 w-5" />
           </button>
 
-          <span className="h-5 w-px bg-slate-200 dark:bg-slate-700 my-auto shrink-0" />
-
-          <UserMenu />
+          {isAmazon ? (
+            /* Amazon Command Center Title Block */
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-9 h-9 md:w-10 md:h-10 rounded-xl bg-white p-1.5 flex items-center justify-center shadow-xs border border-slate-200 dark:border-slate-700 shrink-0">
+                <img
+                  src="/Amazon_icon.png"
+                  alt="Amazon Logo"
+                  className="w-full h-full object-contain"
+                  onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
+                />
+              </div>
+              <div className="flex flex-col select-none min-w-0">
+                <h1 className="text-lg md:text-xl font-bold tracking-tight text-slate-900 dark:text-slate-100 leading-tight truncate">
+                  Amazon Dashboard
+                </h1>
+                <p className="text-[11.5px] md:text-xs text-slate-400 font-normal mt-0.5 truncate">
+                  Complete view of your Amazon business — Sales, Orders, Inventory, Fulfillment, Finances and more.
+                </p>
+              </div>
+            </div>
+          ) : isStripe ? (
+            /* Stripe Command Center Title Block */
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-9 h-9 md:w-10 md:h-10 rounded-xl bg-white p-1.5 flex items-center justify-center shadow-xs border border-slate-200 dark:border-slate-700 shrink-0">
+                <img
+                  src="/stripe-com-logo.png"
+                  alt="Stripe Logo"
+                  className="w-full h-full object-contain"
+                  onError={(e) => { (e.target as HTMLImageElement).src = '/stripe_logo.png'; }}
+                />
+              </div>
+              <div className="flex flex-col select-none min-w-0">
+                <h1 className="text-lg md:text-xl font-bold tracking-tight text-slate-900 dark:text-slate-100 leading-tight truncate">
+                  Stripe Command Center
+                </h1>
+                <p className="text-[11.5px] md:text-xs text-slate-400 font-normal mt-0.5 truncate">
+                  Complete financial intelligence for your Stripe business — Revenue, Subscriptions, Payouts & Disputes
+                </p>
+              </div>
+            </div>
+          ) : (
+            /* Dynamic Title and Subtitle */
+            <div className="flex flex-col select-none">
+              <div className="flex items-center gap-2">
+                <h1 className="text-xl md:text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100 leading-tight">
+                  {title}
+                </h1>
+                {isSales && (
+                  <button className="outline-none">
+                    <Star className="h-[15px] w-[15px] text-slate-350 hover:text-amber-400 cursor-pointer transition fill-none" />
+                  </button>
+                )}
+              </div>
+              <p className="text-[12px] md:text-xs text-slate-400 font-normal mt-0.5">
+                {subtitle}
+              </p>
+            </div>
+          )}
         </div>
-      ) : (
-        <div className="flex items-center gap-2.5 md:gap-3 shrink-0 flex-nowrap">
+
+        {(isAmazon || isStripe) ? (
+          /* Amazon & Stripe Header Right Section: Bell + User Menu */
+          <div className="flex items-center gap-3 shrink-0">
+            <button className="relative flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 text-slate-650 cursor-pointer outline-none transition shadow-2xs">
+              <Bell className="h-3.5 w-3.5 text-slate-500" />
+              <span className="absolute -top-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-red-500 text-[7.5px] font-bold text-white border border-white">
+                5
+              </span>
+            </button>
+
+            <span className="h-5 w-px bg-slate-200 dark:bg-slate-700 my-auto shrink-0" />
+
+            <UserMenu />
+          </div>
+        ) : (
+          <div className="flex items-center gap-2.5 md:gap-3 shrink-0 flex-nowrap">
             {/* Organisation Switcher */}
             {connections.length > 0 && (
               <div className="relative" ref={switcherRef}>
@@ -631,8 +627,8 @@ export function Header() {
                             key={conn.xeroTenantId}
                             onClick={() => handleSwitchOrg(conn.xeroTenantId, conn.name)}
                             className={`flex w-full items-center justify-between px-3 py-2 text-left text-xs rounded-lg transition-colors cursor-pointer outline-none ${isActive
-                                ? "bg-slate-50 font-bold text-slate-900"
-                                : "text-slate-600 hover:bg-slate-50/80 hover:text-slate-900"
+                              ? "bg-slate-50 font-bold text-slate-900"
+                              : "text-slate-600 hover:bg-slate-50/80 hover:text-slate-900"
                               }`}
                           >
                             <span className="truncate pr-2">{conn.name}</span>
@@ -766,7 +762,7 @@ export function Header() {
                   onClick={handleClearCache}
                   disabled={isClearingCache}
                   className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 text-xs font-bold text-slate-655 bg-white hover:bg-slate-50 transition disabled:opacity-55 cursor-pointer outline-none shadow-2xs h-9.5"
-                  title="Clear local database cache"
+                  title="Purges local report cache and fetches fresh live data directly from Xero API"
                 >
                   <Trash2 className={`h-3.5 w-3.5 ${isClearingCache ? 'animate-pulse text-red-500' : 'text-slate-450'}`} />
                   <span>Clear Cache</span>
@@ -780,7 +776,7 @@ export function Header() {
                   <RefreshCw className={`h-3.5 w-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
                   {pathname === '/data-sources' ? 'Sync All' : 'Sync Now'}
                 </button>
-          </>
+              </>
             )}
 
             {/* Funnel/Filter Icon for Sales dashboard */}
@@ -802,8 +798,8 @@ export function Header() {
 
             {/* User Account Menu */}
             <UserMenu />
-        </div>
-      )}
+          </div>
+        )}
       </div>
       <CFOAiDrawer />
     </header>

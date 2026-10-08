@@ -114,6 +114,18 @@ export async function GET(req: NextRequest) {
       
       start = `${sixMonthsAgo.getFullYear()}-${String(sixMonthsAgo.getMonth() + 1).padStart(2, '0')}-01`;
       end = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    } else {
+      // Ensure date range never exceeds 364 days for Xero API limits
+      const dStart = new Date(start);
+      const dEnd = new Date(end);
+      const diffDays = Math.ceil((dEnd.getTime() - dStart.getTime()) / (1000 * 60 * 60 * 24));
+      if (diffDays > 365) {
+        const clampedStart = new Date(dEnd.getTime() - 364 * 24 * 60 * 60 * 1000);
+        const y = clampedStart.getFullYear();
+        const m = String(clampedStart.getMonth() + 1).padStart(2, '0');
+        const d = String(clampedStart.getDate()).padStart(2, '0');
+        start = `${y}-${m}-${d}`;
+      }
     }
 
     const cacheKey = `ProfitAndLoss_${start}_${end}`;

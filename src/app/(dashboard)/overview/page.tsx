@@ -342,8 +342,11 @@ export default function OverviewPage() {
     overdueInvoices: [] as any[],
     chartLabels: [] as string[],
     chartRevenue: [] as number[],
+    chartCompRevenue: [] as number[],
     startDate: "",
-    endDate: ""
+    endDate: "",
+    compStartDate: "",
+    compEndDate: ""
   });
   const [isLoading, setIsLoading] = useState(true);
   const [chartLoading, setChartLoading] = useState(false);
@@ -517,9 +520,13 @@ export default function OverviewPage() {
   const fromDateParam = searchParams.get('from_date') || searchParams.get('fromDate') || '';
   const toDateParam = searchParams.get('to_date') || searchParams.get('toDate') || '';
 
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = async (isInitial: boolean = true) => {
     try {
-      setIsLoading(true);
+      if (isInitial) {
+        setIsLoading(true);
+      } else {
+        setChartLoading(true);
+      }
       const fromDate = searchParams.get('from_date') || searchParams.get('fromDate');
       const toDate = searchParams.get('to_date') || searchParams.get('toDate');
       let url = `/api/xero/dashboard?view=${revenueTimeframe.toLowerCase()}`;
@@ -535,6 +542,7 @@ export default function OverviewPage() {
       console.error('Failed to fetch dashboard data:', err);
     } finally {
       setIsLoading(false);
+      setChartLoading(false);
     }
   };
 
@@ -564,12 +572,12 @@ export default function OverviewPage() {
   };
 
   useEffect(() => {
-    fetchDashboardData();
+    fetchDashboardData(true);
     fetchHealthAndAlerts();
 
     // Listen for custom sync events from Header
     const handleSyncComplete = () => {
-      fetchDashboardData();
+      fetchDashboardData(true);
       fetchHealthAndAlerts();
     };
 
@@ -578,7 +586,12 @@ export default function OverviewPage() {
       window.removeEventListener('xero-sync-complete', handleSyncComplete);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fromDateParam, toDateParam, revenueTimeframe]);
+  }, [fromDateParam, toDateParam]);
+
+  useEffect(() => {
+    fetchDashboardData(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revenueTimeframe]);
 
   // Refs for ECharts initialization
   const revenueChartRef = useRef<HTMLDivElement>(null);
@@ -600,6 +613,57 @@ export default function OverviewPage() {
     }
   };
 
+  const getComparisonDetails = (startStr?: string, endStr?: string, compStartStr?: string, compEndStr?: string) => {
+    if (!startStr || !endStr) {
+      return {
+        label: "vs Prior Period",
+        compShortRange: ""
+      };
+    }
+    try {
+      const start = new Date(startStr);
+      const end = new Date(endStr);
+      const diffDays = Math.round((end.getTime() - start.getTime()) / (1000 * 3600 * 24)) + 1;
+
+      let compStart: Date;
+      let compEnd: Date;
+      if (compStartStr && compEndStr) {
+        compStart = new Date(compStartStr);
+        compEnd = new Date(compEndStr);
+      } else {
+        compEnd = new Date(start.getTime() - 24 * 3600 * 1000);
+        compStart = new Date(compEnd.getTime() - (diffDays - 1) * 24 * 3600 * 1000);
+      }
+
+      const startMonth = compStart.toLocaleDateString('en-GB', { month: 'short' });
+      const startYr = compStart.toLocaleDateString('en-GB', { year: '2-digit' });
+      const endMonth = compEnd.toLocaleDateString('en-GB', { month: 'short' });
+      const endYr = compEnd.toLocaleDateString('en-GB', { year: '2-digit' });
+
+      let compShortRange = "";
+      if (startMonth === endMonth && startYr === endYr) {
+        compShortRange = `${startMonth} ${startYr}`;
+      } else if (startYr === endYr) {
+        compShortRange = `${startMonth} – ${endMonth} ${endYr}`;
+      } else {
+        compShortRange = `${startMonth} ${startYr} – ${endMonth} ${endYr}`;
+      }
+
+      return { label: "vs Prior Period", compShortRange };
+    } catch {
+      return {
+        label: "vs Prior Period",
+        compShortRange: ""
+      };
+    }
+  };
+
+  const compDetails = useMemo(() => {
+    return getComparisonDetails(data?.startDate, data?.endDate, data?.compStartDate, data?.compEndDate);
+  }, [data?.startDate, data?.endDate, data?.compStartDate, data?.compEndDate]);
+
+  const compText = compDetails.compShortRange ? `vs (${compDetails.compShortRange})` : "vs Last Period";
+
   // 1. Metric Cards data
   const metricCards: Array<{
     title: string;
@@ -619,7 +683,7 @@ export default function OverviewPage() {
       value: isLoading ? "..." : formatCurrency(data.revenueMTD, data.currency),
       amount: data.revenueMTD || 0,
       currency: data.currency,
-      change: isLoading ? "..." : `${getGrowthDetails(data.growthPercent).text} vs Last Month`,
+      change: isLoading ? "..." : `${getGrowthDetails(data.growthPercent).text} ${compText}`,
       changeClass: getGrowthDetails(data.growthPercent).className,
       tooltipText: "Accounting Revenue from Xero Profit & Loss Report (VAT Excluded, Credit Notes Included).",
       iconBg: "bg-[#e8f0fe] rounded-xl border border-blue-100/50",
@@ -636,7 +700,7 @@ export default function OverviewPage() {
       value: isLoading ? "..." : formatCurrency(data.netProfit || 0, data.currency),
       amount: data.netProfit || 0,
       currency: data.currency,
-      change: isLoading ? "..." : `${getGrowthDetails(data.netProfitGrowthPercent).text} vs Last Month`,
+      change: isLoading ? "..." : `${getGrowthDetails(data.netProfitGrowthPercent).text} ${compText}`,
       changeClass: getGrowthDetails(data.netProfitGrowthPercent).className,
       tooltipText: "Net Profit from Xero Profit & Loss Report (VAT Excluded, Credit Notes Included).",
       iconBg: "bg-[#e6fcf5] rounded-xl border border-emerald-100/50",
@@ -655,9 +719,9 @@ export default function OverviewPage() {
       value: isLoading ? "..." : formatCurrency(data.totalCash || 0, data.currency),
       amount: data.totalCash || 0,
       currency: data.currency,
-      change: isLoading ? "..." : `${getGrowthDetails(data.cashGrowthPercent).text} vs Last Month`,
+      change: isLoading ? "..." : `${getGrowthDetails(data.cashGrowthPercent).text} ${compText}`,
       changeClass: getGrowthDetails(data.cashGrowthPercent).className,
-      tooltipText: `Point-in-time snapshot as of date. Sum of all liquid bank accounts verified from Chart of Accounts. Click card to view distribution breakdown.`,
+      tooltipText: "Point-in-time snapshot as of date. Sum of all liquid bank accounts verified from Chart of Accounts. Click card to view distribution breakdown.",
       onClick: () => setIsCashDrawerOpen(true),
       iconBg: "bg-[#e6fcf5] rounded-xl border border-emerald-100/50 cursor-pointer hover:bg-emerald-100/70 transition-colors",
       icon: (
@@ -673,7 +737,7 @@ export default function OverviewPage() {
       value: isLoading ? "..." : formatCurrency(data.accountsReceivable || 0, data.currency),
       amount: data.accountsReceivable || 0,
       currency: data.currency,
-      change: isLoading ? "..." : `${getGrowthDetails(data.arGrowthPercent).text} vs Last Month`,
+      change: isLoading ? "..." : `${getGrowthDetails(data.arGrowthPercent).text} ${compText}`,
       changeClass: getGrowthDetails(data.arGrowthPercent).className,
       tooltipText: "Total money collected from paid sales invoices in this period (VAT Included, Credit Notes Excluded).",
       iconBg: "bg-[#fef3c7] rounded-xl border border-amber-100/50",
@@ -692,7 +756,7 @@ export default function OverviewPage() {
       value: isLoading ? "..." : formatCurrency(data.accountsPayable || 0, data.currency),
       amount: data.accountsPayable || 0,
       currency: data.currency,
-      change: isLoading ? "..." : `${getGrowthDetails(data.apGrowthPercent).text} vs Last Month`,
+      change: isLoading ? "..." : `${getGrowthDetails(data.apGrowthPercent).text} ${compText}`,
       changeClass: getGrowthDetails(data.apGrowthPercent).className,
       tooltipText: "Total money paid to suppliers for bills in this period (VAT Included, Credit Notes Excluded).",
       iconBg: "bg-[#f3e8ff] rounded-xl border border-purple-100/50",
@@ -704,7 +768,7 @@ export default function OverviewPage() {
         </svg>
       )
     }
-  ], [data, isLoading, searchParams]);
+  ], [data, isLoading, searchParams, compText]);
 
   // 2. Initialize Revenue Trend Line Chart
   useEffect(() => {
@@ -720,7 +784,9 @@ export default function OverviewPage() {
       ? (data.chartRevenue.length === dataLen ? data.chartRevenue : data.chartRevenue.slice(0, dataLen))
       : Array(dataLen).fill(0);
 
-    const prevRevData = Array(dataLen).fill(0);
+    const prevRevData = (data.chartCompRevenue && data.chartCompRevenue.length > 0)
+      ? (data.chartCompRevenue.length === dataLen ? data.chartCompRevenue : data.chartCompRevenue.slice(0, dataLen))
+      : Array(dataLen).fill(0);
 
     const option = {
       grid: {
@@ -745,32 +811,45 @@ export default function OverviewPage() {
           fontSize: 11
         },
         formatter: function (params: any) {
-          const curr = params[0];
-          const prev = params[1];
-          const displayCurrency = data.currency || "";
+          if (!Array.isArray(params) || params.length === 0) return '';
+          const curr = params.find((p: any) => p.seriesName?.includes('Current')) || params[0];
+          const prev = params.find((p: any) => p.seriesName?.includes('Previous')) || params[1];
+          const displayCurrency = data.currency || "GBP";
 
-          let valFormatted = "";
-          if (!displayCurrency) {
-            valFormatted = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(curr.value);
-          } else if (displayCurrency === 'INR') {
-            valFormatted = '₹' + new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(curr.value);
+          const formatVal = (v: number) => {
+            if (v === undefined || v === null) return `${displayCurrency} 0`;
+            return `${displayCurrency} ${new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(v)}`;
+          };
+
+          const currVal = curr ? (curr.value || 0) : 0;
+          const prevVal = prev ? (prev.value || 0) : 0;
+
+          const currYear = data.startDate ? new Date(data.startDate).getFullYear() : 2026;
+          const prevYear = currYear - 1;
+
+          let growthBadge = '';
+          if (prevVal > 0) {
+            const diffPct = (((currVal - prevVal) / prevVal) * 100).toFixed(1);
+            const isPos = parseFloat(diffPct) >= 0;
+            growthBadge = `<div style="margin-top: 6px; padding: 4px 8px; background: ${isPos ? '#f0fdf4' : '#fff1f2'}; border: 1px solid ${isPos ? '#bbf7d0' : '#fecdd3'}; border-radius: 6px; font-weight: 700; font-size: 10.5px; color: ${isPos ? '#15803d' : '#be123c'}; text-align: center;">${isPos ? '↑' : '↓'} ${Math.abs(parseFloat(diffPct))}% vs ${prevYear}</div>`;
           } else {
-            valFormatted = displayCurrency + ' ' + new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(curr.value);
+            growthBadge = `<div style="margin-top: 6px; padding: 4px 8px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; font-weight: 600; font-size: 10px; color: #64748b; text-align: center;">No ${prevYear} baseline data</div>`;
           }
 
-          const prevVal = prev ? prev.value : 0;
-          const pct = prevVal > 0 ? (((curr.value - prevVal) / prevVal) * 100).toFixed(1) : "0";
-          const currentYear = data.startDate ? new Date(data.startDate).getFullYear() : 2026;
-          const prevYear = currentYear - 1;
           return `
-            <div style="font-family: var(--font-sans), sans-serif; min-width: 130px;">
-              <div style="color: #94a3b8; font-weight: 600; margin-bottom: 4px;">${curr.axisValue} ${currentYear}</div>
-              <div style="display: flex; items-center: center; gap: 6px; font-weight: bold; color: #334155;">
-                <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #0064eb;"></span>
-                <span>Revenue</span>
+            <div style="font-family: var(--font-sans), sans-serif; min-width: 170px; padding: 2px;">
+              <div style="font-weight: 700; color: #475569; border-bottom: 1px solid #f1f5f9; padding-bottom: 4px; margin-bottom: 8px; font-size: 11px;">
+                ${curr.axisValue} Performance
               </div>
-              <div style="font-size: 13px; font-weight: 800; color: #0f172a; margin-top: 4px;">${valFormatted}</div>
-              <div style="color: #10b981; font-weight: 600; margin-top: 2px;">${parseFloat(pct) >= 0 ? '↑' : '↓'} ${Math.abs(parseFloat(pct))}% vs ${prevYear}</div>
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; font-size: 11px;">
+                <span style="color: #0064eb; font-weight: 700;">● ${currYear}:</span>
+                <span style="font-weight: 800; color: #0f172a; margin-left: 10px;">${formatVal(currVal)}</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; font-size: 11px;">
+                <span style="color: #10b981; font-weight: 700;">● ${prevYear}:</span>
+                <span style="font-weight: 800; color: #0f172a; margin-left: 10px;">${formatVal(prevVal)}</span>
+              </div>
+              ${growthBadge}
             </div>
           `;
         }
@@ -795,33 +874,56 @@ export default function OverviewPage() {
         axisTick: { show: false },
         axisLabel: { color: '#94a3b8', fontSize: 10, fontWeight: 505, fontFamily: 'var(--font-sans), sans-serif' }
       },
-      yAxis: {
-        type: 'value',
-        axisLine: { show: false },
-        axisTick: { show: false },
-        splitLine: {
-          lineStyle: {
-            color: '#f8fafc',
-            type: 'dashed'
+      yAxis: [
+        {
+          type: 'value',
+          axisLine: { show: false },
+          axisTick: { show: false },
+          scale: true,
+          splitLine: {
+            lineStyle: {
+              color: '#f8fafc',
+              type: 'dashed'
+            }
+          },
+          axisLabel: {
+            formatter: (val: number) => {
+              const displayCurrency = data.currency || "";
+              if (!displayCurrency) return `${val}`;
+              if (displayCurrency === 'INR') return `₹${val / 100000}L`;
+              return `${displayCurrency} ${val}`;
+            },
+            color: '#94a3b8',
+            fontSize: 10,
+            fontWeight: 505,
+            fontFamily: 'var(--font-sans), sans-serif'
           }
         },
-        axisLabel: {
-          formatter: (val: number) => {
-            const displayCurrency = data.currency || "";
-            if (!displayCurrency) return `${val}`;
-            if (displayCurrency === 'INR') return `₹${val / 100000}L`;
-            return `${displayCurrency} ${val}`;
-          },
-          color: '#94a3b8',
-          fontSize: 10,
-          fontWeight: 505,
-          fontFamily: 'var(--font-sans), sans-serif'
+        {
+          type: 'value',
+          axisLine: { show: false },
+          axisTick: { show: false },
+          scale: true,
+          splitLine: { show: false },
+          axisLabel: {
+            formatter: (val: number) => {
+              const displayCurrency = data.currency || "";
+              if (!displayCurrency) return `${val}`;
+              if (displayCurrency === 'INR') return `₹${val / 100000}L`;
+              return `${displayCurrency} ${val}`;
+            },
+            color: '#10b981',
+            fontSize: 10,
+            fontWeight: 505,
+            fontFamily: 'var(--font-sans), sans-serif'
+          }
         }
-      },
+      ],
       series: [
         {
           name: `Current Year (${data.startDate ? new Date(data.startDate).getFullYear() : 2026})`,
           type: 'line',
+          yAxisIndex: 0,
           smooth: true,
           symbolSize: 8,
           itemStyle: { color: '#0064eb', borderWidth: 2 },
@@ -844,6 +946,7 @@ export default function OverviewPage() {
         {
           name: `Previous Year (${data.startDate ? new Date(data.startDate).getFullYear() - 1 : 2025})`,
           type: 'line',
+          yAxisIndex: 1,
           smooth: true,
           symbolSize: 6,
           itemStyle: { color: '#10b981', borderWidth: 2 },
@@ -1144,7 +1247,7 @@ export default function OverviewPage() {
                 <p className="text-[11px] font-semibold text-slate-400 mt-1">
                   <span className={data.growthPercent >= 0 ? "text-emerald-600 font-bold" : "text-rose-600 font-bold"}>
                     {data.growthPercent >= 0 ? "↑" : "↓"} {Math.abs(data.growthPercent)}%
-                  </span> vs Last Period
+                  </span> {compText}
                 </p>
               </div>
             </div>
@@ -1250,12 +1353,12 @@ export default function OverviewPage() {
         </div>
       )}
 
-      {/* 2. Middle Row: Line Chart, Health Score, Alerts */}
+      {/* 2. Middle Row: Line Chart & Health Score */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
         {isLoading ? (
           <>
             {/* 1. Revenue Trend Line Chart Skeleton */}
-            <div className="lg:col-span-6 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs h-[350px] flex flex-col justify-between select-none">
+            <div className="lg:col-span-7 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs h-[350px] flex flex-col justify-between select-none">
               <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
                 <div className="h-4 w-28 bg-slate-100 rounded animate-pulse" />
                 <div className="h-6 w-32 bg-slate-50 rounded animate-pulse" />
@@ -1277,7 +1380,7 @@ export default function OverviewPage() {
             </div>
 
             {/* 2. Business Health Score Skeleton */}
-            <div className="lg:col-span-3 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between select-none h-[350px]">
+            <div className="lg:col-span-5 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between select-none h-[350px]">
               <div className="border-b border-slate-100 pb-3 mb-2 flex items-center justify-between">
                 <div className="h-4 w-36 bg-slate-100 rounded animate-pulse" />
                 <div className="h-4 w-4 bg-slate-100 rounded animate-pulse" />
@@ -1294,7 +1397,7 @@ export default function OverviewPage() {
               </div>
             </div>
 
-            {/* 3. Alerts & Notifications Skeleton */}
+            {/* 3. Alerts & Notifications Skeleton (Temporarily disabled)
             <div className="lg:col-span-3 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between select-none h-[350px]">
               <div className="border-b border-slate-100 pb-3 mb-3 flex items-center justify-between">
                 <div className="h-4 w-36 bg-slate-100 rounded animate-pulse" />
@@ -1312,11 +1415,12 @@ export default function OverviewPage() {
                 ))}
               </div>
             </div>
+            */}
           </>
         ) : !data.connected ? (
           <>
             {/* Revenue Trend Disconnected */}
-            <div className="lg:col-span-6 bg-white rounded-lg border border-slate-200/80 p-8 shadow-2xs flex flex-col items-center justify-center text-center select-none min-h-[350px]">
+            <div className="lg:col-span-7 bg-white rounded-lg border border-slate-200/80 p-8 shadow-2xs flex flex-col items-center justify-center text-center select-none min-h-[350px]">
               <div className="h-10 w-10 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-400 mb-3.5 animate-pulse">
                 <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <circle cx="12" cy="12" r="10" />
@@ -1330,7 +1434,7 @@ export default function OverviewPage() {
               </p>
             </div>
             {/* Business Health Score Disconnected */}
-            <div className="lg:col-span-3 bg-white rounded-lg border border-slate-200/80 p-8 shadow-2xs flex flex-col items-center justify-center text-center select-none min-h-[350px]">
+            <div className="lg:col-span-5 bg-white rounded-lg border border-slate-200/80 p-8 shadow-2xs flex flex-col items-center justify-center text-center select-none min-h-[350px]">
               <div className="h-10 w-10 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-400 mb-3.5 animate-pulse">
                 <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <circle cx="12" cy="12" r="10" />
@@ -1343,7 +1447,7 @@ export default function OverviewPage() {
                 Please connect your Xero organization to calculate your Business Health Score.
               </p>
             </div>
-            {/* Alerts Disconnected */}
+            {/* Alerts Disconnected (Temporarily disabled)
             <div className="lg:col-span-3 bg-white rounded-lg border border-slate-200/80 p-8 shadow-2xs flex flex-col items-center justify-center text-center select-none min-h-[350px]">
               <div className="h-10 w-10 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-400 mb-3.5 animate-pulse">
                 <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1357,11 +1461,12 @@ export default function OverviewPage() {
                 Please connect your Xero organization to view alerts and notifications.
               </p>
             </div>
+            */}
           </>
         ) : (
           <>
             {/* Revenue Trend Line Chart */}
-            <div className="lg:col-span-6 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs relative flex flex-col justify-between overflow-hidden">
+            <div className="lg:col-span-7 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs relative flex flex-col justify-between overflow-hidden">
               <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4 shrink-0">
                 <h3 className="text-[13.5px] font-bold text-slate-800">Revenue Trend</h3>
 
@@ -1404,7 +1509,7 @@ export default function OverviewPage() {
             </div>
 
             {/* Business Health Score Gauge */}
-            <div className="lg:col-span-3 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between select-none">
+            <div className="lg:col-span-5 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between select-none">
               <div className="border-b border-slate-100 pb-3 mb-2 flex items-center justify-between shrink-0">
                 <h3 className="text-[13.5px] font-bold text-slate-800">Business Health Score</h3>
                 <button className="text-slate-400 hover:text-slate-700 outline-none"><MoreVertical className="h-4 w-4" /></button>
@@ -1472,7 +1577,7 @@ export default function OverviewPage() {
               </div>
             </div>
 
-            {/* Alerts & Notifications with structured rows */}
+            {/* Alerts & Notifications (Temporarily disabled)
             <div className="lg:col-span-3 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between select-none">
               <div className="border-b border-slate-100 pb-3 mb-3 flex items-center justify-between shrink-0">
                 <h3 className="text-[13.5px] font-bold text-slate-800">Alerts & Notifications</h3>
@@ -1484,7 +1589,6 @@ export default function OverviewPage() {
 
               <div className="flex-1 overflow-y-auto max-h-[350px] pr-1">
                 {alertsData === null ? (
-                  /* Loading state - subtle shimmer bars */
                   <div className="space-y-2.5">
                     {[1, 2, 3, 4].map((i) => (
                       <div key={i} className="flex items-start gap-3 p-2.5 rounded-lg border border-slate-100 bg-slate-50/30">
@@ -1497,7 +1601,6 @@ export default function OverviewPage() {
                     ))}
                   </div>
                 ) : alertsData.alerts.length === 0 ? (
-                  /* Empty state - No notifications */
                   <div className="flex flex-col items-center justify-center py-10 gap-3">
                     <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-50 border border-slate-100">
                       <svg className="h-5 w-5 text-slate-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1511,7 +1614,6 @@ export default function OverviewPage() {
                     </div>
                   </div>
                 ) : (
-                  /* Real alerts from API */
                   <div className="space-y-2.5">
                     {alertsData.alerts.map((alert, idx) => (
                       <div key={alert.id || idx} className="flex items-start gap-3 text-[11px] leading-normal p-2.5 rounded-lg border border-slate-100 bg-slate-50/30">
@@ -1531,6 +1633,7 @@ export default function OverviewPage() {
                 )}
               </div>
             </div>
+            */}
           </>
         )}
       </div>

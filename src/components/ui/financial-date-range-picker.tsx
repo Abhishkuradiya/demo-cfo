@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Calendar, ChevronDown, Check, Clock, Filter, RotateCcw } from 'lucide-react';
+import { Calendar, ChevronDown, Check, Clock, Filter, RotateCcw, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatToDDMMYYYY } from './formatted-date-picker';
 
@@ -29,11 +29,13 @@ export function FinancialDateRangePicker({
   const [activePreset, setActivePreset] = useState<string | null>(null);
   const [tempFrom, setTempFrom] = useState(fromDate);
   const [tempTo, setTempTo] = useState(toDate);
+  const [validationError, setValidationError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setTempFrom(fromDate);
     setTempTo(toDate);
+    setValidationError(null);
   }, [fromDate, toDate]);
 
   // Close popover on click outside
@@ -41,6 +43,7 @@ export function FinancialDateRangePicker({
     const handleClickOutside = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setIsOpen(false);
+        setValidationError(null);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -49,6 +52,7 @@ export function FinancialDateRangePicker({
 
   // Accounting Preset Definitions
   const applyPreset = (presetKey: string) => {
+    setValidationError(null);
     const now = new Date();
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth(); // 0-indexed
@@ -115,8 +119,8 @@ export function FinancialDateRangePicker({
         break;
 
       case 'LAST_12_MONTHS':
-        start = new Date(currentYear - 1, currentMonth, 1);
         end = now;
+        start = new Date(now.getTime() - 364 * 24 * 60 * 60 * 1000);
         break;
 
       case 'YTD':
@@ -128,6 +132,11 @@ export function FinancialDateRangePicker({
         return;
     }
 
+    // Ensure range never exceeds 364 days for Xero API limits
+    if (end.getTime() - start.getTime() > 364 * 24 * 60 * 60 * 1000) {
+      start = new Date(end.getTime() - 364 * 24 * 60 * 60 * 1000);
+    }
+
     const fromStr = formatYMD(start);
     const toStr = formatYMD(end);
     setActivePreset(presetKey);
@@ -136,11 +145,25 @@ export function FinancialDateRangePicker({
   };
 
   const handleCustomApply = () => {
-    if (tempFrom && tempTo) {
-      setActivePreset('CUSTOM');
-      onChange(tempFrom, tempTo, 'CUSTOM');
-      setIsOpen(false);
+    if (!tempFrom || !tempTo) return;
+    const dFrom = new Date(tempFrom);
+    const dTo = new Date(tempTo);
+
+    if (dFrom > dTo) {
+      setValidationError('From Date cannot be after To Date.');
+      return;
     }
+
+    const diffDays = Math.ceil((dTo.getTime() - dFrom.getTime()) / (1000 * 60 * 60 * 24));
+    if (diffDays > 365) {
+      setValidationError(`Date range is ${diffDays} days. Xero API allows a max of 365 days (1 year). Please select a range within 365 days.`);
+      return;
+    }
+
+    setValidationError(null);
+    setActivePreset('CUSTOM');
+    onChange(tempFrom, tempTo, 'CUSTOM');
+    setIsOpen(false);
   };
 
   const presetsList = [
@@ -163,7 +186,10 @@ export function FinancialDateRangePicker({
       {/* Trigger Button */}
       <button
         type="button"
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={() => {
+          setIsOpen(!isOpen);
+          setValidationError(null);
+        }}
         className="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 rounded-lg shadow-2xs text-xs font-bold text-slate-800 hover:bg-slate-50 transition cursor-pointer outline-none h-9"
       >
         <Calendar className="h-4 w-4 text-blue-600 shrink-0" />
@@ -228,7 +254,10 @@ export function FinancialDateRangePicker({
                 <input
                   type="date"
                   value={tempFrom}
-                  onChange={(e) => setTempFrom(e.target.value)}
+                  onChange={(e) => {
+                    setTempFrom(e.target.value);
+                    setValidationError(null);
+                  }}
                   className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                 />
               </div>
@@ -237,11 +266,21 @@ export function FinancialDateRangePicker({
                 <input
                   type="date"
                   value={tempTo}
-                  onChange={(e) => setTempTo(e.target.value)}
+                  onChange={(e) => {
+                    setTempTo(e.target.value);
+                    setValidationError(null);
+                  }}
                   className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                 />
               </div>
             </div>
+
+            {validationError && (
+              <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-lg text-rose-700 text-[11px] font-semibold flex items-center gap-1.5 animate-in fade-in">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{validationError}</span>
+              </div>
+            )}
 
             <button
               type="button"

@@ -607,6 +607,8 @@ export class CanonicalMetricEngine {
     let isPnlFromLedger = false;
     let hasPnlData = ledgerEntries.length > 0;
 
+    let nativeGrossProfit: number | null = null;
+
     try {
       const pnlReport = await db.getXeroReport(tenantId, 'ProfitAndLoss', cleanFrom, cleanTo);
       if (pnlReport) {
@@ -625,6 +627,7 @@ export class CanonicalMetricEngine {
             revenueVal = parsedPnl.revenue;
             cogsVal = parsedPnl.cogs;
             opexVal = parsedPnl.operatingExpenses;
+            nativeGrossProfit = parsedPnl.grossProfit;
             isPnlFromLedger = false;
           }
         }
@@ -640,7 +643,9 @@ export class CanonicalMetricEngine {
       opexVal = null;
     }
 
-    const grossProfitVal = (revenueVal !== null && cogsVal !== null) ? Math.round((revenueVal - cogsVal) * 100) / 100 : null;
+    const grossProfitVal = (!isPnlFromLedger && nativeGrossProfit !== null && nativeGrossProfit !== undefined)
+      ? Math.round(nativeGrossProfit * 100) / 100
+      : ((revenueVal !== null && cogsVal !== null) ? Math.round((revenueVal - cogsVal) * 100) / 100 : null);
     const grossMarginPctVal = (revenueVal !== null && revenueVal > 0 && grossProfitVal !== null) ? Math.round(((grossProfitVal / revenueVal) * 100) * 100) / 100 : null;
     const operatingProfitVal = (grossProfitVal !== null && opexVal !== null) ? Math.round((grossProfitVal - opexVal) * 100) / 100 : null;
     

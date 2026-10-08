@@ -12,9 +12,9 @@
   "auditLogging": true,
   "rateLimit": "1000",
   "llmProvider": "omegaplus",
-  "llmApiKey": "oc_krPw665zaAv6A0BQemNT9DODV-0B",
+  "llmApiKey": "oc_9QkDtt-3S71sNp6K_F1twwXoDlnw",
   "llmBaseUrl": "https://api.omegaplusapi.com",
-  "llmDefaultModel": "claude-fable-5",
+  "llmDefaultModel": "claude-fable-5-1",
   "llmEnabledModels": [
     "claude-quantum-lite-1",
     "claude-qwen-3-8-flash",
@@ -34,8 +34,6 @@
     "claude-fable-5",
     "claude-fable-5-1",
     "claude-gpt-6-astra",
-    "claude-space-bunny-alpha",
-    "claude-longcat-2-5-preview",
     "claude-glm-5-3-flash"
   ],
   "llmTemperature": 0.7,

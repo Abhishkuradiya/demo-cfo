@@ -1,8 +1,17 @@
 import { db } from './db';
  
+const tenantRefreshPromises = new Map<number, Promise<string>>();
+
 export async function refreshXeroToken(tenantId: number, credentials: any): Promise<string> {
-  const tokenUrl = 'https://identity.xero.com/connect/token';
-  const basicAuth = Buffer.from(`${credentials.client_id}:${credentials.client_secret}`).toString('base64');
+  const existingRefresh = tenantRefreshPromises.get(tenantId);
+  if (existingRefresh) {
+    return existingRefresh;
+  }
+
+  const refreshPromise = (async () => {
+    try {
+      const tokenUrl = 'https://identity.xero.com/connect/token';
+      const basicAuth = Buffer.from(`${credentials.client_id}:${credentials.client_secret}`).toString('base64');
  
   const response = await fetch(tokenUrl, {
     method: 'POST',
@@ -36,7 +45,14 @@ export async function refreshXeroToken(tenantId: number, credentials: any): Prom
     scopes: data.scope.split(' ')
   });
  
-  return data.access_token;
+      return data.access_token;
+    } finally {
+      tenantRefreshPromises.delete(tenantId);
+    }
+  })();
+
+  tenantRefreshPromises.set(tenantId, refreshPromise);
+  return refreshPromise;
 }
  
 export async function getXeroAccessToken(tenantId: number): Promise<{ accessToken: string; xeroTenantId: string } | null> {

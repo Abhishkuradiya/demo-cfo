@@ -3,6 +3,7 @@ import { db, parseXeroDate } from '@/lib/db';
 import { getTenantIdFromSession } from '@/lib/auth';
 import { getXeroAccessToken, fetchXeroResource, fetchXeroReport } from '@/lib/xero';
 import { ProfitAndLossService } from '@/lib/services/ProfitAndLossService';
+import { getDefaultDateRange } from '@/lib/date-defaults';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -44,25 +45,9 @@ export async function GET(req: NextRequest) {
       startDate = new Date(`${cleanFrom}T00:00:00.000Z`);
       endDate = new Date(`${cleanTo}T23:59:59.999Z`);
     } else {
-      let latestInvoiceDate: Date | null = null;
-      const allInvs = await db.getInvoices(tenantId);
-      for (const inv of allInvs) {
-        if (inv.Type !== 'ACCREC' || (inv.Status !== 'AUTHORISED' && inv.Status !== 'PAID')) continue;
-        const invDate = parseXeroDate(inv.Date || inv.invoice_date);
-        if (invDate && (!latestInvoiceDate || invDate > latestInvoiceDate)) {
-          latestInvoiceDate = invDate;
-        }
-      }
-      if (latestInvoiceDate) {
-        const endYear = latestInvoiceDate.getFullYear();
-        const endMonth = latestInvoiceDate.getMonth();
-        endDate = new Date(Date.UTC(endYear, endMonth + 1, 0, 23, 59, 59, 999));
-        startDate = new Date(Date.UTC(endYear, endMonth - 5, 1, 0, 0, 0, 0));
-      } else {
-        const now = new Date();
-        endDate = new Date(Date.UTC(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999));
-        startDate = new Date(Date.UTC(now.getFullYear(), now.getMonth() - 5, 1, 0, 0, 0, 0));
-      }
+      const defaultDates = getDefaultDateRange();
+      startDate = new Date(`${defaultDates.startDate}T00:00:00.000Z`);
+      endDate = new Date(`${defaultDates.endDate}T23:59:59.999Z`);
     }
 
     const fromStr = paramFromDate || startDate.toISOString().split('T')[0];

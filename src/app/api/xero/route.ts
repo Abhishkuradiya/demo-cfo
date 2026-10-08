@@ -6,6 +6,10 @@ import { XeroFixedAssetsService } from '@/lib/fixedAssetsService';
 import { XeroGeneralLedgerService } from '@/lib/generalLedgerService';
 import { TaxSyncService } from '@/lib/services/TaxSyncService';
 import { CanonicalLedgerIngestionService } from '@/lib/services/CanonicalLedgerIngestionService';
+import { getDefaultDateRange } from '@/lib/date-defaults';
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
  
 // GET retrieves Xero connection status and dynamic record counts for a tenant
 export async function GET(req: NextRequest) {
@@ -75,38 +79,9 @@ export async function GET(req: NextRequest) {
         return match ? new Date(parseInt(match[1])) : new Date(dateVal);
       };
 
-      // Compute default start/end dates from invoices cache
-      const cachedInvoices = await db.getInvoices(tenantId);
-      let latestInvoiceDate: Date | null = null;
-      for (const inv of cachedInvoices) {
-        if (inv.Type !== 'ACCREC' || (inv.Status !== 'AUTHORISED' && inv.Status !== 'PAID')) continue;
-        const invDate = parseXeroDate(inv.Date);
-        if (invDate && (!latestInvoiceDate || invDate > latestInvoiceDate)) {
-          latestInvoiceDate = invDate;
-        }
-      }
-
-      // Helper to format Date as YYYY-MM-DD using local time (avoids UTC timezone shift from toISOString)
-      const formatLocalDate = (d: Date) =>
-        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-
-      let startDateStr = "";
-      let endDateStr = "";
-
-      if (latestInvoiceDate) {
-        const endYear = latestInvoiceDate.getFullYear();
-        const endMonth = latestInvoiceDate.getMonth();
-        const endDate = new Date(endYear, endMonth + 1, 0);
-        const startDate = new Date(endYear, endMonth - 5, 1);
-        startDateStr = formatLocalDate(startDate);
-        endDateStr = formatLocalDate(endDate);
-      } else {
-        const now = new Date();
-        const endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-        const startDate = new Date(now.getFullYear(), now.getMonth() - 5, 1);
-        startDateStr = formatLocalDate(startDate);
-        endDateStr = formatLocalDate(endDate);
-      }
+      const defaultDates = getDefaultDateRange();
+      const startDateStr = defaultDates.startDate;
+      const endDateStr = defaultDates.endDate;
 
       return NextResponse.json({
         connected: true,
@@ -118,6 +93,11 @@ export async function GET(req: NextRequest) {
         startDate: startDateStr,
         endDate: endDateStr,
         ...counts
+      }, {
+        headers: {
+          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+          'Pragma': 'no-cache'
+        }
       });
     }
     
