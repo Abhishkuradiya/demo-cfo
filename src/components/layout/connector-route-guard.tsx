@@ -20,6 +20,7 @@ interface PermissionEntry {
 
 function getNormalizedMenuKey(href: string): string {
   if (href.startsWith('/cfo-copilot')) return '/cfo-copilot';
+  if (href.startsWith('/settings/business-health-score')) return '/settings/business-health-score';
   if (href.startsWith('/settings')) return '/settings';
   if (href.startsWith('/data-sources')) return '/data-sources';
   if (href.startsWith('/subscription')) return '/subscription';
@@ -48,6 +49,11 @@ function isMenuAllowed(href: string, permissions: PermissionEntry[], userEmail: 
     const itemEntry = userPermissions.find(p => p.menu_key === normalizedHref);
     if (itemEntry !== undefined) {
       return itemEntry.is_enabled;
+    }
+    // Fallback to global setting if this specific key isn't explicitly set for user
+    const globalEntry = permissions.find(p => p.role.toUpperCase() === 'ALL' && p.menu_key === normalizedHref);
+    if (globalEntry !== undefined) {
+      return globalEntry.is_enabled;
     }
     return true;
   }
@@ -189,6 +195,11 @@ export function ConnectorRouteGuard({ children }: ConnectorRouteGuardProps) {
   // Menu Permission Route Protection & Smart Auto-Redirect
   const userEmail = (user?.email || '').toLowerCase().trim();
   const isRouteAllowed = useMemo(() => {
+    // Specifically protect Business Health Score configuration route!
+    if (pathname.startsWith('/settings/business-health-score')) {
+      if (!isPermissionsLoaded) return true;
+      return isMenuAllowed('/settings/business-health-score', menuPermissions, userEmail, isSuperAdmin);
+    }
     // Standard system utility routes & CFO Copilot always accessible
     if (
       pathname.startsWith('/data-sources') || 
@@ -205,6 +216,14 @@ export function ConnectorRouteGuard({ children }: ConnectorRouteGuardProps) {
 
   useEffect(() => {
     if (isPermissionsLoaded && !isRouteAllowed && !isLocked) {
+      if (pathname.startsWith('/settings/business-health-score')) {
+        toast.error('Access Restricted', {
+          description: 'Business Health Score configuration has been disabled by your administrator.',
+          id: 'guard-health-score-disabled'
+        });
+        router.replace('/settings');
+        return;
+      }
       const firstAllowed = findFirstAllowedRoute(menuPermissions, userEmail, isSuperAdmin);
       router.replace(firstAllowed);
     }

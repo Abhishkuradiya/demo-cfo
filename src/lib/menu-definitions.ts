@@ -111,6 +111,17 @@ export const SYSTEM_NAV_DEFINITIONS: MenuDefinitionSection[] = [
     ]
   },
   {
+    title: 'Dashboard Widgets & Features',
+    items: [
+      { 
+        name: 'Business Health Score (Card & Configuration)', 
+        href: '/settings/business-health-score',
+        connectorId: 'xero',
+        badge: 'Feature'
+      }
+    ]
+  },
+  {
     title: 'System & Automation',
     items: [
       { name: 'CFO AI Assistant (Side Drawer)', href: '/cfo-ai-drawer' },

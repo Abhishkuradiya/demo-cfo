@@ -19,6 +19,8 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useRouter } from 'next/navigation';
+import { useFeaturePermissions } from '@/hooks/use-feature-permissions';
 
 // ==================================================
 // TYPES & DATA DEFINITIONS
@@ -338,6 +340,9 @@ function ScorePreview({ score, projected, metrics }: { score: number; projected:
 // MAIN PAGE COMPONENT
 // ==================================================
 export default function BusinessHealthScorePage() {
+  const router = useRouter();
+  const { isHealthScoreEnabled, isLoaded } = useFeaturePermissions();
+
   const [metrics, setMetrics] = useState<MetricWeight[]>(DEFAULT_METRICS);
   const [riskRules, setRiskRules] = useState<RiskRule[]>(DEFAULT_RISK_RULES);
   const [recRules, setRecRules] = useState<RecommendationRule[]>(DEFAULT_REC_RULES);
@@ -403,6 +408,26 @@ export default function BusinessHealthScorePage() {
     setSaveStatus('success');
     setTimeout(() => setSaveStatus(null), 3000);
   };
+
+  if (isLoaded && !isHealthScoreEnabled) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] text-center p-8 select-none">
+        <div className="h-16 w-16 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center mb-4 border border-amber-500/20 shadow-md">
+          <AlertTriangle className="h-8 w-8" />
+        </div>
+        <h2 className="text-xl font-black text-slate-800">Business Health Score is Disabled</h2>
+        <p className="text-xs text-slate-500 max-w-md mt-2 leading-relaxed font-medium">
+          The Business Health Score module and target configuration settings have been disabled for your account by your system administrator.
+        </p>
+        <button
+          onClick={() => router.push('/settings')}
+          className="mt-6 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-md transition cursor-pointer"
+        >
+          Return to Settings
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto p-4 sm:p-6 lg:p-8 select-none">

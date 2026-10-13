@@ -38,6 +38,7 @@ import {
   InvoiceStatusSummaryCard,
   BillStatusSummaryCard
 } from '@/components/dashboard/OverviewCards';
+import { useFeaturePermissions } from '@/hooks/use-feature-permissions';
 import { KpisRow, Tooltip } from '@/components/dashboard/KpisWidget';
 import { OverviewMoreCardsRow } from '@/components/dashboard/OverviewMoreCards';
 import { OverviewBottomCardsRow } from '@/components/dashboard/OverviewBottomCards';
@@ -297,6 +298,7 @@ function CardSkeleton() {
 export default function OverviewPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const { isHealthScoreEnabled } = useFeaturePermissions();
   const [revenueTimeframe, setRevenueTimeframe] = useState<'Daily' | 'Weekly' | 'Monthly'>('Monthly');
   const [isSyncing, setIsSyncing] = useState(false);
   const [isRevenueFlipped, setIsRevenueFlipped] = useState(false);
@@ -549,22 +551,42 @@ export default function OverviewPage() {
   // Fetch dynamic health score and alerts data
   const fetchHealthAndAlerts = async () => {
     try {
-      const [hsRes, alRes, recRes] = await Promise.all([
-        fetch('/api/dashboard/health-score'),
+      const promises: Promise<any>[] = [
         fetch('/api/dashboard/alerts'),
         fetch('/api/dashboard/reconciliation')
-      ]);
-      if (hsRes.ok) {
-        const hsData = await hsRes.json();
-        setHealthScore(hsData);
+      ];
+      if (isHealthScoreEnabled) {
+        promises.unshift(fetch('/api/dashboard/health-score'));
       }
-      if (alRes.ok) {
-        const alData = await alRes.json();
-        setAlertsData(alData);
-      }
-      if (recRes.ok) {
-        const recData = await recRes.json();
-        setReconciliation(recData);
+      const results = await Promise.all(promises);
+
+      if (isHealthScoreEnabled) {
+        const hsRes = results[0];
+        const alRes = results[1];
+        const recRes = results[2];
+        if (hsRes && hsRes.ok) {
+          const hsData = await hsRes.json();
+          setHealthScore(hsData);
+        }
+        if (alRes && alRes.ok) {
+          const alData = await alRes.json();
+          setAlertsData(alData);
+        }
+        if (recRes && recRes.ok) {
+          const recData = await recRes.json();
+          setReconciliation(recData);
+        }
+      } else {
+        const alRes = results[0];
+        const recRes = results[1];
+        if (alRes && alRes.ok) {
+          const alData = await alRes.json();
+          setAlertsData(alData);
+        }
+        if (recRes && recRes.ok) {
+          const recData = await recRes.json();
+          setReconciliation(recData);
+        }
       }
     } catch (err) {
       console.error('Failed to fetch health/alerts:', err);
@@ -586,7 +608,7 @@ export default function OverviewPage() {
       window.removeEventListener('xero-sync-complete', handleSyncComplete);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fromDateParam, toDateParam]);
+  }, [fromDateParam, toDateParam, isHealthScoreEnabled]);
 
   useEffect(() => {
     fetchDashboardData(false);
@@ -1358,7 +1380,10 @@ export default function OverviewPage() {
         {isLoading ? (
           <>
             {/* 1. Revenue Trend Line Chart Skeleton */}
-            <div className="lg:col-span-7 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs h-[350px] flex flex-col justify-between select-none">
+            <div className={cn(
+              isHealthScoreEnabled ? "lg:col-span-7" : "lg:col-span-12",
+              "bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs h-[350px] flex flex-col justify-between select-none"
+            )}>
               <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
                 <div className="h-4 w-28 bg-slate-100 rounded animate-pulse" />
                 <div className="h-6 w-32 bg-slate-50 rounded animate-pulse" />
@@ -1380,22 +1405,24 @@ export default function OverviewPage() {
             </div>
 
             {/* 2. Business Health Score Skeleton */}
-            <div className="lg:col-span-5 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between select-none h-[350px]">
-              <div className="border-b border-slate-100 pb-3 mb-2 flex items-center justify-between">
-                <div className="h-4 w-36 bg-slate-100 rounded animate-pulse" />
-                <div className="h-4 w-4 bg-slate-100 rounded animate-pulse" />
+            {isHealthScoreEnabled && (
+              <div className="lg:col-span-5 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between select-none h-[350px]">
+                <div className="border-b border-slate-100 pb-3 mb-2 flex items-center justify-between">
+                  <div className="h-4 w-36 bg-slate-100 rounded animate-pulse" />
+                  <div className="h-4 w-4 bg-slate-100 rounded animate-pulse" />
+                </div>
+                <div className="flex-1 flex flex-col items-center justify-center py-4">
+                  {/* Circle gauge representation skeleton */}
+                  <div className="h-24 w-24 rounded-full border-[7px] border-slate-50 border-t-slate-200 animate-spin" />
+                  <div className="h-3 w-20 bg-slate-100 rounded animate-pulse mt-4" />
+                  <div className="h-2 w-32 bg-slate-100 rounded animate-pulse mt-2" />
+                </div>
+                <div className="space-y-2 mt-3 pt-3 border-t border-slate-50">
+                  <div className="h-2.5 w-full bg-slate-100 rounded animate-pulse" />
+                  <div className="h-2.5 w-5/6 bg-slate-100 rounded animate-pulse" />
+                </div>
               </div>
-              <div className="flex-1 flex flex-col items-center justify-center py-4">
-                {/* Circle gauge representation skeleton */}
-                <div className="h-24 w-24 rounded-full border-[7px] border-slate-50 border-t-slate-200 animate-spin" />
-                <div className="h-3 w-20 bg-slate-100 rounded animate-pulse mt-4" />
-                <div className="h-2 w-32 bg-slate-100 rounded animate-pulse mt-2" />
-              </div>
-              <div className="space-y-2 mt-3 pt-3 border-t border-slate-50">
-                <div className="h-2.5 w-full bg-slate-100 rounded animate-pulse" />
-                <div className="h-2.5 w-5/6 bg-slate-100 rounded animate-pulse" />
-              </div>
-            </div>
+            )}
 
             {/* 3. Alerts & Notifications Skeleton (Temporarily disabled)
             <div className="lg:col-span-3 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between select-none h-[350px]">
@@ -1420,7 +1447,10 @@ export default function OverviewPage() {
         ) : !data.connected ? (
           <>
             {/* Revenue Trend Disconnected */}
-            <div className="lg:col-span-7 bg-white rounded-lg border border-slate-200/80 p-8 shadow-2xs flex flex-col items-center justify-center text-center select-none min-h-[350px]">
+            <div className={cn(
+              isHealthScoreEnabled ? "lg:col-span-7" : "lg:col-span-12",
+              "bg-white rounded-lg border border-slate-200/80 p-8 shadow-2xs flex flex-col items-center justify-center text-center select-none min-h-[350px]"
+            )}>
               <div className="h-10 w-10 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-400 mb-3.5 animate-pulse">
                 <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <circle cx="12" cy="12" r="10" />
@@ -1434,19 +1464,21 @@ export default function OverviewPage() {
               </p>
             </div>
             {/* Business Health Score Disconnected */}
-            <div className="lg:col-span-5 bg-white rounded-lg border border-slate-200/80 p-8 shadow-2xs flex flex-col items-center justify-center text-center select-none min-h-[350px]">
-              <div className="h-10 w-10 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-400 mb-3.5 animate-pulse">
-                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="10" />
-                  <line x1="2" y1="12" x2="22" y2="12" />
-                  <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-                </svg>
+            {isHealthScoreEnabled && (
+              <div className="lg:col-span-5 bg-white rounded-lg border border-slate-200/80 p-8 shadow-2xs flex flex-col items-center justify-center text-center select-none min-h-[350px]">
+                <div className="h-10 w-10 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-400 mb-3.5 animate-pulse">
+                  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="2" y1="12" x2="22" y2="12" />
+                    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                  </svg>
+                </div>
+                <h4 className="text-[12.5px] font-bold text-slate-700 mb-1">Xero Disconnected</h4>
+                <p className="text-[10.5px] text-slate-400 max-w-[200px] leading-relaxed font-sans">
+                  Please connect your Xero organization to calculate your Business Health Score.
+                </p>
               </div>
-              <h4 className="text-[12.5px] font-bold text-slate-700 mb-1">Xero Disconnected</h4>
-              <p className="text-[10.5px] text-slate-400 max-w-[200px] leading-relaxed font-sans">
-                Please connect your Xero organization to calculate your Business Health Score.
-              </p>
-            </div>
+            )}
             {/* Alerts Disconnected (Temporarily disabled)
             <div className="lg:col-span-3 bg-white rounded-lg border border-slate-200/80 p-8 shadow-2xs flex flex-col items-center justify-center text-center select-none min-h-[350px]">
               <div className="h-10 w-10 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-400 mb-3.5 animate-pulse">
@@ -1466,7 +1498,10 @@ export default function OverviewPage() {
         ) : (
           <>
             {/* Revenue Trend Line Chart */}
-            <div className="lg:col-span-7 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs relative flex flex-col justify-between overflow-hidden">
+            <div className={cn(
+              isHealthScoreEnabled ? "lg:col-span-7" : "lg:col-span-12",
+              "bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs relative flex flex-col justify-between overflow-hidden"
+            )}>
               <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4 shrink-0">
                 <h3 className="text-[13.5px] font-bold text-slate-800">Revenue Trend</h3>
 
@@ -1508,74 +1543,76 @@ export default function OverviewPage() {
               </div>
             </div>
 
-            {/* Business Health Score Gauge */}
-            <div className="lg:col-span-5 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between select-none">
-              <div className="border-b border-slate-100 pb-3 mb-2 flex items-center justify-between shrink-0">
-                <h3 className="text-[13.5px] font-bold text-slate-800">Business Health Score</h3>
-                <button className="text-slate-400 hover:text-slate-700 outline-none"><MoreVertical className="h-4 w-4" /></button>
-              </div>
+            {/* Business Health Score Gauge (Only if enabled) */}
+            {isHealthScoreEnabled && (
+              <div className="lg:col-span-5 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between select-none">
+                <div className="border-b border-slate-100 pb-3 mb-2 flex items-center justify-between shrink-0">
+                  <h3 className="text-[13.5px] font-bold text-slate-800">Business Health Score</h3>
+                  <button className="text-slate-400 hover:text-slate-700 outline-none"><MoreVertical className="h-4 w-4" /></button>
+                </div>
 
-              <div className="relative flex flex-col items-center justify-center flex-1 min-h-[125px]">
-                {/* Native SVG Speedometer Gauge Meter */}
-                <HealthScoreGaugeMeter score={healthScore?.overallScore ?? 68} />
+                <div className="relative flex flex-col items-center justify-center flex-1 min-h-[125px]">
+                  {/* Native SVG Speedometer Gauge Meter */}
+                  <HealthScoreGaugeMeter score={healthScore?.overallScore ?? 68} />
 
-                {healthScore ? (
-                  <div className="text-center mt-0.5">
-                    <span className={cn(
-                      "text-[10.5px] font-extrabold px-3 py-0.5 rounded-full uppercase tracking-wider border inline-flex items-center gap-1.5 shadow-3xs",
-                      healthScore.label === 'EXCELLENT' || healthScore.label === 'GOOD' ? 'bg-emerald-50/90 border-emerald-200 text-emerald-700' :
-                        healthScore.label === 'FAIR' ? 'bg-amber-50/90 border-amber-200 text-amber-700' :
-                          healthScore.label === 'WARNING' ? 'bg-orange-50/90 border-orange-200 text-orange-700' :
-                            healthScore.label === 'OFFLINE' || healthScore.label === 'DISCONNECTED' ? 'bg-slate-100 border-slate-200 text-slate-500' :
-                              'bg-rose-50/90 border-rose-200 text-rose-700'
-                    )}>
+                  {healthScore ? (
+                    <div className="text-center mt-0.5">
                       <span className={cn(
-                        "h-1.5 w-1.5 rounded-full animate-pulse",
-                        healthScore.label === 'EXCELLENT' || healthScore.label === 'GOOD' ? 'bg-emerald-500' :
-                          healthScore.label === 'FAIR' ? 'bg-amber-500' :
-                            healthScore.label === 'WARNING' ? 'bg-orange-500' : 'bg-rose-500'
-                      )} />
-                      {healthScore.label}
-                    </span>
-                    <p className="text-[11px] text-slate-500 font-medium mt-1 leading-tight">{healthScore.description}</p>
-                  </div>
-                ) : (
-                  <div className="text-center mt-1">
-                    <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider border bg-slate-50 border-slate-200 text-slate-400">Loading</span>
-                    <p className="text-[11px] text-slate-400 font-medium mt-1.5 leading-normal">Calculating health score...</p>
-                  </div>
-                )}
-              </div>
+                        "text-[10.5px] font-extrabold px-3 py-0.5 rounded-full uppercase tracking-wider border inline-flex items-center gap-1.5 shadow-3xs",
+                        healthScore.label === 'EXCELLENT' || healthScore.label === 'GOOD' ? 'bg-emerald-50/90 border-emerald-200 text-emerald-700' :
+                          healthScore.label === 'FAIR' ? 'bg-amber-50/90 border-amber-200 text-amber-700' :
+                            healthScore.label === 'WARNING' ? 'bg-orange-50/90 border-orange-200 text-orange-700' :
+                              healthScore.label === 'OFFLINE' || healthScore.label === 'DISCONNECTED' ? 'bg-slate-100 border-slate-200 text-slate-500' :
+                                'bg-rose-50/90 border-rose-200 text-rose-700'
+                      )}>
+                        <span className={cn(
+                          "h-1.5 w-1.5 rounded-full animate-pulse",
+                          healthScore.label === 'EXCELLENT' || healthScore.label === 'GOOD' ? 'bg-emerald-500' :
+                            healthScore.label === 'FAIR' ? 'bg-amber-500' :
+                              healthScore.label === 'WARNING' ? 'bg-orange-500' : 'bg-rose-500'
+                        )} />
+                        {healthScore.label}
+                      </span>
+                      <p className="text-[11px] text-slate-500 font-medium mt-1 leading-tight">{healthScore.description}</p>
+                    </div>
+                  ) : (
+                    <div className="text-center mt-1">
+                      <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider border bg-slate-50 border-slate-200 text-slate-400">Loading</span>
+                      <p className="text-[11px] text-slate-400 font-medium mt-1.5 leading-normal">Calculating health score...</p>
+                    </div>
+                  )}
+                </div>
 
-              {/* KPI progress bars */}
-              <div className="space-y-2 mt-3 pt-3 border-t border-slate-50 shrink-0">
-                {healthScore ? (
-                  healthScore.metrics.map((kpi, index) => (
-                    <div key={index} className="space-y-1">
-                      <div className="flex items-center justify-between text-[10.5px] font-semibold text-slate-500">
-                        <span>{kpi.name}</span>
-                        <span className="text-slate-700 font-bold">{kpi.score}/100</span>
+                {/* KPI progress bars */}
+                <div className="space-y-2 mt-3 pt-3 border-t border-slate-50 shrink-0">
+                  {healthScore ? (
+                    healthScore.metrics.map((kpi, index) => (
+                      <div key={index} className="space-y-1">
+                        <div className="flex items-center justify-between text-[10.5px] font-semibold text-slate-500">
+                          <span>{kpi.name}</span>
+                          <span className="text-slate-700 font-bold">{kpi.score}/100</span>
+                        </div>
+                        <div className="h-1.5 w-full bg-slate-50 rounded-full overflow-hidden border border-slate-100">
+                          <div className="h-full rounded-full transition-all duration-700 ease-out" style={{ width: `${kpi.score}%`, backgroundColor: kpi.color }} />
+                        </div>
                       </div>
-                      <div className="h-1.5 w-full bg-slate-50 rounded-full overflow-hidden border border-slate-100">
-                        <div className="h-full rounded-full transition-all duration-700 ease-out" style={{ width: `${kpi.score}%`, backgroundColor: kpi.color }} />
+                    ))
+                  ) : (
+                    ['Profitability', 'Liquidity', 'Efficiency', 'Solvency', 'Growth'].map((name) => (
+                      <div key={name} className="space-y-1">
+                        <div className="flex items-center justify-between text-[10.5px] font-semibold text-slate-500">
+                          <span>{name}</span>
+                          <span className="text-slate-300 font-bold">—</span>
+                        </div>
+                        <div className="h-1.5 w-full bg-slate-50 rounded-full overflow-hidden border border-slate-100">
+                          <div className="h-full rounded-full bg-slate-100 animate-pulse" style={{ width: '30%' }} />
+                        </div>
                       </div>
-                    </div>
-                  ))
-                ) : (
-                  ['Profitability', 'Liquidity', 'Efficiency', 'Solvency', 'Growth'].map((name) => (
-                    <div key={name} className="space-y-1">
-                      <div className="flex items-center justify-between text-[10.5px] font-semibold text-slate-500">
-                        <span>{name}</span>
-                        <span className="text-slate-300 font-bold">—</span>
-                      </div>
-                      <div className="h-1.5 w-full bg-slate-50 rounded-full overflow-hidden border border-slate-100">
-                        <div className="h-full rounded-full bg-slate-100 animate-pulse" style={{ width: '30%' }} />
-                      </div>
-                    </div>
-                  ))
-                )}
+                    ))
+                  )}
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Alerts & Notifications (Temporarily disabled)
             <div className="lg:col-span-3 bg-white rounded-lg border border-slate-200/80 p-5 shadow-2xs flex flex-col justify-between select-none">

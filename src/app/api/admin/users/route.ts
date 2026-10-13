@@ -26,15 +26,31 @@ export async function GET() {
       users = (json.users || []).filter((u: any) => u.tenant_id && u.email !== 'admin@virtualcfo.com');
     }
 
-    const formattedUsers = users.map((u: any) => ({
-      id: `usr-${u.id}`,
-      name: u.email.split('@')[0].replace('.', ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()),
-      email: u.email,
-      company: u.tenant_name || `Tenant #${u.tenant_id}`,
-      role: 'Finance Manager',
-      status: 'Active',
-      lastLogin: u.created_at ? new Date(u.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Recently'
-    }));
+    // Retrieve system menu permissions to calculate each user's health score feature state
+    const allPermissions = await db.getMenuPermissions();
+    const globalHealthScore = allPermissions.find(
+      p => p.role === 'ALL' && p.menu_key === '/settings/business-health-score'
+    );
+    const globalDefault = globalHealthScore !== undefined ? Boolean(globalHealthScore.is_enabled) : true;
+
+    const formattedUsers = users.map((u: any) => {
+      const userRoleKey = `user:${u.email.toLowerCase().trim()}`;
+      const userHsPerm = allPermissions.find(
+        p => p.role.toLowerCase() === userRoleKey && p.menu_key === '/settings/business-health-score'
+      );
+      const healthScoreEnabled = userHsPerm !== undefined ? Boolean(userHsPerm.is_enabled) : globalDefault;
+
+      return {
+        id: `usr-${u.id}`,
+        name: u.email.split('@')[0].replace('.', ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()),
+        email: u.email,
+        company: u.tenant_name || `Tenant #${u.tenant_id}`,
+        role: 'Finance Manager',
+        status: 'Active',
+        healthScoreEnabled,
+        lastLogin: u.created_at ? new Date(u.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Recently'
+      };
+    });
 
     return NextResponse.json({ success: true, users: formattedUsers });
   } catch (err: any) {

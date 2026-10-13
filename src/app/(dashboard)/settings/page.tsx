@@ -1,10 +1,15 @@
+"use client";
+
 import React from 'react';
 import Link from 'next/link';
 import { PageContainer } from '@/components/common/page-container';
 import { SectionHeader } from '@/components/common/section-header';
 import { Layers, Activity, Database, ArrowRight, ShieldCheck } from 'lucide-react';
+import { useFeaturePermissions } from '@/hooks/use-feature-permissions';
 
 export default function SettingsPage() {
+  const { isHealthScoreEnabled } = useFeaturePermissions();
+
   return (
     <PageContainer>
       <SectionHeader
@@ -12,7 +17,7 @@ export default function SettingsPage() {
         description="Configure accounting mappings, business health targets, and data storage settings."
       />
       
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
+      <div className={`grid grid-cols-1 ${isHealthScoreEnabled ? 'md:grid-cols-3' : 'md:grid-cols-2'} gap-6 mt-6`}>
         {/* Account Mappings Card */}
         <Link 
           href="/settings/account-mappings"
@@ -40,29 +45,31 @@ export default function SettingsPage() {
           </div>
         </Link>
 
-        {/* Business Health Score Card */}
-        <Link 
-          href="/settings/business-health-score"
-          className="group bg-white dark:bg-slate-900 p-6 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-emerald-500 dark:hover:border-emerald-500 shadow-xs hover:shadow-md transition-all flex flex-col justify-between"
-        >
-          <div>
-            <div className="flex items-center justify-between mb-4">
-              <div className="p-3 bg-emerald-50 dark:bg-emerald-950/50 rounded-lg text-emerald-600 dark:text-emerald-400">
-                <Activity className="w-6 h-6" />
+        {/* Business Health Score Card (Only rendered when enabled by Admin) */}
+        {isHealthScoreEnabled && (
+          <Link 
+            href="/settings/business-health-score"
+            className="group bg-white dark:bg-slate-900 p-6 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-emerald-500 dark:hover:border-emerald-500 shadow-xs hover:shadow-md transition-all flex flex-col justify-between"
+          >
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <div className="p-3 bg-emerald-50 dark:bg-emerald-950/50 rounded-lg text-emerald-600 dark:text-emerald-400">
+                  <Activity className="w-6 h-6" />
+                </div>
               </div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 group-hover:text-emerald-600 transition-colors">
+                Business Health Score Targets
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 leading-relaxed">
+                Customize profit margin thresholds, liquidity target ratios, and solvency weights for health score evaluation.
+              </p>
             </div>
-            <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 group-hover:text-emerald-600 transition-colors">
-              Business Health Score Targets
-            </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 leading-relaxed">
-              Customize profit margin thresholds, liquidity target ratios, and solvency weights for health score evaluation.
-            </p>
-          </div>
-          <div className="flex items-center gap-2 text-xs font-bold text-emerald-600 dark:text-emerald-400 mt-6 group-hover:translate-x-1 transition-transform">
-            <span>Configure Targets</span>
-            <ArrowRight className="w-3.5 h-3.5" />
-          </div>
-        </Link>
+            <div className="flex items-center gap-2 text-xs font-bold text-emerald-600 dark:text-emerald-400 mt-6 group-hover:translate-x-1 transition-transform">
+              <span>Configure Targets</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </div>
+          </Link>
+        )}
 
         {/* Database & Sync Management Card */}
         <Link 
@@ -79,11 +86,11 @@ export default function SettingsPage() {
               Database & Cache Management
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 leading-relaxed">
-              Inspect PostgreSQL tables, trigger sync cache purges, and manage tenant credential connection scopes.
+              Verify PostgreSQL table records, check report sync freshness, and purge cached report summaries.
             </p>
           </div>
           <div className="flex items-center gap-2 text-xs font-bold text-purple-600 dark:text-purple-400 mt-6 group-hover:translate-x-1 transition-transform">
-            <span>Manage Storage</span>
+            <span>Inspect Database</span>
             <ArrowRight className="w-3.5 h-3.5" />
           </div>
         </Link>
