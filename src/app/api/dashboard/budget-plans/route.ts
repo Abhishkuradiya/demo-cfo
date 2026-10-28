@@ -4,14 +4,42 @@ import { getTenantIdFromSession } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
+function getPlanKey(searchParams?: URLSearchParams, body?: Record<string, unknown>): string {
+  if (searchParams?.get('planKey')) return searchParams.get('planKey')!;
+  if (body?.planKey && typeof body.planKey === 'string') return body.planKey;
+
+  const year = searchParams?.get('year') || (body?.year ? String(body.year) : null);
+  if (year) return `plan_${year}`;
+
+  return 'default_plan';
+}
+
 export async function GET(req: NextRequest) {
   try {
     const sessionTenantId = await getTenantIdFromSession();
     const tenantId = sessionTenantId || 1;
 
     const { searchParams } = new URL(req.url);
-    const planKey = searchParams.get('planKey') || 'default_plan';
+    const action = searchParams.get('action');
 
+    if (action === 'list') {
+      const plans = await db.listCustomBudgetPlans(tenantId);
+      const years = plans
+        .map((p) => {
+          const match = p.planKey.match(/^plan_(\d{4})$/);
+          return match ? parseInt(match[1], 10) : null;
+        })
+        .filter((y): y is number => y !== null);
+
+      return NextResponse.json({
+        success: true,
+        tenantId,
+        plans,
+        years,
+      });
+    }
+
+    const planKey = getPlanKey(searchParams);
     const planData = await db.getCustomBudgetPlan(tenantId, planKey);
 
     return NextResponse.json({
@@ -36,7 +64,7 @@ export async function POST(req: NextRequest) {
     const tenantId = sessionTenantId || 1;
 
     const body = await req.json();
-    const planKey = body?.planKey || 'default_plan';
+    const planKey = getPlanKey(undefined, body);
     const planData = body?.plan || body?.plan_data;
 
     if (!planData) {
@@ -74,25 +102,21 @@ export async function DELETE(req: NextRequest) {
     const tenantId = sessionTenantId || 1;
 
     const { searchParams } = new URL(req.url);
-    let planKey = searchParams.get('planKey');
-
-    if (!planKey) {
-      try {
-        const body = await req.json();
-        planKey = body?.planKey;
-      } catch {
-        // empty body is fine
-      }
+    let body: Record<string, unknown> | undefined;
+    try {
+      body = await req.json();
+    } catch {
+      // empty body
     }
 
-    const keyToDelete = planKey || 'default_plan';
-    const deleted = await db.deleteCustomBudgetPlan(tenantId, keyToDelete);
+    const planKey = getPlanKey(searchParams, body);
+    const deleted = await db.deleteCustomBudgetPlan(tenantId, planKey);
 
     return NextResponse.json({
       success: Boolean(deleted),
       message: 'Custom budget plan removed from database',
       tenantId,
-      planKey: keyToDelete,
+      planKey,
       deleted,
     });
   } catch (error: unknown) {
