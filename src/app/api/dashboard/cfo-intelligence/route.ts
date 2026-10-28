@@ -266,7 +266,7 @@ export async function GET(req: NextRequest) {
       type: 'revenue' | 'expense';
     }
 
-    let budgetItems: BudgetItemEntry[] = [
+    const defaultBudgetItems: BudgetItemEntry[] = [
       { category: 'Sales Revenue', budget: Math.round(totalRevenue * 1.08), actual: Math.round(totalRevenue), type: 'revenue' },
       { category: 'Cost of Goods Sold (COGS)', budget: Math.round(cogs * 0.95), actual: Math.round(cogs), type: 'expense' },
       { category: 'Salaries & Payroll', budget: Math.round(totalExpenses * 0.45), actual: Math.round(totalExpenses * 0.48), type: 'expense' },
@@ -274,7 +274,9 @@ export async function GET(req: NextRequest) {
       { category: 'Software & Cloud Infrastructure', budget: Math.round(totalExpenses * 0.10), actual: Math.round(totalExpenses * 0.12), type: 'expense' },
       { category: 'Office Rent & Facilities', budget: Math.round(totalExpenses * 0.12), actual: Math.round(totalExpenses * 0.12), type: 'expense' },
       { category: 'Professional & Legal Fees', budget: Math.round(totalExpenses * 0.05), actual: Math.round(totalExpenses * 0.07), type: 'expense' }
-    ].filter((item) => Math.abs(item.actual) > 0 || Math.abs(item.budget) > 0);
+    ];
+
+    let budgetItems: BudgetItemEntry[] = defaultBudgetItems.filter((item) => Math.abs(item.actual) > 0 || Math.abs(item.budget) > 0);
 
     // If real ProfitAndLoss report is available in the database, extract dynamic expense accounts
     if (plReport) {
