@@ -90,7 +90,7 @@ export async function createManagementManualJournal(
   const validatedLines = lines.map((line) => {
     const accountId = String(line.accountId ?? '').trim();
     const account = accounts.get(accountId);
-    if (!account || String(account.Status ?? '').toUpperCase() === 'DELETED') throw new Error('Every journal line must use an active account from this Xero organisation.');
+    if (!account || String(account.Status ?? account.status ?? '').trim().toUpperCase() !== 'ACTIVE') throw new Error('Every journal line must use an active account from this Xero organisation.');
     const debit = Number(line.debit ?? 0);
     const credit = Number(line.credit ?? 0);
     if (!Number.isFinite(debit) || !Number.isFinite(credit) || debit < 0 || credit < 0 || debit > 1_000_000_000_000 || credit > 1_000_000_000_000) throw new Error('Enter valid non-negative debit and credit amounts.');
@@ -141,11 +141,37 @@ export async function createManagementManualJournal(
 export async function deleteManagementManualJournal(tenantId: number, journalId: number) {
   await db.assertPostgres();
   if (!Number.isSafeInteger(journalId) || journalId <= 0) throw new Error('Choose a valid management journal.');
-  const result = await pgPool.query(
-    `DELETE FROM management_manual_journals
-      WHERE tenant_id = $1 AND id = $2
-      RETURNING journal_ref`,
-    [tenantId, journalId],
-  );
-  return result.rows[0] ? String(result.rows[0].journal_ref) : null;
+  const client = await pgPool.connect();
+  try {
+    await client.query('BEGIN');
+    const existing = await client.query(
+      `SELECT journal_ref FROM management_manual_journals
+        WHERE tenant_id = $1 AND id = $2 FOR UPDATE`,
+      [tenantId, journalId],
+    );
+    if (!existing.rows[0]) {
+      await client.query('COMMIT');
+      return null;
+    }
+
+    // Delete dependent lines explicitly in the same tenant-scoped transaction.
+    // The FK cascade remains a safeguard, while this makes cleanup unambiguous.
+    await client.query(
+      `DELETE FROM management_manual_journal_lines
+        WHERE tenant_id = $1 AND journal_id = $2`,
+      [tenantId, journalId],
+    );
+    await client.query(
+      `DELETE FROM management_manual_journals
+        WHERE tenant_id = $1 AND id = $2`,
+      [tenantId, journalId],
+    );
+    await client.query('COMMIT');
+    return String(existing.rows[0].journal_ref);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 }

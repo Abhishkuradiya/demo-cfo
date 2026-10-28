@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedSession } from '@/lib/auth';
-import { requireManagementAccountsAdmin } from '@/lib/services/ManagementAccountsLedgerService';
 import { createManagementManualJournal, listManagementManualJournals } from '@/lib/services/ManagementManualJournalService';
 
 function validDate(value: string | null): value is string {
@@ -28,7 +27,6 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const session = await getAuthenticatedSession();
   if (!session) return NextResponse.json({ error: 'Authentication required.' }, { status: 401 });
-  if (!(await requireManagementAccountsAdmin(session.role))) return NextResponse.json({ error: 'Administrator access is required to create management-only journals.' }, { status: 403 });
   try {
     const journal = await createManagementManualJournal(session.tenantId, { userId: session.userId, email: session.email }, await request.json());
     return NextResponse.json({ journal }, { status: 201 });

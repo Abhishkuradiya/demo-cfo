@@ -72,6 +72,11 @@ type AdvancedManagementData = {
 };
 
 const emptyReport: Report = {};
+let jspdfModulePromise: Promise<typeof import('jspdf')> | null = null;
+function loadPdfLibrary() {
+  jspdfModulePromise ??= import('jspdf');
+  return jspdfModulePromise;
+}
 
 function isoDate(date: Date) { return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; }
 function rangeFor(preset: string) { const end = new Date(); const start = new Date(end); if (preset === 'month') start.setDate(1); else if (preset === 'quarter') start.setMonth(end.getMonth() - 2, 1); else if (preset === 'half-year') start.setMonth(end.getMonth() - 5, 1); else if (preset === 'ytd') start.setMonth(0, 1); else start.setDate(start.getDate() - 364); return { from: isoDate(start), to: isoDate(end) }; }
@@ -82,22 +87,73 @@ function sum(lines: Line[] | undefined) { return (lines || []).reduce((total, li
 
 type LedgerExportData = {
   connected: boolean;
-  accounts: { accountId: string; accountCode: string; accountName: string; classification: string; openingBalance: number | null; totalDebits: number | null; totalCredits: number | null; netMovement: number | null; sourceClosingBalance: number | null; adjustedClosingBalance: number | null; unresolvedDifference: number | null; reconciliationStatus: string; adjustmentCount: number; pendingAdjustmentCount: number }[];
-  adjustments: { accountId: string; direction: 'DEBIT' | 'CREDIT'; amount: number; status: string; adjustmentRef: string; description: string }[];
+  accounts: { accountId: string; accountCode: string; accountName: string; classification: string; openingBalance: number | null; totalDebits: number | null; totalCredits: number | null; netMovement: number | null; sourceClosingBalance: number | null; adjustedClosingBalance: number | null; unresolvedDifference: number | null; reconciliationStatus: string; sourceJournalCoverage: 'COMPLETE' | 'PARTIAL' | 'UNAVAILABLE' | 'UNKNOWN'; adjustmentCount: number; pendingAdjustmentCount: number }[];
+  adjustments: { accountId: string; direction: 'DEBIT' | 'CREDIT'; amount: number; adjustmentRef: string; description: string }[];
+  summary: { totalAccounts: number; reconciledAccounts: number; accountsRequiringReview: number; unresolvedDifferences: number; evidenceUnavailable: number };
 };
+
+type LedgerExportSource = {
+  connected?: boolean;
+  accounts?: (Partial<LedgerExportData['accounts'][number]> & { sourceJournalCoverage?: 'COMPLETE' | 'PARTIAL' | 'UNAVAILABLE' | 'UNKNOWN' })[];
+  manualJournals?: { reference?: string; description?: string; lines?: { accountId?: string; debit?: number; credit?: number; description?: string }[] }[];
+  summary?: LedgerExportData['summary'] | null;
+};
+
+function normalizeLedgerExport(result: LedgerExportSource): LedgerExportData | null {
+  if (result.connected !== true || !Array.isArray(result.accounts)) return null;
+  const accounts = result.accounts.filter((account): account is typeof account & { accountId: string } => typeof account.accountId === 'string').map((account) => ({
+    accountId: account.accountId,
+    accountCode: String(account.accountCode ?? ''),
+    accountName: String(account.accountName ?? ''),
+    classification: String(account.classification ?? ''),
+    openingBalance: account.openingBalance ?? null,
+    totalDebits: account.totalDebits ?? null,
+    totalCredits: account.totalCredits ?? null,
+    netMovement: account.netMovement ?? null,
+    sourceClosingBalance: account.sourceClosingBalance ?? null,
+    adjustedClosingBalance: account.adjustedClosingBalance ?? null,
+    unresolvedDifference: account.unresolvedDifference ?? null,
+    reconciliationStatus: String(account.reconciliationStatus ?? ''),
+    sourceJournalCoverage: account.sourceJournalCoverage ?? 'UNKNOWN',
+    adjustmentCount: account.adjustmentCount ?? 0,
+    pendingAdjustmentCount: account.pendingAdjustmentCount ?? 0,
+  }));
+  const adjustments = (Array.isArray(result.manualJournals) ? result.manualJournals : []).flatMap((journal) =>
+    (Array.isArray(journal.lines) ? journal.lines : []).flatMap((line) => {
+      const common = { accountId: String(line.accountId ?? ''), adjustmentRef: String(journal.reference ?? ''), description: String(line.description || journal.description || '') };
+      const entries: LedgerExportData['adjustments'] = [];
+      const debit = Number(line.debit ?? 0);
+      const credit = Number(line.credit ?? 0);
+      if (common.accountId && Number.isFinite(debit) && debit > 0) entries.push({ ...common, direction: 'DEBIT', amount: debit });
+      if (common.accountId && Number.isFinite(credit) && credit > 0) entries.push({ ...common, direction: 'CREDIT', amount: credit });
+      return entries;
+    }),
+  );
+  const summary = result.summary ?? {
+    totalAccounts: accounts.length,
+    reconciledAccounts: accounts.filter((account) => account.reconciliationStatus === 'Matches Xero activity').length,
+    accountsRequiringReview: accounts.filter((account) => account.reconciliationStatus === 'Difference outstanding').length,
+    unresolvedDifferences: accounts.filter((account) => account.unresolvedDifference !== null && Math.abs(account.unresolvedDifference) > 0.01).length,
+    evidenceUnavailable: accounts.filter((account) => account.sourceJournalCoverage !== 'COMPLETE').length,
+  };
+  return { connected: true, accounts, adjustments, summary };
+}
 
 async function fetchLedgerExport(fromDate: string, toDate: string): Promise<LedgerExportData | null> {
   try {
+    // Use the same full ledger review payload as the dashboard. The lightweight
+    // export endpoint omits source coverage and review counts, which made PDF
+    // summaries differ from the on-screen close review.
     const response = await fetch(`/api/dashboard/management-accounts/ledger?fromDate=${encodeURIComponent(fromDate)}&toDate=${encodeURIComponent(toDate)}`, { cache: 'no-store' });
     if (!response.ok) return null;
-    const result = await response.json() as LedgerExportData;
-    return result.connected && Array.isArray(result.accounts) ? result : null;
+    const result = await response.json() as LedgerExportSource;
+    return normalizeLedgerExport(result);
   } catch { return null; }
 }
 
 function CashMovementStatement({ data, currency }: { data: AdvancedManagementData['cashMovement']; currency: string }) {
   return <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-    <div className="border-b border-slate-200 p-4"><h2 className="font-semibold text-slate-900">Actual cash movement</h2><p className="mt-1 text-xs text-slate-500">Cash and bank activity reported by Xero for the selected period.</p></div>
+    <div className="border-b border-slate-200 p-4"><div className="flex items-center gap-2"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-cyan-50 text-[10px] font-bold text-cyan-800">06</span><h2 className="font-semibold text-slate-900">Cash movement</h2></div><p className="mt-1 text-xs text-slate-500">Cash received, cash spent and closing bank balances for the selected period.</p></div>
     {!data?.available ? <p className="p-4 text-sm text-slate-500">Cash movement is unavailable because Xero did not return a complete Bank Summary for this period.</p> : <>
       <div className="grid gap-3 border-b border-slate-100 p-4 sm:grid-cols-2 xl:grid-cols-4">
         {[
@@ -121,18 +177,18 @@ function BalanceMovementAnalysis({ data, currency }: { data: AdvancedManagementD
   if (activityStart) activityStart.setUTCDate(activityStart.getUTCDate() + 1);
   const activityFromDate = activityStart?.toISOString().slice(0, 10) ?? '';
   return <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-    <div className="border-b border-slate-200 p-4"><h2 className="font-semibold text-slate-900">Balance-sheet movement</h2><p className="mt-1 text-xs text-slate-500">Xero balances at {formatDate(data?.previousDate)} compared with {formatDate(data?.currentDate)}. The comparison uses the previous month-end.</p></div>
+    <div className="border-b border-slate-200 p-4"><div className="flex items-center gap-2"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-cyan-50 text-[10px] font-bold text-cyan-800">05</span><h2 className="font-semibold text-slate-900">Balance-sheet movement</h2></div><p className="mt-1 text-xs text-slate-500">Xero balances at {formatDate(data?.previousDate)} compared with {formatDate(data?.currentDate)}. The comparison uses the previous month-end.</p></div>
     {!data?.available ? <p className="p-4 text-sm text-slate-500">Movement analysis is unavailable because one or both dated Xero Balance Sheet reports could not be retrieved.</p> : <>
       <div className="overflow-x-auto"><table className="w-full min-w-[700px] text-left text-xs">
         <thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-3">Category</th><th className="px-4 py-3 text-right">Previous balance</th><th className="px-4 py-3 text-right">Current balance</th><th className="px-4 py-3 text-right">Movement</th><th className="px-4 py-3 text-right">Change</th></tr></thead>
-        <tbody className="divide-y divide-slate-200">{(['assets', 'liabilities', 'equity'] as const).map((category) => <tr key={category}><th className="px-4 py-3 font-semibold capitalize text-slate-700">Total {category}</th><td className="px-4 py-3 text-right tabular-nums">{formatValue(data.previous[category], currency)}</td><td className="px-4 py-3 text-right tabular-nums">{formatValue(data.current[category], currency)}</td><td className={cn('px-4 py-3 text-right font-semibold tabular-nums', (data.changes[category] ?? 0) >= 0 ? 'text-slate-800' : 'text-rose-700')}>{formatValue(data.changes[category], currency)}</td><td className="px-4 py-3 text-right tabular-nums">{data.changePercentages[category] === null ? '—' : `${data.changePercentages[category]!.toFixed(1)}%`}</td></tr>)}</tbody>
+        <tbody className="divide-y divide-slate-200">{(['assets', 'liabilities', 'equity'] as const).map((category) => <tr key={category}><th className="px-4 py-3 font-semibold capitalize text-slate-700">Total {category}</th><td className="px-4 py-3 text-right tabular-nums">{formatValue(data.previous[category], currency)}</td><td className="px-4 py-3 text-right tabular-nums">{formatValue(data.current[category], currency)}</td><td className={cn('px-4 py-3 text-right font-semibold tabular-nums', (data.changes[category] ?? 0) >= 0 ? 'text-slate-800' : 'text-rose-700')}>{formatValue(data.changes[category], currency)}</td><td className="px-4 py-3 text-right tabular-nums">{data.changePercentages[category] === null ? '-' : `${data.changePercentages[category]!.toFixed(1)}%`}</td></tr>)}</tbody>
       </table></div>
-      {data.significant.length > 0 && <div className="border-t border-slate-200 p-4"><h3 className="mb-3 text-sm font-semibold text-slate-800">Largest account movements</h3><div className="overflow-x-auto"><table className="w-full min-w-[700px] text-left text-xs"><thead className="text-[10px] uppercase tracking-wide text-slate-500"><tr><th className="pb-2">Account</th><th className="pb-2">Classification</th><th className="pb-2 text-right">Previous</th><th className="pb-2 text-right">Current</th><th className="pb-2 text-right">Movement</th><th className="pb-2 text-right">Change</th></tr></thead><tbody className="divide-y divide-slate-200">{data.significant.map((account, index) => <tr key={`${account.category}-${account.name}-${index}`}><th className="py-2.5 pr-3 font-medium text-slate-700">{account.name}</th><td className="py-2.5 text-slate-500">{account.category}</td><td className="py-2.5 text-right tabular-nums">{formatValue(account.previous, currency)}</td><td className="py-2.5 text-right tabular-nums">{formatValue(account.current, currency)}</td><td className="py-2.5 text-right font-semibold tabular-nums">{formatValue(account.change, currency)}</td><td className="py-2.5 text-right tabular-nums">{account.changePercent === null ? '—' : `${account.changePercent.toFixed(1)}%`}</td></tr>)}</tbody></table></div><p className="mt-3 text-[11px] text-slate-500">Movements are ranked by absolute value. A percentage is shown only when the previous balance is positive. Xero reports do not identify the cause of each change; review the account activity for context.</p></div>}
+      {data.significant.length > 0 && <div className="border-t border-slate-200 p-4"><h3 className="mb-3 text-sm font-semibold text-slate-800">Largest account movements</h3><div className="overflow-x-auto"><table className="w-full min-w-[700px] text-left text-xs"><thead className="text-[10px] uppercase tracking-wide text-slate-500"><tr><th className="pb-2">Account</th><th className="pb-2">Classification</th><th className="pb-2 text-right">Previous</th><th className="pb-2 text-right">Current</th><th className="pb-2 text-right">Movement</th><th className="pb-2 text-right">Change</th></tr></thead><tbody className="divide-y divide-slate-200">{data.significant.map((account, index) => <tr key={`${account.category}-${account.name}-${index}`}><th className="py-2.5 pr-3 font-medium text-slate-700">{account.name}</th><td className="py-2.5 text-slate-500">{account.category}</td><td className="py-2.5 text-right tabular-nums">{formatValue(account.previous, currency)}</td><td className="py-2.5 text-right tabular-nums">{formatValue(account.current, currency)}</td><td className="py-2.5 text-right font-semibold tabular-nums">{formatValue(account.change, currency)}</td><td className="py-2.5 text-right tabular-nums">{account.changePercent === null ? '-' : `${account.changePercent.toFixed(1)}%`}</td></tr>)}</tbody></table></div><p className="mt-3 text-[11px] text-slate-500">Movements are ranked by absolute value. A percentage is shown only when the previous balance is positive. Xero reports do not identify the cause of each change; review the account activity for context.</p></div>}
       <div className="divide-y divide-slate-200 border-t border-slate-200">{[...new Set(data.accounts.map((account) => account.category))].map((category) => {
         const accounts = data.accounts.filter((account) => account.category === category);
         return <details key={category} className="group"><summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 [&::-webkit-details-marker]:hidden"><span>{category}</span><span className="flex items-center gap-2 text-xs font-normal text-slate-500">{accounts.length} accounts<ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" /></span></summary><div className="overflow-x-auto border-t border-slate-100"><table className="w-full min-w-[700px] text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-2">Account (expand for entries)</th><th className="px-4 py-2 text-right">Previous</th><th className="px-4 py-2 text-right">Current</th><th className="px-4 py-2 text-right">Movement</th><th className="px-4 py-2 text-right">Change</th></tr></thead><tbody className="divide-y divide-slate-200">{accounts.map((account, index) => <AccountMovementRow key={`${account.name}-${index}`} account={account} fromDate={activityFromDate} toDate={data?.currentDate ?? ''} currency={currency} contactComparisons={data.contactComparisons} />)}</tbody></table></div></details>;
       })}</div>
-      <div className="grid gap-3 border-t border-slate-100 bg-slate-50/60 p-4 sm:grid-cols-2">{data.equations.map((equation) => <div key={equation.date} className="flex min-w-0 items-start justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2.5"><div><p className="text-xs font-semibold text-slate-700">Balance-sheet equation</p><p className="mt-1 text-[11px] text-slate-500">As at {formatDate(equation.date)} · difference {formatValue(equation.difference, currency)}</p></div><span className={cn('text-xs font-semibold', equation.balanced === true ? 'text-emerald-700' : equation.balanced === false ? 'text-amber-700' : 'text-slate-500')}>{equation.balanced === true ? 'Balanced' : equation.balanced === false ? 'Review required' : 'Not available'}</span></div>)}</div>
+      <div className="grid gap-3 border-t border-slate-100 bg-slate-50/60 p-4 sm:grid-cols-2">{data.equations.map((equation) => <div key={equation.date} className="flex min-w-0 items-start justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2.5"><div><p className="text-xs font-semibold text-slate-700">Balance-sheet equation</p><p className="mt-1 text-[11px] text-slate-500">As at {formatDate(equation.date)} | difference {formatValue(equation.difference, currency)}</p></div><span className={cn('text-xs font-semibold', equation.balanced === true ? 'text-emerald-700' : equation.balanced === false ? 'text-amber-700' : 'text-slate-500')}>{equation.balanced === true ? 'Balanced' : equation.balanced === false ? 'Review required' : 'Not available'}</span></div>)}</div>
     </>}
   </section>;
 }
@@ -196,21 +252,21 @@ function AccountMovementRow({ account, fromDate, toDate, currency, contactCompar
       <td className="px-4 py-2.5 text-right tabular-nums">{formatValue(account.previous, currency)}</td>
       <td className="px-4 py-2.5 text-right tabular-nums">{formatValue(account.current, currency)}</td>
       <td className="px-4 py-2.5 text-right font-semibold tabular-nums">{formatValue(account.change, currency)}</td>
-      <td className="px-4 py-2.5 text-right tabular-nums">{account.changePercent === null ? '—' : `${account.changePercent.toFixed(1)}%`}</td>
+      <td className="px-4 py-2.5 text-right tabular-nums">{account.changePercent === null ? '-' : `${account.changePercent.toFixed(1)}%`}</td>
     </tr>
     {expanded && <tr><td colSpan={5} className="bg-slate-50/80 px-4 py-3">
       {contactComparison && <div className="mb-3 overflow-hidden rounded-lg border border-slate-200 bg-white">
         <div className="border-b border-slate-200 px-3 py-2"><p className="text-xs font-semibold capitalize text-slate-800">{contactKind} balance comparison</p><p className="mt-0.5 text-[11px] text-slate-500">Xero aged balance by contact at the two balance-sheet dates.</p></div>
-        {contactComparison.loading ? <p className="px-3 py-3 text-xs text-slate-500">Loading Xero contact balances…</p>
+        {contactComparison.loading ? <p className="px-3 py-3 text-xs text-slate-500">Loading Xero contact balances...</p>
           : !contactComparison.available ? <p className="px-3 py-3 text-xs text-slate-500">Xero contact balance reports could not be retrieved for both dates.</p>
           : contactComparison.entries.length === 0 ? <p className="px-3 py-3 text-xs text-slate-500">No outstanding {contactKind} balances were reported on either date.</p>
-            : <div className="max-h-80 overflow-auto"><table className="w-full min-w-[640px] text-left text-[11px]"><thead className="sticky top-0 bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500"><tr><th className="px-3 py-2">{contactKind}</th><th className="px-3 py-2 text-right">Previous</th><th className="px-3 py-2 text-right">Current</th><th className="px-3 py-2 text-right">Movement</th><th className="px-3 py-2 text-right">Change</th></tr></thead><tbody className="divide-y divide-slate-100">{contactComparison.entries.map((entry) => <tr key={entry.name} className="hover:bg-slate-50/70"><th className="px-3 py-2 text-left font-medium text-slate-700">{entry.name}</th><td className="px-3 py-2 text-right tabular-nums">{formatValue(entry.previous, currency)}</td><td className="px-3 py-2 text-right tabular-nums">{formatValue(entry.current, currency)}</td><td className="px-3 py-2 text-right font-semibold tabular-nums">{formatValue(entry.movement, currency)}</td><td className="px-3 py-2 text-right tabular-nums">{entry.changePercent === null ? '—' : `${entry.changePercent.toFixed(1)}%`}</td></tr>)}</tbody></table></div>}
+            : <div className="max-h-80 overflow-auto"><table className="w-full min-w-[640px] text-left text-[11px]"><thead className="sticky top-0 bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500"><tr><th className="px-3 py-2">{contactKind}</th><th className="px-3 py-2 text-right">Previous</th><th className="px-3 py-2 text-right">Current</th><th className="px-3 py-2 text-right">Movement</th><th className="px-3 py-2 text-right">Change</th></tr></thead><tbody className="divide-y divide-slate-100">{contactComparison.entries.map((entry) => <tr key={entry.name} className="hover:bg-slate-50/70"><th className="px-3 py-2 text-left font-medium text-slate-700">{entry.name}</th><td className="px-3 py-2 text-right tabular-nums">{formatValue(entry.previous, currency)}</td><td className="px-3 py-2 text-right tabular-nums">{formatValue(entry.current, currency)}</td><td className="px-3 py-2 text-right font-semibold tabular-nums">{formatValue(entry.movement, currency)}</td><td className="px-3 py-2 text-right tabular-nums">{entry.changePercent === null ? '-' : `${entry.changePercent.toFixed(1)}%`}</td></tr>)}</tbody></table></div>}
       </div>}
-      {!contactComparison && (loading ? <p className="text-xs text-slate-500">Loading Xero account activity…</p>
+      {!contactComparison && (loading ? <p className="text-xs text-slate-500">Loading Xero account activity...</p>
         : loadError ? <div className="flex flex-wrap items-center gap-3 text-xs text-rose-700"><span>{loadError}</span><button type="button" onClick={() => { setActivity(null); setLoadError(null); void loadActivity(); }} className="cursor-pointer font-semibold underline">Try again</button></div>
           : activity?.transactions.length ? <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
             <div className="border-b border-slate-200 px-3 py-2"><p className="text-xs font-semibold text-slate-800">Xero entries for {formatDate(fromDate)} to {formatDate(toDate)}</p><p className="mt-0.5 text-[11px] text-slate-500">Debits and credits recorded against this account during the comparison period.</p></div>
-            <table className="w-full min-w-[760px] text-left text-[11px]"><thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500"><tr><th className="px-3 py-2">Date</th><th className="px-3 py-2">Description</th><th className="px-3 py-2">Type</th><th className="px-3 py-2">Reference</th><th className="px-3 py-2 text-right">Debit</th><th className="px-3 py-2 text-right">Credit</th><th className="px-3 py-2 text-right">Running balance</th></tr></thead><tbody className="divide-y divide-slate-100">{activity.transactions.map((entry, index) => <tr key={`${entry.date}-${entry.reference}-${index}`}><td className="whitespace-nowrap px-3 py-2 text-slate-600">{formatDate(entry.date)}</td><td className="max-w-[220px] px-3 py-2 text-slate-700">{entry.description || '—'}</td><td className="px-3 py-2 text-slate-600">{entry.type || '—'}</td><td className="px-3 py-2 text-slate-600">{entry.reference || '—'}</td><td className="px-3 py-2 text-right tabular-nums">{formatValue(entry.debit, currency || entry.currency)}</td><td className="px-3 py-2 text-right tabular-nums">{formatValue(entry.credit, currency || entry.currency)}</td><td className="px-3 py-2 text-right font-medium tabular-nums">{formatValue(entry.runningBalance, currency || entry.currency)}</td></tr>)}</tbody></table>
+            <table className="w-full min-w-[760px] text-left text-[11px]"><thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500"><tr><th className="px-3 py-2">Date</th><th className="px-3 py-2">Description</th><th className="px-3 py-2">Type</th><th className="px-3 py-2">Reference</th><th className="px-3 py-2 text-right">Debit</th><th className="px-3 py-2 text-right">Credit</th><th className="px-3 py-2 text-right">Running balance</th></tr></thead><tbody className="divide-y divide-slate-100">{activity.transactions.map((entry, index) => <tr key={`${entry.date}-${entry.reference}-${index}`}><td className="whitespace-nowrap px-3 py-2 text-slate-600">{formatDate(entry.date)}</td><td className="max-w-[220px] px-3 py-2 text-slate-700">{entry.description || '-'}</td><td className="px-3 py-2 text-slate-600">{entry.type || '-'}</td><td className="px-3 py-2 text-slate-600">{entry.reference || '-'}</td><td className="px-3 py-2 text-right tabular-nums">{formatValue(entry.debit, currency || entry.currency)}</td><td className="px-3 py-2 text-right tabular-nums">{formatValue(entry.credit, currency || entry.currency)}</td><td className="px-3 py-2 text-right font-medium tabular-nums">{formatValue(entry.runningBalance, currency || entry.currency)}</td></tr>)}</tbody></table>
           </div>
           : <p className="rounded-lg border border-slate-200 bg-white px-3 py-3 text-xs text-slate-500">{activity?.message || 'Xero returned no account entries for this comparison period.'}</p>)}
     </td></tr>}
@@ -311,16 +367,16 @@ function PerformanceComparisons({ analysis, summary, fromDate, toDate, currency 
   return <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
     <div className="border-b border-slate-200 px-4 py-3">
       <h2 className="text-sm font-semibold text-slate-900">Period performance</h2>
-      <p className="mt-1 text-xs text-slate-500">{formatDate(fromDate)} – {formatDate(toDate)} compared with the previous period and the same dates last year.</p>
+      <p className="mt-1 text-xs text-slate-500">{formatDate(fromDate)}  to  {formatDate(toDate)} compared with the previous period and the same dates last year.</p>
     </div>
     <div className="overflow-x-auto">
       <table className={`w-full ${budget ? 'min-w-[980px]' : 'min-w-[780px]'} text-left text-xs`}>
         <thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500"><tr>
           <th scope="col" className="px-4 py-3 font-semibold">Measure</th>
           <th scope="col" className="px-3 py-3 text-right font-semibold">Selected period</th>
-          <th scope="col" className="px-3 py-3 text-right font-semibold"><span className="block">Previous period</span><span className="mt-1 block text-[9px] font-normal normal-case tracking-normal">{formatDate(previous.fromDate)} – {formatDate(previous.toDate)}</span></th>
+          <th scope="col" className="px-3 py-3 text-right font-semibold"><span className="block">Previous period</span><span className="mt-1 block text-[9px] font-normal normal-case tracking-normal">{formatDate(previous.fromDate)}  to  {formatDate(previous.toDate)}</span></th>
           <th scope="col" className="px-3 py-3 text-right font-semibold">Change</th>
-          <th scope="col" className="px-3 py-3 text-right font-semibold"><span className="block">Same dates last year</span><span className="mt-1 block text-[9px] font-normal normal-case tracking-normal">{formatDate(priorYear.fromDate)} – {formatDate(priorYear.toDate)}</span></th>
+          <th scope="col" className="px-3 py-3 text-right font-semibold"><span className="block">Same dates last year</span><span className="mt-1 block text-[9px] font-normal normal-case tracking-normal">{formatDate(priorYear.fromDate)}  to  {formatDate(priorYear.toDate)}</span></th>
           <th scope="col" className="px-3 py-3 text-right font-semibold">Change</th>
           {budget && <><th scope="col" className="px-3 py-3 text-right font-semibold">Xero budget</th><th scope="col" className="px-3 py-3 text-right font-semibold">Variance</th></>}
         </tr></thead>
@@ -329,9 +385,9 @@ function PerformanceComparisons({ analysis, summary, fromDate, toDate, currency 
             <th scope="row" className="px-4 py-3 font-semibold text-slate-700">{metric.label}</th>
             <td className="px-3 py-3 text-right font-semibold tabular-nums text-slate-900">{formatValue(metric.current, currency)}</td>
             <td className="px-3 py-3 text-right tabular-nums text-slate-600">{hasPrevious ? formatValue(metric.previous, currency) : 'Not available'}</td>
-            <td className="px-3 py-3 text-right font-medium tabular-nums text-slate-700">{hasPrevious ? comparisonChange(metric.current, metric.previous!, currency) : '—'}</td>
+            <td className="px-3 py-3 text-right font-medium tabular-nums text-slate-700">{hasPrevious ? comparisonChange(metric.current, metric.previous!, currency) : '-'}</td>
             <td className="px-3 py-3 text-right tabular-nums text-slate-600">{hasPriorYear ? formatValue(metric.priorYear, currency) : 'Not available'}</td>
-            <td className="px-3 py-3 text-right font-medium tabular-nums text-slate-700">{hasPriorYear ? comparisonChange(metric.current, metric.priorYear!, currency) : '—'}</td>
+            <td className="px-3 py-3 text-right font-medium tabular-nums text-slate-700">{hasPriorYear ? comparisonChange(metric.current, metric.priorYear!, currency) : '-'}</td>
             {budget && <><td className="px-3 py-3 text-right tabular-nums text-slate-600">{formatValue(metric.budget, currency)}</td><td className="px-3 py-3 text-right font-medium tabular-nums text-slate-700">{comparisonChange(metric.current, metric.budget!, currency)}</td></>}
           </tr>)}
         </tbody>
@@ -352,8 +408,28 @@ export default function ManagementAccountsPage() {
   const loadSequence = useRef(0);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState<'pdf' | 'excel' | null>(null);
+  const [ledgerSnapshot, setLedgerSnapshot] = useState<{ fromDate: string; toDate: string; data: LedgerExportData } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<Record<string, boolean>>({ revenue: false, cogs: false, expenses: false, other: false });
+
+  useEffect(() => {
+    const warmPdfAssets = () => {
+      void loadPdfLibrary().catch(() => { jspdfModulePromise = null; });
+      const cover = new Image();
+      cover.src = '/management-accounts-cover.png';
+    };
+    if ('requestIdleCallback' in window) {
+      const idleId = window.requestIdleCallback(warmPdfAssets, { timeout: 2500 });
+      return () => window.cancelIdleCallback(idleId);
+    }
+    const timer = setTimeout(warmPdfAssets, 1200);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const handleLedgerData = useCallback((data: Parameters<typeof normalizeLedgerExport>[0], snapshotFrom: string, snapshotTo: string) => {
+    const normalized = normalizeLedgerExport(data);
+    if (normalized) setLedgerSnapshot({ fromDate: snapshotFrom, toDate: snapshotTo, data: normalized });
+  }, []);
 
   const load = useCallback(async (from = fromDate, to = toDate) => {
     const requestSequence = ++loadSequence.current;
@@ -428,6 +504,29 @@ export default function ManagementAccountsPage() {
   const cash = hasBalance ? bs.sourceSummary?.workingCapital?.cash ?? null : null;
   const receivables = hasBalance ? bs.sourceSummary?.workingCapital?.receivables ?? null : null;
   const payables = hasBalance ? bs.sourceSummary?.workingCapital?.payables ?? null : null;
+  const sumLines = (lines: Line[] | undefined) => (lines ?? []).reduce((total, line) => total + line.value, 0);
+  const balanceComposition = [
+    {
+      title: 'Assets',
+      total: bs.sourceSummary?.assets,
+      segments: [
+        { label: 'Current assets', value: sumLines(bs.assets?.current), color: 'bg-cyan-600' },
+        { label: 'Non-current assets', value: sumLines(bs.assets?.nonCurrent), color: 'bg-blue-900' },
+        { label: 'Other assets', value: sumLines(bs.assets?.unclassified), color: 'bg-sky-300' },
+      ],
+    },
+    {
+      title: 'Liabilities and equity',
+      total: bs.sourceSummary?.liabilities != null && bs.sourceSummary.equity != null
+        ? bs.sourceSummary.liabilities + bs.sourceSummary.equity
+        : null,
+      segments: [
+        { label: 'Current liabilities', value: sumLines(bs.liabilities?.current), color: 'bg-amber-600' },
+        { label: 'Non-current liabilities', value: sumLines(bs.liabilities?.nonCurrent), color: 'bg-orange-300' },
+        { label: 'Equity', value: sumLines(bs.equity), color: 'bg-emerald-600' },
+      ],
+    },
+  ];
   const unclassifiedBalanceAccounts = [
     ...(bs.assets?.unclassified || []).map((line, index) => ({ id: `other-asset-${index}`, line, name: line.name, value: line.value, category: 'Other assets' })),
     ...(bs.liabilities?.unclassified || []).map((line, index) => ({ id: `other-liability-${index}`, line, name: line.name, value: line.value, category: 'Other liabilities' })),
@@ -446,12 +545,51 @@ export default function ManagementAccountsPage() {
     ...payableEntries.filter((entry) => Number.isFinite(entry.value) && Math.abs(entry.value) > 0).sort((left, right) => Math.abs(right.value) - Math.abs(left.value)).slice(0, 5),
   ];
 
+  const buildManagementSummaryRows = () => {
+    const rows: string[][] = [];
+    if (summary) {
+      rows.push(['Trading performance', 'group']);
+      rows.push([`Revenue for ${formatDate(fromDate)} to ${formatDate(toDate)} was ${formatValue(summary.revenue, currency)}.`, 'detail']);
+      rows.push([`Gross profit was ${formatValue(summary.grossProfit, currency)}${summary.grossProfitMargin == null ? '' : `, a gross margin of ${summary.grossProfitMargin.toFixed(1)}%`}.`, 'detail']);
+      rows.push([`Operating expenses were ${formatValue(summary.expenses, currency)} and net profit was ${formatValue(summary.netProfit, currency)}${summary.profitMargin == null ? '' : `, a net margin of ${summary.profitMargin.toFixed(1)}%`}.`, 'detail']);
+      const comparisons = analysis?.comparisons;
+      const movement = (difference: number) => Math.abs(difference) < 0.005 ? 'unchanged' : `${formatValue(Math.abs(difference), currency)} ${difference > 0 ? 'higher' : 'lower'}`;
+      if (comparisons?.previousPeriod.available && comparisons.previousPeriod.totals) {
+        rows.push([`Compared with the previous period, revenue was ${movement(summary.revenue - comparisons.previousPeriod.totals.revenue)} and net profit was ${movement(summary.netProfit - comparisons.previousPeriod.totals.netProfit)}.`, 'detail']);
+      }
+      if (comparisons?.priorYear.available && comparisons.priorYear.totals) {
+        rows.push([`Compared with the same dates last year, revenue was ${movement(summary.revenue - comparisons.priorYear.totals.revenue)} and net profit was ${movement(summary.netProfit - comparisons.priorYear.totals.netProfit)}.`, 'detail']);
+      }
+    }
+    if (hasBalance) {
+      rows.push(['Financial position', 'group']);
+      rows.push([`At ${formatDate(toDate)}, total assets were ${formatValue(bs.sourceSummary?.assets, currency)}, total liabilities were ${formatValue(bs.sourceSummary?.liabilities, currency)}, and total equity was ${formatValue(bs.sourceSummary?.equity, currency)}.`, 'detail']);
+      const workingCapital = bs.sourceSummary?.workingCapital;
+      if (workingCapital?.netWorkingCapital != null) rows.push([`Net working capital was ${formatValue(workingCapital.netWorkingCapital, currency)}${workingCapital.currentRatio == null ? '' : `, with a current ratio of ${workingCapital.currentRatio.toFixed(2)}x`}.`, 'detail']);
+      if (balance?.isBalanced === true) rows.push(['The balance sheet is in balance.', 'detail']);
+      else if (balance?.isBalanced === false) rows.push([`The balance sheet has a difference of ${formatValue(balance.difference, currency)}.`, 'detail']);
+    }
+    return rows;
+  };
+
   const downloadPdf = async () => {
     if (loading || exporting) return;
     setExporting('pdf');
     try {
-      const ledgerExport = await fetchLedgerExport(fromDate, toDate);
-      const { default: JsPDF } = await import('jspdf');
+      const cachedLedger = ledgerSnapshot?.fromDate === fromDate && ledgerSnapshot.toDate === toDate ? ledgerSnapshot.data : null;
+      // Supporting reports load after the core P&L and balance sheet so the
+      // dashboard can render quickly. Export must await those reports instead
+      // of capturing their initial null state and silently dropping sections.
+      const [ledgerExport, exportAnalysis, exportAdvanced, { default: JsPDF }] = await Promise.all([
+        cachedLedger ? Promise.resolve(cachedLedger) : fetchLedgerExport(fromDate, toDate),
+        fetch(`/api/dashboard/reports/management-analysis?fromDate=${encodeURIComponent(fromDate)}&toDate=${encodeURIComponent(toDate)}&storage=postgres`, { cache: 'no-store' })
+          .then(async (response) => response.ok ? await response.json() as ManagementAnalysis : null).catch(() => null),
+        fetch(`/api/dashboard/reports/management-accounts-advanced?fromDate=${encodeURIComponent(fromDate)}&toDate=${encodeURIComponent(toDate)}&storage=postgres`, { cache: 'no-store' })
+          .then(async (response) => response.ok ? await response.json() as AdvancedManagementData : null).catch(() => null),
+        loadPdfLibrary(),
+      ]);
+      const pdfAnalysis = exportAnalysis ?? analysis;
+      const pdfAdvanced = exportAdvanced ?? advanced;
       const doc = new JsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
       const pageWidth = doc.internal.pageSize.getWidth();
       const pageHeight = doc.internal.pageSize.getHeight();
@@ -474,6 +612,7 @@ export default function ManagementAccountsPage() {
         subtitle: string;
         headers: string[];
         rows: string[][];
+        columnKey?: string;
         indentDetails?: boolean;
         layout?: 'standard' | 'trend' | 'comparison' | 'statement' | 'profit-flow' | 'balance-sheet' | 'metrics' | 'exposures' | 'summary';
         summaryCards?: { label: string; value: string; detail?: string }[];
@@ -507,9 +646,8 @@ export default function ManagementAccountsPage() {
           layout: 'trend',
           tocEntries: [{ title: 'Monthly Performance', description: 'Reported activity by month', rowIndex: 0 }]
         });
-        const comparisons = analysis?.comparisons;
-        const hasComparisonData = Boolean(comparisons?.previousPeriod.available || comparisons?.priorYear.available || comparisons?.budget?.available);
-        if (summary && comparisons && hasComparisonData) {
+        const comparisons = pdfAnalysis?.comparisons;
+        if (summary && comparisons) {
           const hasBudget = Boolean(comparisons.budget?.available);
           const amountAndChange = (current: number, baseline: number | undefined, available: boolean) => available && baseline !== undefined
             ? [formatValue(baseline, currency), `${current - baseline > 0 ? '+' : ''}${formatValue(current - baseline, currency)}`]
@@ -522,7 +660,7 @@ export default function ManagementAccountsPage() {
           ];
           sections.push({
             title: 'Performance Comparisons',
-            subtitle: `Selected: ${fromDate}–${toDate} | Previous: ${comparisons.previousPeriod.fromDate}–${comparisons.previousPeriod.toDate} | Last year: ${comparisons.priorYear.fromDate}–${comparisons.priorYear.toDate}${hasBudget ? ' | Budget available' : ''}`,
+            subtitle: `Selected ${fromDate} to ${toDate} | Previous ${comparisons.previousPeriod.fromDate} to ${comparisons.previousPeriod.toDate} | Last year ${comparisons.priorYear.fromDate} to ${comparisons.priorYear.toDate}${hasBudget ? ' | Budget available' : ''}`,
             headers: hasBudget ? ['MEASURE', 'SELECTED', 'PREVIOUS', 'CHANGE', 'LAST YEAR', 'CHANGE', 'BUDGET', 'VARIANCE'] : ['MEASURE', 'SELECTED', 'PREVIOUS', 'CHANGE', 'LAST YEAR', 'CHANGE'],
             rows: comparisonRows,
             layout: 'comparison',
@@ -617,8 +755,11 @@ export default function ManagementAccountsPage() {
           });
         }
       }
-      if (advanced?.cashMovement?.available) {
-        const cash = advanced.cashMovement;
+      if (pdfAdvanced) {
+        const cash = pdfAdvanced.cashMovement;
+        if (!cash?.available) {
+          sections.push({ title: 'Actual Cash Movement', subtitle: `${formatDate(fromDate)} to ${formatDate(toDate)} | Xero Bank Summary | ${currency || 'Currency not specified'}`, headers: ['CASH MOVEMENT', 'STATUS'], rows: [['Cash movement data', 'Unavailable in the Xero Bank Summary for this period', 'detail']], layout: 'statement', tocEntries: [{ title: 'Actual Cash Movement', description: 'Cash movement report status for the selected period', rowIndex: 0 }] });
+        } else {
         const cashRows: string[][] = [
           ['Opening cash and bank balances', formatValue(cash.opening, currency), 'total'],
           ['Cash received', '', 'group'],
@@ -632,73 +773,74 @@ export default function ManagementAccountsPage() {
           ['Roll-forward difference', formatValue(cash.reconciliationDifference, currency), 'detail'],
         ];
         sections.push({ title: 'Actual Cash Movement', subtitle: `${formatDate(fromDate)} to ${formatDate(toDate)} | Xero Bank Summary | ${currency || 'Currency not specified'}`, headers: ['CASH MOVEMENT', 'AMOUNT'], rows: cashRows, layout: 'statement', tocEntries: [{ title: 'Actual Cash Movement', description: 'Opening cash, receipts, payments and closing position', rowIndex: 0 }] });
+        }
       }
-      if (advanced?.balanceMovement?.available) {
-        const movement = advanced.balanceMovement;
+      if (pdfAdvanced) {
+        const movement = pdfAdvanced.balanceMovement;
+        if (!movement?.available) {
+          const previousDate = movement?.previousDate ? formatDate(movement.previousDate) : 'previous reporting date';
+          const currentDate = movement?.currentDate ? formatDate(movement.currentDate) : formatDate(toDate);
+          sections.push({ title: 'Balance-Sheet Movement', subtitle: `${previousDate} compared with ${currentDate} | ${currency || 'Currency not specified'}`, headers: ['BALANCE-SHEET MOVEMENT', 'STATUS'], rows: [['Movement analysis', 'Unavailable for the selected reporting dates', 'detail']], layout: 'comparison', tocEntries: [{ title: 'Balance-Sheet Movement', description: 'Movement report status between the two Xero balance-sheet dates', rowIndex: 0 }] });
+        } else {
         const movementRows: string[][] = [];
         (['assets', 'liabilities', 'equity'] as const).forEach((category) => {
-          movementRows.push([`Total ${category}`, formatValue(movement.previous[category], currency), formatValue(movement.current[category], currency), formatValue(movement.changes[category], currency), movement.changePercentages[category] === null ? '—' : `${movement.changePercentages[category]!.toFixed(1)}%`, 'total']);
+          movementRows.push([`Total ${category}`, formatValue(movement.previous[category], currency), formatValue(movement.current[category], currency), formatValue(movement.changes[category], currency), movement.changePercentages[category] === null ? '-' : `${movement.changePercentages[category]!.toFixed(1)}%`, 'total']);
           const accounts = movement.accounts.filter((account) => account.category.toLowerCase().includes(category === 'assets' ? 'asset' : category === 'liabilities' ? 'liabilit' : 'equity'));
-          accounts.forEach((account) => movementRows.push([account.name, formatValue(account.previous, currency), formatValue(account.current, currency), formatValue(account.change, currency), account.changePercent === null ? '—' : `${account.changePercent.toFixed(1)}%`, 'detail']));
+          accounts.forEach((account) => movementRows.push([account.name, formatValue(account.previous, currency), formatValue(account.current, currency), formatValue(account.change, currency), account.changePercent === null ? '-' : `${account.changePercent.toFixed(1)}%`, 'detail']));
         });
         sections.push({ title: 'Balance-Sheet Movement', subtitle: `Previous month-end ${formatDate(movement.previousDate)} compared with ${formatDate(movement.currentDate)} | Percentages shown where the previous balance is positive | ${currency || 'Currency not specified'}`, headers: ['ACCOUNT / CATEGORY', 'PREVIOUS', 'CURRENT', 'MOVEMENT', 'CHANGE'], rows: movementRows, layout: 'comparison', tocEntries: [{ title: 'Balance-Sheet Movement', description: 'Account changes between the two Xero balance-sheet dates', rowIndex: 0 }] });
-      }
-      if (advanced?.closeReview) {
-        const closeRows: string[][] = [
-          [`Review totals: ${advanced.closeReview.counts.verified} verified · ${advanced.closeReview.counts.attention} need attention · ${advanced.closeReview.counts.notVerified} not verified`, '', 'group'],
-          ...advanced.closeReview.controls.map((control) => [control.name, `${control.status === 'verified' ? 'Verified' : control.status === 'attention' ? 'Needs attention' : control.status === 'not-applicable' ? 'Not applicable' : 'Not verified'} — ${control.detail} (${control.evidence}; ${control.referenceDate})`, 'detail']),
-        ];
-        sections.push({ title: 'Month-End Close Review', subtitle: `${formatDate(fromDate)} to ${formatDate(toDate)} | Evidence-based review summary; not a close certification`, headers: ['CONTROL', 'STATUS AND EVIDENCE'], rows: closeRows, layout: 'metrics', tocEntries: [{ title: 'Month-End Close Review', description: 'Control status and evidence available for the selected period', rowIndex: 0 }] });
-      }
-      const closingRows: string[][] = [];
-      if (summary) {
-        closingRows.push(['Trading performance', 'group']);
-        closingRows.push([`Revenue for ${formatDate(fromDate)} to ${formatDate(toDate)} was ${formatValue(summary.revenue, currency)}.`, 'detail']);
-        closingRows.push([`Gross profit was ${formatValue(summary.grossProfit, currency)}${summary.grossProfitMargin == null ? '' : `, a gross margin of ${summary.grossProfitMargin.toFixed(1)}%`}.`, 'detail']);
-        closingRows.push([`Operating expenses were ${formatValue(summary.expenses, currency)} and net profit was ${formatValue(summary.netProfit, currency)}${summary.profitMargin == null ? '' : `, a net margin of ${summary.profitMargin.toFixed(1)}%`}.`, 'detail']);
-        const comparisons = analysis?.comparisons;
-        const movement = (difference: number) => Math.abs(difference) < 0.005 ? 'unchanged' : `${formatValue(Math.abs(difference), currency)} ${difference > 0 ? 'higher' : 'lower'}`;
-        if (comparisons?.previousPeriod.available && comparisons.previousPeriod.totals) {
-          const revenueChange = summary.revenue - comparisons.previousPeriod.totals.revenue;
-          const profitChange = summary.netProfit - comparisons.previousPeriod.totals.netProfit;
-          closingRows.push([`Compared with the previous period, revenue was ${movement(revenueChange)} and net profit was ${movement(profitChange)}.`, 'detail']);
         }
-        if (comparisons?.priorYear.available && comparisons.priorYear.totals) {
-          const revenueChange = summary.revenue - comparisons.priorYear.totals.revenue;
-          const profitChange = summary.netProfit - comparisons.priorYear.totals.netProfit;
-          closingRows.push([`Compared with the same dates last year, revenue was ${movement(revenueChange)} and net profit was ${movement(profitChange)}.`, 'detail']);
-        }
-      }
-      if (hasBalance) {
-        closingRows.push(['Financial position', 'group']);
-        closingRows.push([`At ${formatDate(toDate)}, total assets were ${formatValue(bs.sourceSummary?.assets, currency)}, total liabilities were ${formatValue(bs.sourceSummary?.liabilities, currency)}, and total equity was ${formatValue(bs.sourceSummary?.equity, currency)}.`, 'detail']);
-        const workingCapital = bs.sourceSummary?.workingCapital;
-        if (workingCapital?.netWorkingCapital != null) closingRows.push([`Net working capital was ${formatValue(workingCapital.netWorkingCapital, currency)}${workingCapital.currentRatio == null ? '' : `, with a current ratio of ${workingCapital.currentRatio.toFixed(2)}x`}.`, 'detail']);
-        if (balance?.isBalanced === true) closingRows.push(['The balance sheet is in balance.', 'detail']);
-        else if (balance?.isBalanced === false) closingRows.push([`The balance sheet has a difference of ${formatValue(balance.difference, currency)}.`, 'detail']);
       }
       if (ledgerExport) {
-        const adjustmentTotals = new Map<string, { debit: number; credit: number }>();
+        const adjustmentTotals = new Map<string, { debit: number; credit: number; references: string[] }>();
         for (const item of ledgerExport.adjustments) {
-          if (item.status !== 'APPROVED') continue;
-          const totals = adjustmentTotals.get(item.accountId) ?? { debit: 0, credit: 0 };
+          const totals = adjustmentTotals.get(item.accountId) ?? { debit: 0, credit: 0, references: [] };
           totals[item.direction === 'DEBIT' ? 'debit' : 'credit'] += item.amount;
+          if (item.adjustmentRef && !totals.references.includes(item.adjustmentRef)) totals.references.push(item.adjustmentRef);
           adjustmentTotals.set(item.accountId, totals);
         }
+        const adjustmentDescriptions = new Map<string, string[]>();
+        for (const item of ledgerExport.adjustments) {
+          if (!item.description.trim()) continue;
+          const descriptions = adjustmentDescriptions.get(item.accountId) ?? [];
+          if (!descriptions.includes(item.description.trim())) descriptions.push(item.description.trim());
+          adjustmentDescriptions.set(item.accountId, descriptions);
+        }
         const ledgerRows = ledgerExport.accounts.map((account) => {
-          const totals = adjustmentTotals.get(account.accountId) ?? { debit: 0, credit: 0 };
-          const internal = totals.debit || totals.credit ? `Management debit ${formatValue(totals.debit, currency)} / credit ${formatValue(totals.credit, currency)}` : '—';
-          const sourceStatus = account.reconciliationStatus === 'Matches Xero activity' ? 'Balance matched' : account.reconciliationStatus === 'Difference outstanding' ? 'Variance identified' : 'Evidence unavailable';
-          return [account.accountCode ? `${account.accountCode} · ${account.accountName}` : account.accountName, account.classification, formatValue(account.sourceClosingBalance, currency), internal, formatValue(account.adjustedClosingBalance, currency), formatValue(account.unresolvedDifference, currency), sourceStatus, 'detail'];
+          const totals = adjustmentTotals.get(account.accountId) ?? { debit: 0, credit: 0, references: [] };
+          const hasManagementOnlyEntry = totals.debit > 0 || totals.credit > 0;
+          const purpose = (adjustmentDescriptions.get(account.accountId) ?? []).join('; ');
+          const details = hasManagementOnlyEntry
+            ? ['MANAGEMENT-ONLY ENTRY - NOT POSTED TO XERO', totals.references.length ? `Reference: ${totals.references.join(', ')}` : '', purpose ? `Purpose: ${purpose}` : ''].filter(Boolean).join(' | ')
+            : (account.reconciliationStatus === 'Matches Xero activity' ? 'Balance matched' : account.reconciliationStatus === 'Difference outstanding' ? 'Variance identified' : 'Evidence unavailable');
+          const conciseDetails = details.length > 115 ? `${details.slice(0, 112).trimEnd()}…` : details || '-';
+          const managementAdjustment = hasManagementOnlyEntry ? `Dr ${formatValue(totals.debit, currency)} - Cr ${formatValue(totals.credit, currency)}` : '-';
+          return [account.accountCode ? `${account.accountCode} - ${account.accountName}` : account.accountName, formatValue(account.sourceClosingBalance, currency), managementAdjustment, formatValue(account.adjustedClosingBalance, currency), formatValue(account.unresolvedDifference, currency), conciseDetails, hasManagementOnlyEntry ? 'management-only' : 'detail'];
         });
+        const ledgerSummary = ledgerExport.summary;
         sections.push({
-          title: 'Period-end Ledger Review', subtitle: `${formatDate(fromDate)} to ${formatDate(toDate)}  |  Management adjustments are separate from Xero source balances`,
-          headers: ['ACCOUNT', 'CLASSIFICATION', 'XERO BALANCE', 'MANAGEMENT ADJUSTMENT', 'PRO FORMA BALANCE', 'SOURCE VARIANCE', 'SOURCE STATUS'],
+          title: 'Period-end Ledger Review', subtitle: `${formatDate(fromDate)} to ${formatDate(toDate)} | Management-only closing entries are identified separately and are not posted to Xero.`,
+          headers: ['ACCOUNT', 'XERO CLOSE', 'MGMT ADJUSTMENT', 'ADJUSTED CLOSE', 'VARIANCE', 'ENTRY DETAILS'],
           rows: ledgerRows,
+          summaryCards: [
+            { label: 'Accounts in review', value: String(ledgerSummary.totalAccounts) },
+            { label: 'Matched to Xero activity', value: String(ledgerSummary.reconciledAccounts) },
+            { label: 'Closing entries outstanding', value: String(ledgerSummary.unresolvedDifferences) },
+            { label: 'Source detail incomplete', value: String(ledgerSummary.evidenceUnavailable) },
+          ],
+          columnKey: 'Xero close: balance reported by Xero. Mgmt adjustment: debit and credit recorded for this report only. Adjusted close: balance after the management-only entry. Variance: Xero close less adjusted close. Entry details show the entry status, reference and purpose.',
           layout: 'standard',
           tocEntries: [{ title: 'Period-end Ledger Review', description: 'Xero balances, management adjustments and source variances', rowIndex: 0 }],
         });
       }
+      if (pdfAdvanced?.closeReview) {
+        const closeRows: string[][] = [
+          [`Review totals: ${pdfAdvanced.closeReview.counts.verified} verified | ${pdfAdvanced.closeReview.counts.attention} need attention | ${pdfAdvanced.closeReview.counts.notVerified} not verified`, '', 'group'],
+          ...pdfAdvanced.closeReview.controls.map((control) => [control.name, `${control.status === 'verified' ? 'Verified' : control.status === 'attention' ? 'Needs attention' : control.status === 'not-applicable' ? 'Not applicable' : 'Not verified'} - ${control.detail} (${control.evidence}; ${control.referenceDate})`, 'detail']),
+        ];
+        sections.push({ title: 'Month-End Close Review', subtitle: `${formatDate(fromDate)} to ${formatDate(toDate)} | Evidence-based review summary; not a close certification`, headers: ['CONTROL', 'STATUS AND EVIDENCE'], rows: closeRows, layout: 'metrics', tocEntries: [{ title: 'Month-End Close Review', description: 'Control status and evidence available for the selected period', rowIndex: 0 }] });
+      }
+      const closingRows = buildManagementSummaryRows();
       if (closingRows.length) sections.push({
         title: 'Management Summary',
         subtitle: `${orgName || 'Organisation'} | ${formatDate(fromDate)} to ${formatDate(toDate)} | ${currency || 'Currency not specified'}`,
@@ -874,8 +1016,8 @@ export default function ManagementAccountsPage() {
           doc.text(formatValue(stage.value, currency), startX + width - 3, y + 7, { align: 'right' });
         });
         doc.setFont('helvetica', 'normal'); doc.setFontSize(6.2); doc.setTextColor(...muted);
-        doc.text(`− Cost of sales  ${formatValue(costOfSales, currency)}`, startX + 4, top + 23);
-        doc.text(`− Operating expenses  ${formatValue(operatingExpenses, currency)}`, startX + 4, top + 43);
+        doc.text(`Less: Cost of sales  ${formatValue(costOfSales, currency)}`, startX + 4, top + 23);
+        doc.text(`Less: Operating expenses  ${formatValue(operatingExpenses, currency)}`, startX + 4, top + 43);
         return top + 63;
       };
 
@@ -896,7 +1038,7 @@ export default function ManagementAccountsPage() {
         sourceY = (coverImage.naturalHeight - sourceHeight) * 0.55;
       }
       const coverCanvas = document.createElement('canvas');
-      coverCanvas.width = 1200;
+      coverCanvas.width = 900;
       coverCanvas.height = Math.round(coverCanvas.width / coverRatio);
       const coverContext = coverCanvas.getContext('2d');
       if (!coverContext) throw new Error('Unable to prepare the PDF cover image.');
@@ -907,7 +1049,7 @@ export default function ManagementAccountsPage() {
       coverGradient.addColorStop(1, 'rgba(15, 35, 68, 0.24)');
       coverContext.fillStyle = coverGradient;
       coverContext.fillRect(0, 0, coverCanvas.width, coverCanvas.height);
-      doc.addImage(coverCanvas.toDataURL('image/jpeg', 0.94), 'JPEG', 0, 0, pageWidth, pageHeight);
+      doc.addImage(coverCanvas.toDataURL('image/jpeg', 0.84), 'JPEG', 0, 0, pageWidth, pageHeight);
       doc.setDrawColor(230, 235, 240); doc.setLineWidth(0.65); doc.rect(2.5, 2.5, pageWidth - 5, pageHeight - 5, 'S');
 
       // Reserve page 2 for an index populated only after every section has paginated.
@@ -997,24 +1139,50 @@ export default function ManagementAccountsPage() {
       }
       let currentY = pageHeight;
       let currentBodyStart = pageHeight;
-      const columnWidths = (headers: string[]) => headers[0] === 'MEASURE'
+      const columnWidths = (headers: string[]) => headers[0] === 'ACCOUNT' && headers[1] === 'XERO CLOSE'
+        ? [43, 21, 30, 22, 20, tableWidth - 136]
+        : headers[0] === 'MEASURE'
         ? headers.length === 8 ? [28, 22, 23, 18, 23, 18, 22, 20] : [32, 29, 29, 27, 32, 25]
         : headers.length === 4
         ? [40, (tableWidth - 40) / 3, (tableWidth - 40) / 3, (tableWidth - 40) / 3]
         : headers.length === 5 ? [34, (tableWidth - 34) / 4, (tableWidth - 34) / 4, (tableWidth - 34) / 4, (tableWidth - 34) / 4]
-        : headers.length === 1 ? [tableWidth] : headers[0] === 'CONTROL' ? [tableWidth * 0.42, tableWidth * 0.58] : [tableWidth * 0.72, tableWidth * 0.28];
-      const rowHeightFor = (section: PdfSection, row: string[]) => {
+        : headers.length === 7 ? [27, 18, 23, 29, 25, 22, tableWidth - 144]
+        : headers.length === 1 ? [tableWidth] : headers[0] === 'CONTROL' ? [tableWidth * 0.42, tableWidth * 0.58]
+        : headers.length === 2 ? [tableWidth * 0.72, tableWidth * 0.28]
+        : Array.from({ length: headers.length }, () => tableWidth / Math.max(1, headers.length));
+      const valuesForRow = (section: PdfSection, row: string[]) => {
         const kind = row[row.length - 1];
-        const values = ['group', 'detail', 'total', 'subtotal', 'flag', 'comparison'].includes(kind) ? row.slice(0, -1) : row;
-        if (section.layout === 'balance-sheet' && kind === 'group') return 8.6;
-        if (section.layout === 'balance-sheet' && kind === 'total') return 8.2;
+        const values = ['group', 'detail', 'total', 'subtotal', 'flag', 'comparison', 'management-only'].includes(kind) ? row.slice(0, -1) : row;
+        if (section.title !== 'Period-end Ledger Review') return values;
+        return values.map((value) => !value || value === 'Not available' ? '-' : value);
+      };
+      const rowLayoutCache = new WeakMap<string[], { values: string[]; lines: string[][]; height: number }>();
+      const rowLayoutFor = (section: PdfSection, row: string[]) => {
+        const cached = rowLayoutCache.get(row);
+        if (cached) return cached;
+        const kind = row[row.length - 1];
+        const values = valuesForRow(section, row);
+        if (section.layout === 'balance-sheet' && (kind === 'group' || kind === 'total')) {
+          const layout = { values, lines: [], height: kind === 'group' ? 8.6 : 8.2 };
+          rowLayoutCache.set(row, layout);
+          return layout;
+        }
+        const isLedgerRow = section.title === 'Period-end Ledger Review';
         doc.setFont('helvetica', kind === 'group' || kind === 'total' || kind === 'subtotal' || kind === 'flag' ? 'bold' : 'normal');
-        doc.setFontSize(kind === 'group' ? 8.2 : 8.6);
+        doc.setFontSize(isLedgerRow ? 7.2 : kind === 'group' ? 8.2 : 8.6);
         const widths = columnWidths(section.headers);
         if (kind === 'comparison') doc.setFontSize(7.2);
-        const lineCounts = values.map((value, column) => (doc.splitTextToSize(value, Math.max(14, (widths[column] ?? widths[0] ?? tableWidth) - 10)) as string[]).length);
-        return Math.max(7.2, Math.max(1, ...lineCounts) * 4.1 + 3.1);
+        const lines = values.map((value, column) => {
+          const minimumWidth = isLedgerRow && column === 5 ? 20 : 14;
+          return doc.splitTextToSize(value, Math.max(minimumWidth, (widths[column] ?? widths[0] ?? tableWidth) - 9));
+        });
+        const maxLineCount = Math.max(1, ...lines.map((cellLines) => cellLines.length));
+        const height = Math.max(7.2, maxLineCount * (isLedgerRow ? 3.5 : 4.1) + (isLedgerRow ? 2.8 : 3.1));
+        const layout = { values, lines, height };
+        rowLayoutCache.set(row, layout);
+        return layout;
       };
+      const rowHeightFor = (section: PdfSection, row: string[]) => rowLayoutFor(section, row).height;
       const drawTableHeader = (section: PdfSection, top: number) => {
         const widths = columnWidths(section.headers);
         if (section.layout === 'summary') {
@@ -1030,7 +1198,7 @@ export default function ManagementAccountsPage() {
           doc.setFillColor(...navy); doc.rect(left, top, tableWidth, 8, 'F');
           doc.setTextColor(255, 255, 255);
         }
-        doc.setFont('helvetica', 'bold'); doc.setFontSize(section.layout === 'comparison' ? 6.7 : 7.2);
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(section.title === 'Period-end Ledger Review' ? 5.5 : section.layout === 'comparison' ? 6.7 : 7.2);
         let x = left + 4;
         section.headers.forEach((header, column) => {
           const isText = column === 0;
@@ -1080,7 +1248,7 @@ export default function ManagementAccountsPage() {
         doc.text('VIRTUAL CFO INTELLIGENCE  /  MANAGEMENT ACCOUNTS', left, 11);
         doc.setDrawColor(220, 228, 235); doc.line(left, 15, right, 15);
         doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(...navy);
-        doc.text(continued ? `${section.title}  —  Continued` : section.title, left, 26);
+        doc.text(continued ? `${section.title} - Continued` : section.title, left, 26);
         doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(...muted); doc.text(section.subtitle, left, 33);
         if (!continued && (section.layout === 'statement' || section.layout === 'balance-sheet')) {
           const cardsBottom = drawSectionCards(section, 41);
@@ -1093,7 +1261,17 @@ export default function ManagementAccountsPage() {
         } else if (!continued && section.layout === 'summary') {
           currentBodyStart = drawSectionCards(section, 41) + 6;
         } else {
-          currentBodyStart = drawTableHeader(section, 40);
+          let tableTop = 40;
+          if (!continued && section.columnKey) {
+            doc.setFont('helvetica', 'normal'); doc.setFontSize(6.6); doc.setTextColor(...muted);
+            const keyLines = doc.splitTextToSize(section.columnKey, tableWidth - 7) as string[];
+            const keyHeight = Math.max(8, keyLines.length * 3.2 + 3);
+            doc.setFillColor(241, 248, 250); doc.setDrawColor(220, 232, 237); doc.setLineWidth(0.2);
+            doc.roundedRect(left, 37, tableWidth, keyHeight, 1, 1, 'FD');
+            doc.text(keyLines, left + 3, 41);
+            tableTop = 37 + keyHeight + 2;
+          }
+          currentBodyStart = drawTableHeader(section, tableTop);
         }
         currentY = currentBodyStart;
       };
@@ -1109,7 +1287,7 @@ export default function ManagementAccountsPage() {
       for (const section of sections) {
         const firstRowHeight = section.rows.length ? rowHeightFor(section, section.rows[0]) : 0;
         const sectionSpacing = 12;
-        if (section.layout === 'statement' || section.layout === 'balance-sheet' || section.layout === 'profit-flow' || section.layout === 'summary' || currentY >= pageHeight || currentY + sectionSpacing + 30 + firstRowHeight > contentBottom) startSectionPage(section, false);
+        if (section.columnKey || section.layout === 'statement' || section.layout === 'balance-sheet' || section.layout === 'profit-flow' || section.layout === 'summary' || currentY >= pageHeight || currentY + sectionSpacing + 30 + firstRowHeight > contentBottom) startSectionPage(section, false);
         else {
           currentY += sectionSpacing;
           startSectionOnCurrentPage(section);
@@ -1124,8 +1302,7 @@ export default function ManagementAccountsPage() {
         for (let rowIndex = 0; rowIndex < section.rows.length; rowIndex++) {
           const row = section.rows[rowIndex];
           const kind = row[row.length - 1];
-          const values = ['group', 'detail', 'total', 'subtotal', 'flag', 'comparison'].includes(kind) ? row.slice(0, -1) : row;
-          const rowHeight = rowHeightFor(section, row);
+          const { values, lines: cachedLines, height: rowHeight } = rowLayoutFor(section, row);
           const nextRow = section.rows[rowIndex + 1];
           const keepWithNext = Boolean(nextRow && (kind === 'group' || nextRow[nextRow.length - 1] === 'total'));
           const pairHeight = keepWithNext ? rowHeight + rowHeightFor(section, nextRow!) : rowHeight;
@@ -1148,6 +1325,9 @@ export default function ManagementAccountsPage() {
           } else if (kind === 'subtotal') {
             doc.setDrawColor(210, 220, 228); doc.setLineWidth(0.25); doc.line(left, currentY, right, currentY);
             doc.setFillColor(248, 250, 252); doc.rect(left, currentY, tableWidth, rowHeight, 'F');
+          } else if (kind === 'management-only') {
+            doc.setFillColor(255, 247, 237); doc.rect(left, currentY, tableWidth, rowHeight, 'F');
+            doc.setDrawColor(217, 119, 6); doc.setLineWidth(0.7); doc.line(left + 1, currentY + 0.7, left + 1, currentY + rowHeight - 0.7);
           } else if (kind === 'detail' && rowIndex % 2 === 0) {
             doc.setFillColor(249, 251, 252); doc.rect(left, currentY, tableWidth, rowHeight, 'F');
           } else if (kind === 'flag') {
@@ -1166,12 +1346,12 @@ export default function ManagementAccountsPage() {
             doc.roundedRect(left + 0.8, currentY + 0.35, tableWidth - 1.6, rowHeight - 0.7, 1.2, 1.2, 'FD');
             doc.setDrawColor(...teal); doc.setLineWidth(0.7); doc.line(left + 1.2, currentY + 1, left + 1.2, currentY + rowHeight - 1);
           }
-          doc.setFont('helvetica', kind === 'group' || kind === 'total' || kind === 'subtotal' || kind === 'flag' ? 'bold' : 'normal');
-          doc.setFontSize(kind === 'comparison' ? 7.2 : kind === 'group' ? 8.2 : 8.6);
+          doc.setFont('helvetica', kind === 'group' || kind === 'total' || kind === 'subtotal' || kind === 'flag' || kind === 'management-only' ? 'bold' : 'normal');
+          doc.setFontSize(section.title === 'Period-end Ledger Review' ? 7.2 : kind === 'comparison' ? 7.2 : kind === 'group' ? 8.2 : 8.6);
           const primaryBalanceGroup = section.layout === 'balance-sheet' && kind === 'group' && ['Assets', 'Liabilities', 'Equity'].includes(values[0]);
           const balanceSheetTotal = section.layout === 'balance-sheet' && kind === 'total';
           const balanceSheetSubgroup = section.layout === 'balance-sheet' && kind === 'group' && !primaryBalanceGroup;
-          doc.setTextColor(...(primaryBalanceGroup || balanceSheetTotal ? [255, 255, 255] as [number, number, number] : balanceSheetSubgroup ? [153, 89, 34] as [number, number, number] : kind === 'group' ? navy : kind === 'flag' ? [190, 24, 93] as [number, number, number] : navy));
+          doc.setTextColor(...(kind === 'management-only' ? [146, 64, 14] as [number, number, number] : primaryBalanceGroup || balanceSheetTotal ? [255, 255, 255] as [number, number, number] : balanceSheetSubgroup ? [153, 89, 34] as [number, number, number] : kind === 'group' ? navy : kind === 'flag' ? [190, 24, 93] as [number, number, number] : navy));
           let x = left + 4;
           values.forEach((value, column) => {
             const isText = column === 0;
@@ -1181,10 +1361,9 @@ export default function ManagementAccountsPage() {
             }
             const indent = isText && ((section.indentDetails && kind === 'detail') || (section.layout === 'summary' && kind === 'detail')) ? 3 : 0;
             const columnWidth = widths[column] ?? widths[0] ?? tableWidth;
-            const maxWidth = Math.max(14, columnWidth - 9 - indent);
-            const lines = doc.splitTextToSize(value, maxWidth) as string[];
+            const lines = cachedLines[column] ?? [value];
             const position = isText ? x + indent : x + columnWidth - 8;
-            doc.text(lines, position, currentY + 4.9, { align: isText ? 'left' : 'right' });
+            doc.text(lines, position, currentY + (section.title === 'Period-end Ledger Review' ? 4 : 4.9), { align: isText ? 'left' : 'right' });
             x += widths[column];
           });
           doc.setDrawColor(204, 215, 225); doc.setLineWidth(section.layout === 'statement' ? 0.4 : 0.42); doc.line(left, currentY + rowHeight, right, currentY + rowHeight);
@@ -1227,7 +1406,7 @@ export default function ManagementAccountsPage() {
       ];
       indexEntries.forEach((entry, index) => {
         const pages = pageLocations.get(entry.title);
-        const pageText = pages ? (pages.start === pages.end ? String(pages.start) : `${pages.start}–${pages.end}`) : '—';
+        const pageText = pages ? (pages.start === pages.end ? String(pages.start) : `${pages.start}-${pages.end}`) : '-';
         doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5); doc.setTextColor(...navy);
         const titleWidth = doc.getTextWidth(entry.title);
         doc.text(String(index + 1).padStart(2, '0'), left, indexY);
@@ -1258,7 +1437,8 @@ export default function ManagementAccountsPage() {
     if (loading || exporting) return;
     setExporting('excel');
     try {
-      const ledgerExport = await fetchLedgerExport(fromDate, toDate);
+      const cachedLedger = ledgerSnapshot?.fromDate === fromDate && ledgerSnapshot.toDate === toDate ? ledgerSnapshot.data : null;
+      const ledgerExport = cachedLedger ?? await fetchLedgerExport(fromDate, toDate);
       const ExcelJS = (await import('exceljs')).default;
       const workbook = new ExcelJS.Workbook();
       workbook.creator = 'Virtual CFO'; workbook.created = new Date(); workbook.modified = new Date();
@@ -1276,12 +1456,13 @@ export default function ManagementAccountsPage() {
       index.getRow(4).eachCell((cell) => Object.assign(cell, headerStyle));
       const sheetIndex: [string, string, string][] = [['Executive Summary', 'Summary', 'Xero Profit & Loss and Balance Sheet']];
       if (hasPnl) sheetIndex.push(['Profit & Loss Detail', 'P&L Detail', `Xero P&L  |  ${fromDate} to ${toDate}`], ['Monthly Performance', 'Monthly Trend', 'Monthly Xero P&L reports']);
+      if (hasPnl && analysis?.comparisons) sheetIndex.push(['Performance Comparisons', 'Comparisons', `Selected period  |  ${fromDate} to ${toDate}`]);
       if (hasBalance) sheetIndex.push(['Balance Sheet Snapshot', 'Balance Sheet', `Xero Balance Sheet  |  ${toDate}`]);
-      if (hasPnl && analysis?.comparisons && (analysis.comparisons.previousPeriod.available || analysis.comparisons.priorYear.available || analysis.comparisons.budget?.available)) sheetIndex.push(['Performance Comparisons', 'Comparisons', `Selected period  |  ${fromDate} to ${toDate}`]);
       if (advanced?.cashMovement?.available) sheetIndex.push(['Actual Cash Movement', 'Cash Movement', `Xero Bank Summary  |  ${fromDate} to ${toDate}`]);
       if (advanced?.balanceMovement?.available) sheetIndex.push(['Balance-Sheet Movement', 'BS Movement', `${advanced.balanceMovement.previousDate} to ${advanced.balanceMovement.currentDate}`]);
+      if (ledgerExport) sheetIndex.push(['Period-end Ledger Review', 'Ledger Closing', `Xero balances, management adjustments and closing summary  |  ${fromDate} to ${toDate}`]);
       if (advanced?.closeReview) sheetIndex.push(['Month-End Close Review', 'Close Review', `Evidence checked ${new Date(advanced.closeReview.checkedAt).toLocaleString()}`]);
-      if (ledgerExport) sheetIndex.push(['Period-end Ledger Review', 'Ledger Closing', `Xero balances and management adjustments  |  ${fromDate} to ${toDate}`]);
+      if (buildManagementSummaryRows().length) sheetIndex.push(['Management Summary', 'Management Summary', 'Period results and financial position']);
       sheetIndex.forEach((row) => index.addRow(row));
       index.columns = [{ width: 30 }, { width: 24 }, { width: 48 }]; index.autoFilter = 'A4:C4';
 
@@ -1313,31 +1494,64 @@ export default function ManagementAccountsPage() {
 
       if (ledgerExport) {
         const ledgerSheet = workbook.addWorksheet('Ledger Closing');
-        addTitle(ledgerSheet, 'PERIOD-END LEDGER REVIEW — XERO SOURCE FIGURES', 14);
-        ledgerSheet.addRow([]);
-        ledgerSheet.addRow(['Account code', 'Account name', 'Classification', 'Opening balance', 'Xero debits', 'Xero credits', 'Net movement', 'Approved management debit', 'Approved management credit', 'Xero closing balance', 'Pro forma balance (unposted)', 'Source variance', 'Source status', 'Management adjustment references']);
+        addTitle(ledgerSheet, 'PERIOD-END LEDGER REVIEW', 6);
+        ledgerSheet.mergeCells(3, 1, 3, 6);
+        ledgerSheet.getCell('A3').value = 'Xero close is the source balance. Management adjustments are recorded for this report only and are not posted to Xero. Adjusted close includes these entries; variance is the Xero close less the adjusted close.';
+        ledgerSheet.getCell('A3').alignment = { wrapText: true, vertical: 'middle' };
+        ledgerSheet.getRow(3).height = 34;
+        ledgerSheet.addRow(['Account', 'Xero close', 'Management adjustment (Dr / Cr)', 'Adjusted close', 'Variance', 'Entry details']);
         ledgerSheet.getRow(4).eachCell((cell) => Object.assign(cell, headerStyle));
-        const approvedByAccount = new Map<string, { debit: number; credit: number; references: string[] }>();
+        const adjustmentByAccount = new Map<string, { debit: number; credit: number; references: string[]; descriptions: string[] }>();
         for (const adjustment of ledgerExport.adjustments) {
-          const current = approvedByAccount.get(adjustment.accountId) ?? { debit: 0, credit: 0, references: [] };
-          if (adjustment.status === 'APPROVED') {
-            current[adjustment.direction === 'DEBIT' ? 'debit' : 'credit'] += adjustment.amount;
-            current.references.push(adjustment.adjustmentRef);
-          }
-          approvedByAccount.set(adjustment.accountId, current);
+          const current = adjustmentByAccount.get(adjustment.accountId) ?? { debit: 0, credit: 0, references: [], descriptions: [] };
+          current[adjustment.direction === 'DEBIT' ? 'debit' : 'credit'] += adjustment.amount;
+          if (adjustment.adjustmentRef && !current.references.includes(adjustment.adjustmentRef)) current.references.push(adjustment.adjustmentRef);
+          const description = adjustment.description.trim();
+          if (description && !current.descriptions.includes(description)) current.descriptions.push(description);
+          adjustmentByAccount.set(adjustment.accountId, current);
         }
         for (const account of ledgerExport.accounts) {
-          const adjustment = approvedByAccount.get(account.accountId) ?? { debit: 0, credit: 0, references: [] };
+          const adjustment = adjustmentByAccount.get(account.accountId) ?? { debit: 0, credit: 0, references: [], descriptions: [] };
+          const isManagementOnly = adjustment.debit > 0 || adjustment.credit > 0;
           const sourceStatus = account.reconciliationStatus === 'Matches Xero activity' ? 'Balance matched' : account.reconciliationStatus === 'Difference outstanding' ? 'Variance identified' : 'Evidence unavailable';
-          ledgerSheet.addRow([account.accountCode, account.accountName, account.classification, account.openingBalance, account.totalDebits, account.totalCredits, account.netMovement, adjustment.debit, adjustment.credit, account.sourceClosingBalance, account.adjustedClosingBalance, account.unresolvedDifference, sourceStatus, adjustment.references.join(', ') || (account.pendingAdjustmentCount ? 'Pending approval' : '')]);
+          const details = isManagementOnly
+            ? ['MANAGEMENT-ONLY ENTRY - NOT POSTED TO XERO', adjustment.references.length ? `Reference: ${adjustment.references.join(', ')}` : '', adjustment.descriptions.length ? `Purpose: ${adjustment.descriptions.join('; ')}` : ''].filter(Boolean).join(' | ')
+            : sourceStatus;
+          const entryDetails = details.length > 150 ? `${details.slice(0, 147).trimEnd()}...` : details || '-';
+          const appOnlyAmounts = isManagementOnly ? `Dr ${adjustment.debit.toFixed(2)} - Cr ${adjustment.credit.toFixed(2)}` : '-';
+          const row = ledgerSheet.addRow([
+            account.accountCode ? `${account.accountCode} - ${account.accountName}` : account.accountName,
+            account.sourceClosingBalance ?? 'Not available',
+            appOnlyAmounts,
+            account.adjustedClosingBalance ?? 'Not available',
+            account.unresolvedDifference ?? 'Not available',
+            entryDetails,
+          ]);
+          [2, 4, 5].forEach((column) => { if (typeof row.getCell(column).value === 'number') row.getCell(column).numFmt = moneyFormat; });
+          if (isManagementOnly) {
+            row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF7ED' } };
+            row.font = { color: { argb: 'FF92400E' }, bold: true };
+          }
         }
-        ledgerSheet.eachRow((row, rowNumber) => { if (rowNumber > 4) for (let column = 4; column <= 12; column += 1) row.getCell(column).numFmt = moneyFormat; });
-        ledgerSheet.columns = [{ width: 15 }, { width: 32 }, { width: 20 }, ...Array.from({ length: 9 }, () => ({ width: 20 })), { width: 32 }, { width: 38 }];
-        ledgerSheet.autoFilter = `A4:N${ledgerSheet.rowCount}`;
+        ledgerSheet.columns = [{ width: 34 }, { width: 18 }, { width: 34 }, { width: 18 }, { width: 18 }, { width: 58 }];
+        const finalLedgerAccountRow = ledgerSheet.rowCount;
+        ledgerSheet.autoFilter = `A4:F${finalLedgerAccountRow}`;
+        ledgerSheet.addRow([]);
+        const ledgerSummaryTitle = ledgerSheet.addRow(['LEDGER CLOSING SUMMARY']);
+        ledgerSheet.mergeCells(ledgerSummaryTitle.number, 1, ledgerSummaryTitle.number, 6);
+        ledgerSummaryTitle.getCell(1).font = { bold: true, color: { argb: 'FF0F2344' } };
+        ledgerSummaryTitle.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEAF4F7' } };
+        const summaryHeader = ledgerSheet.addRow(['Review measure', 'Account count']);
+        summaryHeader.eachCell((cell) => Object.assign(cell, headerStyle));
+        [
+          ['Accounts in review', ledgerExport.summary.totalAccounts],
+          ['Matched to Xero activity', ledgerExport.summary.reconciledAccounts],
+          ['Closing entries outstanding', ledgerExport.summary.unresolvedDifferences],
+          ['Source detail incomplete', ledgerExport.summary.evidenceUnavailable],
+        ].forEach((row) => ledgerSheet.addRow(row));
       }
-
       const comparisons = analysis?.comparisons;
-      if (hasPnl && summary && comparisons && (comparisons.previousPeriod.available || comparisons.priorYear.available || comparisons.budget?.available)) {
+      if (hasPnl && summary && comparisons) {
         const compareSheet = workbook.addWorksheet('Comparisons');
         addTitle(compareSheet, 'PERFORMANCE COMPARISONS', 8);
         compareSheet.addRow([]);
@@ -1413,6 +1627,30 @@ export default function ManagementAccountsPage() {
         review.controls.forEach((control) => sheet.addRow([control.name, control.status === 'verified' ? 'Verified' : control.status === 'attention' ? 'Needs attention' : control.status === 'not-applicable' ? 'Not applicable' : 'Not verified', control.detail, control.evidence, control.referenceDate]));
         sheet.columns = [{ width: 32 }, { width: 20 }, { width: 68 }, { width: 48 }, { width: 22 }]; sheet.autoFilter = `A4:E${sheet.rowCount}`;
       }
+      const managementSummaryRows = buildManagementSummaryRows();
+      if (managementSummaryRows.length) {
+        const narrative = workbook.addWorksheet('Management Summary');
+        addTitle(narrative, 'MANAGEMENT SUMMARY', 2);
+        narrative.addRow([]);
+        narrative.addRow(['Section', 'Period summary']);
+        narrative.getRow(4).eachCell((cell) => Object.assign(cell, headerStyle));
+        managementSummaryRows.forEach(([text, kind]) => {
+          const row = kind === 'group' ? narrative.addRow([text, '']) : narrative.addRow(['', text]);
+          row.height = kind === 'group' ? 22 : 34;
+          row.eachCell((cell) => { cell.alignment = { vertical: 'middle', wrapText: true }; });
+          if (kind === 'group') {
+            row.font = { bold: true, color: { argb: 'FF0F2344' } };
+            row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+          }
+        });
+        narrative.columns = [{ width: 30 }, { width: 110 }];
+      }
+      // Keep worksheet tabs in the same reading order as the PDF contents.
+      // The ledger review (including its summary) follows both movement reports.
+      ['Contents', ...sheetIndex.map(([, worksheetName]) => worksheetName)].forEach((worksheetName, index) => {
+        const worksheet = workbook.getWorksheet(worksheetName);
+        if (worksheet) (worksheet as import('exceljs').Worksheet & { orderNo: number }).orderNo = index + 1;
+      });
       workbook.eachSheet((sheet) => { sheet.eachRow((row) => row.eachCell((cell) => { cell.alignment = { ...cell.alignment, vertical: 'middle' }; })); });
       const buffer = await workbook.xlsx.writeBuffer();
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -1425,18 +1663,42 @@ export default function ManagementAccountsPage() {
 
   return <PageContainer className="pb-2 print:space-y-4">
     <div className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6 lg:flex-row lg:items-start lg:justify-between"><div><div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-cyan-700"><FileText className="h-4 w-4" /> Management reporting</div><h1 className="text-2xl font-bold tracking-tight text-slate-900">Management Accounts</h1><p className="mt-1 max-w-2xl text-sm text-slate-500">A focused view of the selected Xero reporting period and balance-sheet position.</p><div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-500"><span className="rounded-full bg-slate-100 px-2.5 py-1">{orgName || 'Your organisation'}</span><span className="rounded-full bg-slate-100 px-2.5 py-1">Currency: {currency || 'Not specified'}</span></div></div><div className="flex flex-wrap items-center gap-2 print:hidden"><button type="button" disabled={loading || exporting !== null || (!hasPnl && !hasBalance)} onClick={() => void downloadPdf()} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"><FileText className="h-4 w-4" />{exporting === 'pdf' ? 'Creating PDF...' : 'Download PDF'}</button><button type="button" disabled={loading || exporting !== null || (!hasPnl && !hasBalance)} onClick={() => void downloadExcel()} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"><FileText className="h-4 w-4" />{exporting === 'excel' ? 'Creating Excel...' : 'Export to Excel'}</button><button type="button" disabled={loading} onClick={() => void load()} className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-slate-800 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"><RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} /> Refresh</button></div></div>
+    {!loading && (hasPnl || hasBalance) && <nav aria-label="Management accounts report sections" className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm print:hidden sm:p-4">
+      <div className="mb-2 flex items-center justify-between gap-3"><div><h2 className="text-xs font-semibold text-slate-800">Report sections</h2><p className="mt-0.5 text-[11px] text-slate-500">Choose a section to go straight to its figures.</p></div><span className="hidden text-[10px] font-medium uppercase tracking-wider text-slate-400 sm:block">Quick navigation</span></div>
+      <div className="flex flex-nowrap gap-2 overflow-x-auto overscroll-x-contain pb-2 min-[992px]:flex-wrap min-[992px]:overflow-visible min-[992px]:pb-1" style={{ scrollbarWidth: 'thin', scrollbarColor: '#94a3b8 #f1f5f9' }}>
+        {[
+          { id: 'report-overview', step: '01', label: 'Overview', show: hasPnl },
+          { id: 'profit-and-loss', step: '02', label: 'Profit & loss', show: hasPnl },
+          { id: 'monthly-performance', step: '03', label: 'Monthly trend', show: hasPnl },
+          { id: 'balance-sheet', step: '04', label: 'Balance sheet', show: hasBalance },
+          { id: 'other-balance-accounts', step: '04a', label: 'Other accounts', show: hasBalance && unclassifiedBalanceLines.length > 0 },
+          { id: 'balance-movement', step: '05', label: 'Balance changes', show: Boolean(pnl.connected && bs.connected) },
+          { id: 'cash-movement', step: '06', label: 'Cash movement', show: Boolean(pnl.connected && bs.connected) },
+          { id: 'period-close', step: '07', label: 'Period-end close', show: Boolean(pnl.connected && bs.connected) },
+        ].filter((item) => item.show).map((item) => <a key={item.id} href={`#${item.id}`} className="group inline-flex min-h-9 shrink-0 cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700 transition-colors hover:border-cyan-300 hover:bg-cyan-50 hover:text-cyan-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-600">
+          <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-white px-1 text-[9px] font-semibold text-cyan-800 ring-1 ring-slate-200 group-hover:ring-cyan-300">{item.step}</span>{item.label}<ChevronRight className="h-3.5 w-3.5 text-slate-400 group-hover:text-cyan-700" />
+        </a>)}
+      </div>
+      <p className="mt-1 text-[10px] text-slate-400 min-[992px]:hidden">Scroll horizontally to view all report sections.</p>
+    </nav>}
     <div className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm lg:flex-row lg:items-end lg:justify-between print:hidden"><div className="flex flex-wrap gap-2">{[['month', 'Month'], ['quarter', 'Quarter'], ['half-year', 'Half Year'], ['ytd', 'YTD'], ['ttm', 'Trailing 12M']].map(([value, label]) => <button key={value} type="button" onClick={() => applyPreset(value)} className={cn('rounded-lg border px-3 py-2 text-xs font-semibold cursor-pointer transition-colors', preset === value ? 'border-cyan-600 bg-cyan-50 text-cyan-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50')}>{label}</button>)}</div><div className="flex flex-wrap items-end gap-3"><label className="text-xs font-semibold text-slate-600">From<input aria-label="Report start date" type="date" value={fromDate} onChange={(event) => { setPreset('custom'); setFromDate(event.target.value); }} className="mt-1 block rounded-lg border border-slate-200 px-3 py-2 text-sm font-normal text-slate-700" /></label><label className="text-xs font-semibold text-slate-600">To<input aria-label="Report end date" type="date" value={toDate} onChange={(event) => { setPreset('custom'); setToDate(event.target.value); }} className="mt-1 block rounded-lg border border-slate-200 px-3 py-2 text-sm font-normal text-slate-700" /></label><button type="button" onClick={() => void load()} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 cursor-pointer">Apply</button></div></div>
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600"><span className="flex items-center gap-2"><CalendarDays className="h-4 w-4 text-cyan-700" /><strong className="text-slate-800">Profit &amp; loss period:</strong> {formatDate(fromDate)} - {formatDate(toDate)} <span className="text-slate-400"> | </span> <strong className="text-slate-800">Balance sheet:</strong> {formatDate(toDate)}</span>{reportPreparedAt && <span className="flex items-center gap-2"><Database className="h-4 w-4" /> Prepared {new Date(reportPreparedAt).toLocaleString()}</span>}</div>
     {error && <div role="alert" className="flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800"><AlertCircle className="mt-0.5 h-5 w-5 shrink-0" /><div><p className="font-semibold">Could not load management accounts</p><p className="mt-1">Please try again. If the issue continues, check your Xero connection.</p></div></div>}
     {!loading && !error && (pnl.connected === false || bs.connected === false) && <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"><XCircle className="mt-0.5 h-5 w-5 shrink-0" /><div><p className="font-semibold">Xero is not connected</p><p className="mt-1">Connect your Xero organisation to view its management accounts.</p></div></div>}
     {loading ? <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">{[1, 2, 3, 4].map((item) => <div key={item} className="h-32 animate-pulse rounded-xl border border-slate-200 bg-slate-100" />)}</div> : <>
       {!hasPnl && !hasBalance && !error && pnl.connected !== false && <div className="rounded-xl border border-dashed border-slate-300 bg-white p-10 text-center"><Scale className="mx-auto h-8 w-8 text-slate-400" /><h2 className="mt-3 text-sm font-semibold text-slate-800">No report data for this period</h2><p className="mx-auto mt-1 max-w-lg text-xs text-slate-500">No financial data is available for this period.</p></div>}
-      {hasPnl && <><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">{[['Revenue', summary?.revenue, 'text-slate-900'], ['Gross profit', summary?.grossProfit, 'text-cyan-700'], ['Operating expenses', summary?.expenses, 'text-amber-700'], ['Net profit', summary?.netProfit, summary && summary.netProfit >= 0 ? 'text-emerald-700' : 'text-rose-700']].map(([label, value, color]) => <div key={String(label)} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md"><p className="text-xs font-semibold uppercase tracking-wider text-slate-500">{label}</p><p className={cn('mt-3 text-xl font-bold tabular-nums', color)}>{formatValue(value as number | undefined, currency)}</p><p className="mt-1 text-xs text-slate-400">{label === 'Gross profit' ? (summary?.grossProfitMargin == null ? 'Gross margin not available' : `${summary.grossProfitMargin.toFixed(1)}% gross margin`) : label === 'Net profit' ? (summary?.profitMargin == null ? 'Net margin not available' : `${summary.profitMargin.toFixed(1)}% net margin`) : 'For the selected period'}</p></div>)}</div>
+      {hasPnl && <><section id="report-overview" aria-labelledby="report-overview-title" className="scroll-mt-32 space-y-3">
+        <div className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3"><span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-cyan-50 text-cyan-800"><TrendingUp className="h-4 w-4" /></span><div><h2 id="report-overview-title" className="text-sm font-semibold text-slate-900">Financial overview</h2><p className="mt-0.5 text-xs text-slate-500">Income and profit for {formatDate(fromDate)} to {formatDate(toDate)}.</p></div></div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{[['Revenue', summary?.revenue, 'text-slate-900'], ['Gross profit', summary?.grossProfit, 'text-cyan-700'], ['Operating expenses', summary?.expenses, 'text-amber-700'], ['Net profit', summary?.netProfit, summary && summary.netProfit >= 0 ? 'text-emerald-700' : 'text-rose-700']].map(([label, value, color]) => <div key={String(label)} className="rounded-xl border border-slate-200 bg-white p-4 transition-shadow hover:shadow-sm"><p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</p><p className={cn('mt-2 text-xl font-bold tabular-nums', color)}>{formatValue(value as number | undefined, currency)}</p><p className="mt-1 text-xs text-slate-500">{label === 'Gross profit' ? (summary?.grossProfitMargin == null ? 'Margin unavailable' : `${summary.grossProfitMargin.toFixed(1)}% margin`) : label === 'Net profit' ? (summary?.profitMargin == null ? 'Margin unavailable' : `${summary.profitMargin.toFixed(1)}% margin`) : 'Selected period'}</p></div>)}</div>
+      </section>
+        <section id="profit-and-loss" aria-labelledby="profit-and-loss-title" className="scroll-mt-32 space-y-3">
+          <div className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm"><span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-cyan-50 text-xs font-bold text-cyan-800">02</span><div><h2 id="profit-and-loss-title" className="text-sm font-semibold text-slate-900">Profit and loss</h2><p className="mt-0.5 text-xs text-slate-500">Compare results with other periods, then explore the income and expense breakdown.</p></div></div>
         <PerformanceComparisons analysis={analysis} summary={summary} fromDate={fromDate} toDate={toDate} currency={currency} />
-        <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]"><section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"><div className="border-b border-slate-200 p-4"><h2 className="font-semibold text-slate-900">Profit & loss statement</h2><p className="mt-1 text-xs text-slate-500">Income and expense accounts for the selected period.</p></div><Section title="Revenue" lines={pnl.income?.operating || []} total={sum(pnl.income?.operating)} currency={currency} open={open.revenue} onToggle={() => setOpen((state) => ({ ...state, revenue: !state.revenue }))} /><Section title="Cost of sales" lines={pnl.cogs || []} total={sum(pnl.cogs)} currency={currency} open={open.cogs} onToggle={() => setOpen((state) => ({ ...state, cogs: !state.cogs }))} /><div className="flex justify-between border-b border-slate-100 bg-cyan-50/60 px-4 py-3 text-sm font-bold text-cyan-900"><span>Gross profit</span><span>{formatValue(summary?.grossProfit, currency)}</span></div><Section title="Operating expenses" lines={pnl.expenses?.operating || []} total={sum(pnl.expenses?.operating)} currency={currency} open={open.expenses} onToggle={() => setOpen((state) => ({ ...state, expenses: !state.expenses }))} /><Section title="Other income and expenses" lines={[...(pnl.income?.other || []), ...(pnl.expenses?.other || []).map((line) => ({ ...line, name: `${line.name} (expense)` }))]} total={sum(pnl.income?.other) - sum(pnl.expenses?.other)} currency={currency} open={open.other} onToggle={() => setOpen((state) => ({ ...state, other: !state.other }))} /><div className="flex justify-between bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-900"><span>Net profit</span><span>{formatValue(summary?.netProfit, currency)}</span></div></section><section className="rounded-xl border border-slate-200 bg-white shadow-sm"><div className="border-b border-slate-200 p-4"><h2 className="font-semibold text-slate-900">Executive summary</h2><p className="mt-1 text-xs text-slate-500">A summary of results for the selected period.</p></div><div className="space-y-4 p-4 text-sm text-slate-600">{summary && <><p>Revenue of <strong className="text-slate-900">{formatValue(summary.revenue, currency)}</strong> produced gross profit of <strong className="text-slate-900">{formatValue(summary.grossProfit, currency)}</strong> at a {summary.grossProfitMargin == null ? 'not available' : `${summary.grossProfitMargin.toFixed(1)}%`} gross margin.</p><p>Net profit was <strong className={summary.netProfit >= 0 ? 'text-emerald-700' : 'text-rose-700'}>{formatValue(summary.netProfit, currency)}</strong>, representing a {summary.profitMargin == null ? 'not available' : `${summary.profitMargin.toFixed(1)}%`} net margin.</p></>}</div></section></div>
-        <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]"><section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"><div className="border-b border-slate-200 bg-slate-50/80 p-4"><h2 className="font-semibold text-slate-900">Profit & loss statement</h2><p className="mt-1 text-xs text-slate-500">Income and expense accounts for the selected period.</p></div><Section title="Revenue" lines={pnl.income?.operating || []} total={sum(pnl.income?.operating)} currency={currency} open={open.revenue} onToggle={() => setOpen((state) => ({ ...state, revenue: !state.revenue }))} /><Section title="Cost of sales" lines={pnl.cogs || []} total={sum(pnl.cogs)} currency={currency} open={open.cogs} onToggle={() => setOpen((state) => ({ ...state, cogs: !state.cogs }))} /><div className="flex justify-between border-b border-slate-100 bg-cyan-50/60 px-4 py-3 text-sm font-bold text-cyan-900"><span>Gross profit</span><span>{formatValue(summary?.grossProfit, currency)}</span></div><Section title="Operating expenses" lines={pnl.expenses?.operating || []} total={sum(pnl.expenses?.operating)} currency={currency} open={open.expenses} onToggle={() => setOpen((state) => ({ ...state, expenses: !state.expenses }))} /><Section title="Other income and expenses" lines={[...(pnl.income?.other || []), ...(pnl.expenses?.other || []).map((line) => ({ ...line, name: `${line.name} (expense)` }))]} total={sum(pnl.income?.other) - sum(pnl.expenses?.other)} currency={currency} open={open.other} onToggle={() => setOpen((state) => ({ ...state, other: !state.other }))} /><div className="flex justify-between bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-900"><span>Net profit</span><span>{formatValue(summary?.netProfit, currency)}</span></div></section><section className="overflow-hidden rounded-xl border border-cyan-100 bg-gradient-to-br from-cyan-50/70 via-white to-white shadow-sm"><div className="border-b border-cyan-100 p-4"><h2 className="font-semibold text-slate-900">Executive summary</h2><p className="mt-1 text-xs text-slate-500">A summary of results for the selected period.</p></div><div className="space-y-4 p-4 text-sm leading-6 text-slate-600">{summary && <><p>Revenue of <strong className="text-slate-900">{formatValue(summary.revenue, currency)}</strong> produced gross profit of <strong className="text-slate-900">{formatValue(summary.grossProfit, currency)}</strong> at a {summary.grossProfitMargin == null ? 'not available' : `${summary.grossProfitMargin.toFixed(1)}%`} gross margin.</p><p className="border-t border-cyan-100 pt-3">Net profit was <strong className={summary.netProfit >= 0 ? 'text-emerald-700' : 'text-rose-700'}>{formatValue(summary.netProfit, currency)}</strong>, representing a {summary.profitMargin == null ? 'not available' : `${summary.profitMargin.toFixed(1)}%`} net margin.</p></>}</div></section></div>
+        </section>
+        <section id="monthly-performance" aria-labelledby="monthly-performance-title" className="scroll-mt-32 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
           <div className="flex items-center justify-between border-b border-slate-200 p-4">
-            <div><h2 className="font-semibold text-slate-900">Monthly performance</h2><p className="mt-1 text-xs text-slate-500">Monthly revenue, total costs and net profit for the selected dates.</p></div>
+            <div><div className="flex items-center gap-2"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-cyan-50 text-[10px] font-bold text-cyan-800">03</span><h2 id="monthly-performance-title" className="font-semibold text-slate-900">Monthly trend</h2></div><p className="mt-1 text-xs text-slate-500">Revenue, total costs and net profit across the selected dates.</p></div>
             <TrendingUp className="h-5 w-5 text-cyan-700" />
           </div>
           {trends.length > 0 && <MonthlyPerformanceChart data={trends} currency={currency} />}
@@ -1451,10 +1713,10 @@ export default function ManagementAccountsPage() {
           </div>
         </section></>}
       {hasBalance && (
-        <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-          <div className="flex flex-col gap-2 border-b border-slate-200 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <section id="balance-sheet" aria-labelledby="balance-sheet-title" className="scroll-mt-32 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex flex-col gap-3 border-b border-slate-200 bg-gradient-to-r from-slate-50 via-white to-white p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
             <div>
-              <h2 className="font-semibold text-slate-900">Balance-sheet snapshot</h2>
+              <div className="flex items-center gap-2.5"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-cyan-50 text-cyan-800 ring-1 ring-cyan-100"><Scale className="h-4 w-4" /></span><h2 id="balance-sheet-title" className="text-base font-semibold text-slate-900">Balance sheet</h2></div>
               <p className="mt-1 text-xs text-slate-500">Assets, liabilities and equity as at {formatDate(toDate)}.</p>
             </div>
             {balance && (
@@ -1465,57 +1727,79 @@ export default function ManagementAccountsPage() {
             )}
           </div>
 
-          <div className="grid gap-3 border-b border-slate-100 p-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          <div className="grid gap-3 border-b border-slate-100 bg-slate-50/60 p-4 sm:grid-cols-3">
             {[
-              ['Cash & bank', cash],
-              ['Receivables', receivables],
-              ['Payables', payables],
               ['Total assets', bs.sourceSummary?.assets ?? null],
               ['Total liabilities', bs.sourceSummary?.liabilities ?? null],
               ['Total equity', bs.sourceSummary?.equity ?? null],
             ].map(([label, value]) => (
-              <div key={String(label)} className="border-l-2 border-cyan-600 bg-slate-50 px-3 py-2 transition-colors hover:bg-white hover:shadow-sm">
-                <p className="text-xs font-semibold text-slate-500">{label}</p>
-                <p className="mt-2 font-bold tabular-nums text-slate-900">{formatValue(typeof value === 'number' ? value : null, currency)}</p>
+              <div key={String(label)} className={cn('group rounded-xl border border-slate-200 bg-white px-4 py-3.5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-sm', label === 'Total assets' ? 'hover:border-cyan-200' : label === 'Total liabilities' ? 'hover:border-amber-200' : 'hover:border-emerald-200')}>
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+                <p className={cn('mt-2 text-lg font-bold tabular-nums', label === 'Total liabilities' ? 'text-amber-800' : label === 'Total equity' ? 'text-emerald-800' : 'text-slate-900')}>{formatValue(typeof value === 'number' ? value : null, currency)}</p>
               </div>
             ))}
           </div>
 
-          <div className="grid gap-6 border-b border-slate-100 p-4 lg:grid-cols-3">
+          <div className="grid gap-4 border-b border-slate-100 p-4 md:grid-cols-2 sm:p-5">
+            {balanceComposition.map((composition) => {
+              const positiveSegments = composition.segments.filter((segment) => segment.value > 0);
+              const segmentTotal = positiveSegments.reduce((total, segment) => total + segment.value, 0);
+              return <div key={composition.title} className="rounded-xl border border-slate-200 bg-white p-4">
+                <div className="flex items-baseline justify-between gap-3">
+                  <h3 className="text-sm font-semibold text-slate-800">{composition.title}</h3>
+                  <span className="text-xs font-semibold tabular-nums text-slate-700">{formatValue(composition.total, currency)}</span>
+                </div>
+                <div className="mt-4 flex h-3.5 overflow-hidden rounded-full bg-slate-100" role="img" aria-label={`${composition.title} composition`}>
+                  {segmentTotal > 0 ? positiveSegments.map((segment) => <span key={segment.label} title={`${segment.label}: ${formatValue(segment.value, currency)}`} className={cn('h-full transition-[width] duration-500', segment.color)} style={{ width: `${(segment.value / segmentTotal) * 100}%` }} />) : <span className="h-full w-full bg-slate-200" />}
+                </div>
+                <div className="mt-3 grid gap-x-4 gap-y-2 sm:grid-cols-2">
+                  {composition.segments.filter((segment) => segment.value !== 0).map((segment) => <div key={segment.label} className="flex min-w-0 items-center justify-between gap-2 text-[11px]">
+                    <span className="flex min-w-0 items-center gap-2 text-slate-500"><span className={cn('h-2.5 w-2.5 shrink-0 rounded-sm', segment.color)} /><span className="truncate">{segment.label}</span></span>
+                    <span className="shrink-0 font-medium tabular-nums text-slate-700">{formatValue(segment.value, currency)}</span>
+                  </div>)}
+                  {positiveSegments.length === 0 && <p className="text-xs text-slate-500">Composition data is not available.</p>}
+                </div>
+              </div>;
+            })}
+          </div>
+
+          <div className="grid gap-3 border-b border-slate-100 p-4 md:grid-cols-2 xl:grid-cols-3 sm:p-5">
             {[
               { title: 'Assets', lines: [...(bs.assets?.current || []).map((line, index) => ({ line, id: `current-asset-${index}` })), ...(bs.assets?.nonCurrent || []).map((line, index) => ({ line, id: `non-current-asset-${index}` }))] },
               { title: 'Liabilities', lines: [...(bs.liabilities?.current || []).map((line, index) => ({ line, id: `current-liability-${index}` })), ...(bs.liabilities?.nonCurrent || []).map((line, index) => ({ line, id: `non-current-liability-${index}` }))] },
               { title: 'Equity', lines: (bs.equity || []).map((line, index) => ({ line, id: `equity-${index}` })) },
             ].map((group) => (
-              <div key={group.title}>
-                <h3 className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-500">{group.title}</h3>
+              <div key={group.title} className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+                <h3 className={cn('border-b px-3.5 py-2.5 text-[11px] font-bold uppercase tracking-wider', group.title === 'Assets' ? 'border-cyan-100 bg-cyan-50/60 text-cyan-900' : group.title === 'Liabilities' ? 'border-amber-100 bg-amber-50/60 text-amber-900' : 'border-emerald-100 bg-emerald-50/60 text-emerald-900')}>{group.title}<span className="float-right font-medium normal-case tracking-normal text-slate-500">{group.lines.length} {group.lines.length === 1 ? 'account' : 'accounts'}</span></h3>
+                <div className="divide-y divide-slate-100 px-3.5 py-1.5">
                 {group.lines.map(({ line, id }) => {
                   const flagRank = topBalanceFlags.findIndex((account) => account.id === id);
                   return (
-                  <div key={id} className={cn('flex justify-between gap-3 rounded-md py-1 text-xs', flagRank >= 0 ? 'bg-rose-50/80 px-2 text-rose-800' : 'text-slate-600')}>
+                  <div key={id} className={cn('flex min-h-9 items-center justify-between gap-3 px-1.5 text-xs transition-colors hover:bg-slate-50', flagRank >= 0 ? 'bg-rose-50/80 px-2 text-rose-800 hover:bg-rose-50' : 'text-slate-600')}>
                     <span className="flex min-w-0 items-center gap-1.5">{flagRank >= 0 && <Flag aria-label={`Priority ${flagRank + 1} balance`} className="h-3 w-3 shrink-0 fill-rose-600 text-rose-600" />}<span className="truncate">{line.name}</span></span>
                     <span className={cn('shrink-0 tabular-nums', flagRank >= 0 && 'font-semibold')}>{formatValue(line.value, currency)}</span>
                   </div>
                   );
                 })}
+                </div>
               </div>
             ))}
           </div>
 
           {(hasReceivableDetails || hasPayableDetails) && <div className="grid gap-3 border-b border-slate-100 p-4 lg:grid-cols-2">
-            {hasReceivableDetails && <details className="group rounded-lg border border-slate-200 bg-white">
-              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-3 [&::-webkit-details-marker]:hidden">
+            {hasReceivableDetails && <details className="group overflow-hidden rounded-xl border border-slate-200 bg-white transition-shadow hover:shadow-sm">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 bg-slate-50/70 px-3.5 py-3.5 transition-colors hover:bg-cyan-50/50 [&::-webkit-details-marker]:hidden">
                 <span><span className="block text-sm font-semibold text-slate-800">Receivables by customer</span><span className="mt-0.5 block text-[11px] text-slate-500">Outstanding invoices at {formatDate(analysis?.receivables?.asOfDate)}</span></span>
-                <span className="flex shrink-0 items-center gap-2 text-xs text-slate-500">{receivableEntries.length} entries<ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" /></span>
+                <span className="flex shrink-0 items-center gap-2 text-xs text-slate-600"><span>{receivableEntries.length} entries</span><span className="rounded-md border border-slate-200 bg-white px-2 py-1 font-semibold text-cyan-800">View details <ChevronDown className="ml-1 inline h-3.5 w-3.5 transition-transform group-open:rotate-180" /></span></span>
               </summary>
               <div className="max-h-72 divide-y divide-slate-100 overflow-y-auto border-t border-slate-100">
                 {receivableEntries.map((entry, index) => { const flagRank = topBalanceFlags.findIndex((flagged) => flagged.id === entry.id); return <div key={entry.id} className={cn('flex items-center justify-between gap-3 px-3 py-2 text-xs', flagRank >= 0 ? 'bg-rose-50/80 text-rose-800' : 'text-slate-600')}><span className="flex min-w-0 items-center gap-2"><span className="w-5 shrink-0 text-[10px] text-slate-400">{index + 1}</span>{flagRank >= 0 && <Flag className="h-3 w-3 shrink-0 fill-rose-600 text-rose-600" />}<span className="min-w-0 truncate">{entry.name}<span className="ml-2 text-[10px] text-slate-400">{entry.invoiceCount} invoices</span></span></span><span className="shrink-0 font-semibold tabular-nums">{formatValue(entry.value, currency)}</span></div>; })}
               </div>
             </details>}
-            {hasPayableDetails && <details className="group rounded-lg border border-slate-200 bg-white">
-              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-3 [&::-webkit-details-marker]:hidden">
+            {hasPayableDetails && <details className="group overflow-hidden rounded-xl border border-slate-200 bg-white transition-shadow hover:shadow-sm">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 bg-slate-50/70 px-3.5 py-3.5 transition-colors hover:bg-amber-50/50 [&::-webkit-details-marker]:hidden">
                 <span><span className="block text-sm font-semibold text-slate-800">Payables by supplier</span><span className="mt-0.5 block text-[11px] text-slate-500">Outstanding bills at {formatDate(analysis?.payables?.asOfDate)}</span></span>
-                <span className="flex shrink-0 items-center gap-2 text-xs text-slate-500">{payableEntries.length} entries<ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" /></span>
+                <span className="flex shrink-0 items-center gap-2 text-xs text-slate-600"><span>{payableEntries.length} entries</span><span className="rounded-md border border-slate-200 bg-white px-2 py-1 font-semibold text-amber-800">View details <ChevronDown className="ml-1 inline h-3.5 w-3.5 transition-transform group-open:rotate-180" /></span></span>
               </summary>
               <div className="max-h-72 divide-y divide-slate-100 overflow-y-auto border-t border-slate-100">
                 {payableEntries.map((entry, index) => { const flagRank = topBalanceFlags.findIndex((flagged) => flagged.id === entry.id); return <div key={entry.id} className={cn('flex items-center justify-between gap-3 px-3 py-2 text-xs', flagRank >= 0 ? 'bg-rose-50/80 text-rose-800' : 'text-slate-600')}><span className="flex min-w-0 items-center gap-2"><span className="w-5 shrink-0 text-[10px] text-slate-400">{index + 1}</span>{flagRank >= 0 && <Flag className="h-3 w-3 shrink-0 fill-rose-600 text-rose-600" />}<span className="min-w-0 truncate">{entry.name}<span className="ml-2 text-[10px] text-slate-400">{entry.invoiceCount} bills</span></span></span><span className="shrink-0 font-semibold tabular-nums">{formatValue(entry.value, currency)}</span></div>; })}
@@ -1536,14 +1820,14 @@ export default function ManagementAccountsPage() {
             </div>
           </div>}
 
-          <div className="grid gap-3 bg-slate-50/70 p-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-3 border-t border-slate-200 bg-slate-50/70 p-4 sm:grid-cols-2 lg:grid-cols-4 sm:p-5">
             {[
               { label: 'Net working capital', value: formatValue(bs.sourceSummary?.workingCapital?.netWorkingCapital, currency), note: 'Current assets less current liabilities' },
               { label: 'Current ratio', value: bs.sourceSummary?.workingCapital?.currentRatio == null ? 'Not available' : bs.sourceSummary.workingCapital.currentRatio.toFixed(2) + 'x', note: 'Current assets divided by current liabilities' },
               { label: 'Receivables / payables', value: bs.sourceSummary?.workingCapital?.receivablesToPayables == null ? 'Not available' : bs.sourceSummary.workingCapital.receivablesToPayables.toFixed(2) + 'x', note: 'Receivables divided by payables' },
               { label: 'Cash / payables', value: bs.sourceSummary?.workingCapital?.cashToPayables == null ? 'Not available' : bs.sourceSummary.workingCapital.cashToPayables.toFixed(2) + 'x', note: 'Cash divided by payables' },
             ].map((metric) => (
-              <div key={metric.label} className="rounded-lg border border-slate-200/70 bg-white px-3 py-2.5 transition-all duration-200 hover:-translate-y-0.5 hover:border-cyan-200 hover:shadow-sm">
+              <div key={metric.label} className="rounded-xl border border-slate-200 bg-white px-3.5 py-3 transition-all duration-200 hover:-translate-y-0.5 hover:border-cyan-200 hover:shadow-sm">
                 <span className="block text-xs text-slate-500">{metric.label}</span>
                 <strong className="mt-1 block text-sm text-slate-900 tabular-nums">{metric.value}</strong>
                 <span className="mt-1 block text-[11px] text-slate-400">{metric.note}</span>
@@ -1552,14 +1836,12 @@ export default function ManagementAccountsPage() {
           </div>
         </section>
       )}
+      {hasBalance && unclassifiedBalanceLines.length > 0 && <section id="other-balance-accounts" aria-labelledby="other-balance-accounts-title" className="scroll-mt-32 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"><div className="border-b border-slate-100 px-4 py-3"><h2 id="other-balance-accounts-title" className="text-sm font-semibold text-slate-800">Other balance-sheet accounts</h2><p className="mt-1 text-xs text-slate-500">Additional accounts included in the balance sheet.</p></div><div className="divide-y divide-slate-100">{unclassifiedBalanceAccounts.map((account) => { const flagRank = topBalanceFlags.findIndex((flagged) => flagged.id === account.id); return <div key={account.id} className={cn('flex justify-between gap-4 px-4 py-2 text-xs', flagRank >= 0 ? 'bg-rose-50/80 font-semibold text-rose-800' : 'text-slate-600')}><span className="flex items-center gap-1.5">{flagRank >= 0 && <Flag aria-label={`Priority ${flagRank + 1} balance`} className="h-3 w-3 fill-rose-600 text-rose-600" />}{account.name}</span><span className="tabular-nums">{formatValue(account.value, currency)}</span></div>; })}</div></section>}
       {pnl.connected && bs.connected && <>
-        <BalanceMovementAnalysis data={advanced?.balanceMovement ?? null} currency={currency} />
-        <CashMovementStatement data={advanced?.cashMovement ?? null} currency={currency} />
-        <ManagementLedgerWorkspace fromDate={fromDate} toDate={toDate} sourceChecks={advanced?.closeReview ?? null} />
+        <div id="balance-movement" className="scroll-mt-32"><BalanceMovementAnalysis data={advanced?.balanceMovement ?? null} currency={currency} /></div>
+        <div id="cash-movement" className="scroll-mt-32"><CashMovementStatement data={advanced?.cashMovement ?? null} currency={currency} /></div>
+        <div id="period-close" className="scroll-mt-32"><ManagementLedgerWorkspace fromDate={fromDate} toDate={toDate} sourceChecks={advanced?.closeReview ?? null} onLedgerData={handleLedgerData} /></div>
       </>}
-      {hasBalance && unclassifiedBalanceLines.length > 0 && <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"><div className="border-b border-slate-100 px-4 py-3"><h2 className="text-sm font-semibold text-slate-800">Other balance-sheet accounts</h2><p className="mt-1 text-xs text-slate-500">Other accounts included in the balance sheet.</p></div><div className="divide-y divide-slate-100">{unclassifiedBalanceAccounts.map((account) => { const flagRank = topBalanceFlags.findIndex((flagged) => flagged.id === account.id); return <div key={account.id} className={cn('flex justify-between gap-4 px-4 py-2 text-xs', flagRank >= 0 ? 'bg-rose-50/80 font-semibold text-rose-800' : 'text-slate-600')}><span className="flex items-center gap-1.5">{flagRank >= 0 && <Flag aria-label={`Priority ${flagRank + 1} balance`} className="h-3 w-3 fill-rose-600 text-rose-600" />}{account.name}</span><span className="tabular-nums">{formatValue(account.value, currency)}</span></div>; })}</div></section>}
     </>}
   </PageContainer>;
 }
-
-

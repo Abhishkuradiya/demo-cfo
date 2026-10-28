@@ -304,6 +304,8 @@ export default function OverviewPage() {
   const [reconciliationSearch, setReconciliationSearch] = useState('');
   const [reconciliationTypeFilter, setReconciliationTypeFilter] = useState('ALL');
   const [reconciliationPage, setReconciliationPage] = useState(1);
+  const [periodStartDraft, setPeriodStartDraft] = useState('');
+  const [periodEndDraft, setPeriodEndDraft] = useState('');
 
   // State for live Xero data calculations
   const [data, setData] = useState({
@@ -503,6 +505,28 @@ export default function OverviewPage() {
 
   const fromDateParam = searchParams.get('from_date') || searchParams.get('fromDate') || '';
   const toDateParam = searchParams.get('to_date') || searchParams.get('toDate') || '';
+
+  useEffect(() => {
+    setPeriodStartDraft(fromDateParam || data.startDate || '');
+    setPeriodEndDraft(toDateParam || data.endDate || '');
+  }, [fromDateParam, toDateParam, data.startDate, data.endDate]);
+
+  const applyReportingPeriod = () => {
+    if (!periodStartDraft || !periodEndDraft) {
+      toast.error('Select both dates to update the reporting period.');
+      return;
+    }
+    if (periodStartDraft > periodEndDraft) {
+      toast.error('The start date must be on or before the end date.');
+      return;
+    }
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('from_date', periodStartDraft);
+    params.set('to_date', periodEndDraft);
+    params.set('fromDate', periodStartDraft);
+    params.set('toDate', periodEndDraft);
+    router.push(`/xero-dashboard?${params.toString()}`);
+  };
 
   const fetchDashboardData = async (isInitial: boolean = true) => {
     try {
@@ -1007,6 +1031,29 @@ export default function OverviewPage() {
 
   return (
     <div className="space-y-6 max-w-full">
+      <section className="overflow-visible rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+          <div className="min-w-0">
+            <p className="mb-1 text-[11px] font-bold uppercase tracking-[0.12em] text-sky-700">Financial performance</p>
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900">Executive Overview</h1>
+            <p className="mt-1 text-sm text-slate-500">A consolidated view of your organisation’s financial position and operating performance.</p>
+          </div>
+          <div className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-slate-50/80 p-3 sm:flex-row sm:items-end sm:gap-3 lg:min-w-[440px] lg:justify-end">
+            <div className="flex min-w-0 flex-1 flex-col gap-1">
+              <label htmlFor="overview-period-start" className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">From</label>
+              <input id="overview-period-start" type="date" value={periodStartDraft} onChange={(event) => setPeriodStartDraft(event.target.value)} className="h-10 min-w-0 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100" />
+            </div>
+            <div className="flex min-w-0 flex-1 flex-col gap-1">
+              <label htmlFor="overview-period-end" className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">To</label>
+              <input id="overview-period-end" type="date" value={periodEndDraft} onChange={(event) => setPeriodEndDraft(event.target.value)} className="h-10 min-w-0 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100" />
+            </div>
+            <button type="button" onClick={applyReportingPeriod} disabled={!periodStartDraft || !periodEndDraft} className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50">
+              <Calendar className="h-4 w-4" />
+              Apply
+            </button>
+          </div>
+        </div>
+      </section>
       {/* 1. Metric Cards Row */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
         {isLoading ? (

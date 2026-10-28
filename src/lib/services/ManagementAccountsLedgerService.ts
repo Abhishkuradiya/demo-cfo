@@ -26,6 +26,9 @@ export type LedgerAccount = {
 };
 
 function record(value: unknown): RecordValue { return value && typeof value === 'object' && !Array.isArray(value) ? value as RecordValue : {}; }
+function isActiveXeroAccount(account: RecordValue) {
+  return String(account.Status ?? account.status ?? '').trim().toUpperCase() === 'ACTIVE';
+}
 function amount(value: unknown): number | null {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
   if (typeof value !== 'string') return null;
@@ -200,7 +203,9 @@ export async function listManagementLedger(tenantId: number, fromDate: string, t
   const openingValues = sourceAmounts(openingBs);
   const closingValues = sourceAmounts(closingBs);
   const pnlValues = sourceAmounts(pnlReport);
-  const activeAccounts = accounts.filter((account) => String(account.Status ?? '').toUpperCase() !== 'DELETED');
+  const activeAccounts = accounts.filter(isActiveXeroAccount);
+  const activeAccountIds = new Set(activeAccounts.map((account) => String(account.AccountID ?? '')).filter(Boolean));
+  const activeManualJournals = manualJournals.filter((journal) => journal.lines.length > 0 && journal.lines.every((line) => activeAccountIds.has(line.accountId)));
   const activityTargets = activeAccounts.map((source) => {
     const id = String(source.AccountID ?? '');
     const name = String(source.Name ?? 'Unnamed Xero account');
@@ -269,7 +274,7 @@ export async function listManagementLedger(tenantId: number, fromDate: string, t
     const statement = statementFor(accountClass);
     const normal = normalBalance(accountClass);
     const snapshot = snapshotsById.get(id);
-    const journalSigned = manualJournals.reduce((total, journal) => total + journal.lines
+    const journalSigned = activeManualJournals.reduce((total, journal) => total + journal.lines
       .filter((line) => line.accountId === id)
       .reduce((lineTotal, line) => lineTotal + (normal === 'DEBIT' ? line.debit - line.credit : line.credit - line.debit), 0), 0);
     const sourceOpening = openingValues.get(id) ?? openingValues.get(`name:${name.toLocaleLowerCase()}`) ?? null;
@@ -316,7 +321,7 @@ export async function listManagementLedger(tenantId: number, fromDate: string, t
   return {
     connected: true,
     accounts: ledgerAccounts,
-    manualJournals,
+    manualJournals: activeManualJournals,
     summary: { totalAccounts: ledgerAccounts.length, reconciledAccounts: fullyReconciled, accountsRequiringReview: needsReview, unresolvedDifferences: unresolved, evidenceUnavailable },
     currency: String(record(org).BaseCurrency ?? ''),
     lastSyncedAt: syncedValue ? new Date(syncedValue).toISOString() : null,
@@ -325,13 +330,82 @@ export async function listManagementLedger(tenantId: number, fromDate: string, t
   };
 }
 
+/** Lightweight ledger payload for exports: uses the report snapshots already stored in PostgreSQL and
+ * avoids refreshing the organisation-wide journal feed just to build a PDF or workbook. */
+export async function getManagementLedgerExportData(tenantId: number, fromDate: string, toDate: string) {
+  await db.assertPostgres();
+  const token = await getXeroAccessToken(tenantId);
+  if (!token) return { connected: false, accounts: [], manualJournals: [], currency: null, lastSyncedAt: null };
+  const priorDate = new Date(`${fromDate}T00:00:00.000Z`);
+  priorDate.setUTCDate(priorDate.getUTCDate() - 1);
+  const openingDate = priorDate.toISOString().slice(0, 10);
+  const [storedAccounts, pnlReport, openingReport, balanceReport, journals, organisation] = await Promise.all([
+    db.getPostgresReport(tenantId, 'Accounts_metadata'),
+    getOrFetchManagementReport(tenantId, `ProfitAndLoss_${fromDate}_${toDate}`, () => fetchXeroReport(token.accessToken, token.xeroTenantId, 'ProfitAndLoss', `fromDate=${fromDate}&toDate=${toDate}`)),
+    getOrFetchManagementReport(tenantId, `BalanceSheet_${openingDate}`, () => fetchXeroReport(token.accessToken, token.xeroTenantId, 'BalanceSheet', `date=${openingDate}`)),
+    getOrFetchManagementReport(tenantId, `BalanceSheet_${toDate}`, () => fetchXeroReport(token.accessToken, token.xeroTenantId, 'BalanceSheet', `date=${toDate}`)),
+    listManagementManualJournals(tenantId, fromDate, toDate),
+    db.getPostgresReport(tenantId, 'Organisation'),
+  ]);
+  const accounts = Array.isArray(storedAccounts) ? storedAccounts.map(record).filter(isActiveXeroAccount) : [];
+  const activeIds = new Set(accounts.map((account) => String(account.AccountID ?? '')).filter(Boolean));
+  const activeJournals = journals.filter((journal) => journal.lines.length > 0 && journal.lines.every((line) => activeIds.has(line.accountId)));
+  const pnlValues = sourceAmounts(pnlReport);
+  const openingValues = sourceAmounts(openingReport);
+  const balanceValues = sourceAmounts(balanceReport);
+  const accountsById = new Map(accounts.map((account) => [String(account.AccountID ?? ''), account]));
+  const signedAdjustments = new Map<string, number>();
+  const adjustmentCounts = new Map<string, number>();
+  for (const journal of activeJournals) {
+    for (const line of journal.lines) {
+      const account = accountsById.get(line.accountId);
+      if (!account) continue;
+      const accountClass = classification(account);
+      const signed = normalBalance(accountClass) === 'DEBIT' ? line.debit - line.credit : line.credit - line.debit;
+      signedAdjustments.set(line.accountId, (signedAdjustments.get(line.accountId) ?? 0) + signed);
+      adjustmentCounts.set(line.accountId, (adjustmentCounts.get(line.accountId) ?? 0) + 1);
+    }
+  }
+  return {
+    connected: true,
+    accounts: accounts.map((account) => {
+      const accountId = String(account.AccountID ?? '');
+      const accountName = String(account.Name ?? 'Unnamed Xero account');
+      const accountClass = classification(account);
+      const statement = statementFor(accountClass);
+      const balances = statement === 'BALANCE_SHEET' ? balanceValues : statement === 'PROFIT_AND_LOSS' ? pnlValues : new Map<string, number>();
+      const closing = balances.get(accountId) ?? balances.get(`name:${accountName.toLocaleLowerCase()}`) ?? null;
+      const signed = signedAdjustments.get(accountId) ?? 0;
+      return {
+        accountId,
+        accountCode: String(account.Code ?? ''),
+        accountName,
+        classification: accountClass,
+        openingBalance: statement === 'BALANCE_SHEET' ? openingValues.get(accountId) ?? openingValues.get(`name:${accountName.toLocaleLowerCase()}`) ?? null : null,
+        totalDebits: null,
+        totalCredits: null,
+        netMovement: null,
+        sourceClosingBalance: closing,
+        adjustedClosingBalance: closing === null ? null : closing + signed,
+        unresolvedDifference: closing === null ? null : closing - (closing + signed),
+        reconciliationStatus: 'Evidence unavailable',
+        adjustmentCount: adjustmentCounts.get(accountId) ?? 0,
+        pendingAdjustmentCount: 0,
+      };
+    }),
+    manualJournals: activeJournals,
+    currency: String(record(organisation).BaseCurrency ?? ''),
+    lastSyncedAt: null,
+  };
+}
+
 export async function loadLedgerAccountDetail(tenantId: number, accountId: string, fromDate: string, toDate: string) {
   await db.assertPostgres();
   const token = await getXeroAccessToken(tenantId);
   if (!token) throw new Error('Xero is not connected.');
-  const accountsRaw = await db.getPostgresReport(tenantId, 'Accounts_metadata');
-  const source = (Array.isArray(accountsRaw) ? accountsRaw.map(record) : []).find((item) => String(item.AccountID ?? '') === accountId);
-  if (!source) throw new Error('The requested account is not part of this Xero organisation.');
+  const accountsRaw = await refreshXeroAccounts(tenantId, token.accessToken, token.xeroTenantId);
+  const source = (Array.isArray(accountsRaw) ? accountsRaw.map(record) : []).find((item) => String(item.AccountID ?? '') === accountId && isActiveXeroAccount(item));
+  if (!source) throw new Error('The requested account is not active in this Xero organisation.');
   const account: RecordValue = { ...source, AccountID: accountId };
   const accountClass = classification(account);
   const normal = normalBalance(accountClass);
@@ -378,7 +452,8 @@ export async function loadLedgerAccountDetail(tenantId: number, accountId: strin
   const netMovement = calculated.netMovement;
   const calculatedClosing = calculated.originalClosing ?? (sourceCoverage === 'PARTIAL' && opening !== null ? opening : null);
   const allManualJournals = await listManagementManualJournals(tenantId, fromDate, toDate);
-  const manualJournals = allManualJournals.filter((journal) => journal.lines.some((line) => line.accountId === accountId));
+  const activeAccountIds = new Set((Array.isArray(accountsRaw) ? accountsRaw.map(record) : []).filter(isActiveXeroAccount).map((item) => String(item.AccountID ?? '')).filter(Boolean));
+  const manualJournals = allManualJournals.filter((journal) => journal.lines.some((line) => line.accountId === accountId) && journal.lines.every((line) => activeAccountIds.has(line.accountId)));
   const journalSigned = manualJournals.reduce((total, journal) => total + journal.lines
     .filter((line) => line.accountId === accountId)
     .reduce((lineTotal, line) => lineTotal + (normal === 'DEBIT' ? line.debit - line.credit : line.credit - line.debit), 0), 0);

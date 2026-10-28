@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedSession } from '@/lib/auth';
-import { listManagementLedger, loadLedgerAccountDetail, requireManagementAccountsAdmin } from '@/lib/services/ManagementAccountsLedgerService';
+import { getManagementLedgerExportData, listManagementLedger, loadLedgerAccountDetail } from '@/lib/services/ManagementAccountsLedgerService';
 
 function validDate(value: string | null): value is string {
   if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -19,11 +19,14 @@ export async function GET(request: NextRequest) {
     const accountId = params.get('accountId');
     if (accountId) {
       const detail = await loadLedgerAccountDetail(session.tenantId, accountId, fromDate, toDate);
-      const canManageManualJournals = await requireManagementAccountsAdmin(session.role);
-      return NextResponse.json({ ...detail, canManageManualJournals });
+      return NextResponse.json({ ...detail, canManageManualJournals: true });
+    }
+    if (params.get('export') === 'true') {
+      const ledger = await getManagementLedgerExportData(session.tenantId, fromDate, toDate);
+      return NextResponse.json({ ...ledger, canManageManualJournals: true });
     }
     const ledger = await listManagementLedger(session.tenantId, fromDate, toDate);
-    return NextResponse.json({ ...ledger, canManageManualJournals: await requireManagementAccountsAdmin(session.role) });
+    return NextResponse.json({ ...ledger, canManageManualJournals: true });
   } catch (error) {
     console.error('Management ledger retrieval failed:', error);
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Ledger details could not be loaded.' }, { status: 502 });
