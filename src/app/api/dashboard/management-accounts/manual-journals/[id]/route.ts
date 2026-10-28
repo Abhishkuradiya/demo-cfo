@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { getAuthenticatedSession } from '@/lib/auth';
-import { requireManagementAccountsAdmin } from '@/lib/services/ManagementAccountsLedgerService';
 import { deleteManagementManualJournal } from '@/lib/services/ManagementManualJournalService';
 
 export async function DELETE(
@@ -9,10 +8,6 @@ export async function DELETE(
 ) {
   const session = await getAuthenticatedSession();
   if (!session) return NextResponse.json({ error: 'Authentication required.' }, { status: 401 });
-  if (!(await requireManagementAccountsAdmin(session.role))) {
-    return NextResponse.json({ error: 'Authorised finance access is required to delete management-only journals.' }, { status: 403 });
-  }
-
   const { id } = await context.params;
   const journalId = Number(id);
   if (!Number.isSafeInteger(journalId) || journalId <= 0) {

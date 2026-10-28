@@ -30,6 +30,7 @@ export function AppLayout({ children }: AppLayoutProps) {
     '/reports/cash-flow', '/alerts', '/reports/balance-sheet', '/reports/budget-actual',
     '/ai-insights', '/reports', '/reports/profit-and-loss', '/reports/customers',
     '/reports/tax-center', '/developer-amazon',
+    '/xero-dashboard',
   ]);
   const fallbackPageTitles: Record<string, string> = {
     '/xero-dashboard': 'Executive Overview',

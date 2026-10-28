@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
-import { Activity, AlertCircle, ChevronDown, CircleCheck, CircleHelp, FileWarning, LoaderCircle, RefreshCw, Search, ShieldAlert } from 'lucide-react';
+import { Activity, AlertCircle, BookOpen, ChevronDown, CircleCheck, CircleHelp, FileWarning, LoaderCircle, RefreshCw, Search, ShieldAlert } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ManagementManualJournals } from './ManagementManualJournals';
 
@@ -51,7 +51,7 @@ function closingState(account: LedgerAccount, journalCount: number) {
   return { label: journalCount ? 'Variance remains' : 'Closing entry required', style: 'border-amber-200 bg-amber-50 text-amber-800' };
 }
 
-export function ManagementLedgerWorkspace({ fromDate, toDate, sourceChecks }: { fromDate: string; toDate: string; sourceChecks?: SourceChecks | null }) {
+export function ManagementLedgerWorkspace({ fromDate, toDate, sourceChecks, onLedgerData }: { fromDate: string; toDate: string; sourceChecks?: SourceChecks | null; onLedgerData?: (data: LedgerData, fromDate: string, toDate: string) => void }) {
   const [data, setData] = useState<LedgerData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -71,9 +71,10 @@ export function ManagementLedgerWorkspace({ fromDate, toDate, sourceChecks }: { 
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Closing review could not be loaded.');
       setData(result);
+      onLedgerData?.(result, fromDate, toDate);
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Closing review could not be loaded.'); }
     finally { setLoading(false); }
-  }, [fromDate, toDate]);
+  }, [fromDate, toDate, onLedgerData]);
 
   // Fetch tenant and period scoped closing data when the selected range changes.
   // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -127,22 +128,23 @@ export function ManagementLedgerWorkspace({ fromDate, toDate, sourceChecks }: { 
   }), [data?.manualJournals, expandedAccountId]);
 
   return <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-    <div className="flex flex-col gap-3 border-b border-slate-200 p-4 sm:flex-row sm:items-center sm:justify-between">
-      <div><h2 className="text-base font-semibold text-slate-900">Period-end closing review</h2><p className="mt-1 text-xs text-slate-500">Source journal lines and closing balances for {fromDate} to {toDate}.</p>{data?.lastSyncedAt && <p className="mt-1 text-[11px] text-slate-400">Last Xero synchronisation: {new Date(data.lastSyncedAt).toLocaleString()}</p>}</div>
+    <div className="flex flex-col gap-3 border-b border-slate-200 bg-slate-50/50 p-4 sm:flex-row sm:items-center sm:justify-between">
+      <div><div className="flex items-center gap-2"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-cyan-50 text-cyan-800"><BookOpen className="h-4 w-4" /></span><h2 className="text-base font-semibold text-slate-900">Ledger review and closing entries</h2></div><p className="mt-1 text-xs text-slate-600">Review account activity and closing balances for {fromDate} to {toDate}.</p>{data?.lastSyncedAt && <p className="mt-1 text-[11px] text-slate-400">Last Xero synchronisation: {new Date(data.lastSyncedAt).toLocaleString()}</p>}</div>
       <button type="button" onClick={() => void load()} disabled={loading} className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"><RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />Refresh closing data</button>
     </div>
     {error && <div role="alert" className="m-4 flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{error}</div>}
-    {data?.summary && <div className="grid grid-cols-2 gap-3 border-b border-slate-200 bg-slate-50/60 p-4 sm:grid-cols-4">{[
+    {data?.summary && <div className="grid grid-cols-2 divide-x divide-slate-200 border-b border-slate-200 bg-white sm:grid-cols-4">{[
       { label: 'Accounts in review', value: totals.accounts, Icon: Activity, color: 'text-slate-800' },
       { label: 'Matched to Xero activity', value: totals.matches, Icon: CircleCheck, color: 'text-emerald-700' },
       { label: 'Closing entries outstanding', value: totals.closingEntries, Icon: FileWarning, color: 'text-amber-700' },
       { label: 'Source detail incomplete', value: totals.unavailable, Icon: CircleHelp, color: 'text-slate-600' },
-    ].map(({ label, value, Icon, color }) => <div key={label} className="flex min-w-0 items-start gap-2.5 rounded-lg border border-slate-200 bg-white px-3 py-3"><Icon className={cn('mt-0.5 h-4 w-4 shrink-0', color)} /><div><span className="block text-[11px] text-slate-500">{label}</span><strong className={cn('mt-1 block text-lg tabular-nums', color)}>{value}</strong></div></div>)}</div>}
+    ].map(({ label, value, Icon, color }) => <div key={label} className="flex min-w-0 items-center gap-2.5 px-3 py-3 sm:px-4"><Icon className={cn('h-4 w-4 shrink-0', color)} /><div className="min-w-0"><span className="block text-[10px] leading-4 text-slate-500 sm:text-[11px]">{label}</span><strong className={cn('mt-0.5 block text-base tabular-nums', color)}>{value}</strong></div></div>)}</div>}
     <div className="border-b border-sky-200 bg-sky-50/60 px-4 py-3 text-xs leading-5 text-slate-700"><p className="font-semibold text-slate-800">How this close is assessed</p><p className="mt-0.5">Xero system journals and Xero manual journals are shown as source activity when access is available. Management-only closing journals are stored in this application and can complete the management view; they are never posted to Xero and do not certify Xero’s source ledger.</p></div>
 
     {data?.connected && <ManagementManualJournals
       fromDate={fromDate} toDate={toDate} currency={data.currency}
       accounts={data.accounts.map(({ accountId, accountCode, accountName, classification }) => ({ accountId, accountCode, accountName, classification }))}
+      activeAccountIds={data.accounts.map(({ accountId }) => accountId)}
       canManage={data.canManageManualJournals} onSaved={() => { void reloadAfterJournal(); }}
       openForAccountId={journalOpenAccountId} onOpenHandled={clearJournalOpenRequest}
     />}
@@ -164,7 +166,7 @@ export function ManagementLedgerWorkspace({ fromDate, toDate, sourceChecks }: { 
             <td className="px-3 py-3 text-slate-600">{account.classification}</td><td className="px-3 py-3 text-right tabular-nums">{money(account.openingBalance, data.currency)}</td><td className="px-3 py-3 text-right tabular-nums">{money(account.sourceClosingBalance, data.currency)}</td><td className="px-3 py-3 text-right font-semibold tabular-nums">{money(account.adjustedClosingBalance, data.currency)}</td><td className={cn('px-3 py-3 text-right font-semibold tabular-nums', account.unresolvedDifference !== null && Math.abs(account.unresolvedDifference) > 0.01 ? 'text-amber-800' : 'text-slate-700')}>{account.unresolvedDifference === null ? unavailable : money(account.unresolvedDifference, data.currency)}</td><td className="px-3 py-3"><span className={cn('inline-flex whitespace-nowrap rounded-full border px-2 py-1 text-[10px] font-medium', state.style)}>{state.label}</span></td>
           </tr>{isOpen && <tr><td colSpan={7} className="border-b border-cyan-100 bg-slate-50/70 p-3 sm:p-4"><div className="space-y-4 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
             <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 pb-3"><div><h3 className="text-sm font-semibold text-slate-900">{account.accountName} · source activity</h3><p className="mt-1 text-xs text-slate-500">Xero journal lines for {fromDate} to {toDate}</p></div><span className={cn('rounded-full border px-2.5 py-1 text-[10px] font-medium', sourceStatusStyles[account.reconciliationStatus] || sourceStatusStyles['Evidence unavailable'])}>{account.sourceJournalCoverage === 'COMPLETE' ? account.reconciliationStatus : account.sourceJournalCoverage === 'PARTIAL' ? 'Partial Xero journal detail' : 'Source evidence unavailable'}</span></div>
-            {detail?.account.accountId === account.accountId && detail.transactions.length === 0 && data.canManageManualJournals && <button type="button" onClick={() => setJournalOpenAccountId(account.accountId)} className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs font-semibold text-cyan-900 hover:bg-cyan-100"><FileWarning className="h-4 w-4" />Add management-only closing journal</button>}
+            {detail?.account.accountId === account.accountId && data.canManageManualJournals && <button type="button" onClick={() => setJournalOpenAccountId(account.accountId)} className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs font-semibold text-cyan-900 hover:bg-cyan-100"><FileWarning className="h-4 w-4" />Add management-only closing journal</button>}
             {detailLoading && isOpen ? <div className="flex items-center justify-center gap-2 py-10 text-sm text-slate-500"><LoaderCircle className="h-4 w-4 animate-spin" />Loading account activity…</div> : detailError ? <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800">{detailError}</div> : detail?.account.accountId === account.accountId && <>
               {detail.warning && <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-900">{detail.warning}{detail.warning.includes('does not include permission to retrieve system journal entries') && <p className="mt-2">After a platform administrator enables journal access for the Xero app, <a href="/api/xero/redirect?include_restricted=true" className="cursor-pointer font-semibold text-cyan-800 underline underline-offset-2">reconnect Xero with journal access</a>.</p>}</div>}
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">{[
@@ -177,7 +179,13 @@ export function ManagementLedgerWorkspace({ fromDate, toDate, sourceChecks }: { 
         })}</tbody>
       </table>
     </div>}
-    {sourceChecks && <details className="border-t border-slate-200"><summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-slate-800 [&::-webkit-details-marker]:hidden"><span>Supporting source checks</span><span className="text-xs font-normal text-slate-500">{sourceChecks.counts.verified} passed · {sourceChecks.counts.attention} require review · {sourceChecks.counts.notVerified} unavailable</span></summary><div className="divide-y divide-slate-100 border-t border-slate-200">{sourceChecks.controls.map((control) => { const passed = control.status === 'verified'; const requiresReview = control.status === 'attention'; const statusLabel = passed ? 'Passed' : requiresReview ? 'Review required' : control.status === 'not-applicable' ? 'Not applicable' : 'Evidence unavailable'; return <article key={control.id} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-start sm:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="text-xs font-semibold text-slate-800">{control.name}</h3><span className={cn('rounded-full border px-2 py-0.5 text-[10px] font-medium', passed ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : requiresReview ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-slate-200 bg-slate-100 text-slate-600')}>{statusLabel}</span></div><p className="mt-1 text-xs leading-5 text-slate-600">{control.detail}</p><p className="mt-1 text-[10px] text-slate-400">Source: {control.evidence} · {displayDate(control.referenceDate)}</p></div></article>; })}</div></details>}
+    {sourceChecks && <details className="group border-t border-slate-200 bg-white">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-4 border-l-4 border-cyan-600 bg-gradient-to-r from-cyan-50/80 to-white px-4 py-4 transition-colors hover:from-cyan-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyan-600 [&::-webkit-details-marker]:hidden">
+        <span className="flex min-w-0 items-start gap-3"><span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-cyan-800 shadow-sm ring-1 ring-cyan-100"><ShieldAlert className="h-4 w-4" /></span><span className="min-w-0"><span className="block text-sm font-semibold text-slate-900">Supporting source checks</span><span className="mt-0.5 block text-xs font-normal text-slate-600">Evidence behind the close review results</span><span className="mt-2 flex flex-wrap gap-1.5 text-[10px] font-medium"><span className="rounded-full bg-emerald-100 px-2 py-1 text-emerald-800">{sourceChecks.counts.verified} passed</span><span className="rounded-full bg-amber-100 px-2 py-1 text-amber-900">{sourceChecks.counts.attention} require review</span><span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">{sourceChecks.counts.notVerified} unavailable</span></span></span></span>
+        <span className="flex shrink-0 items-center gap-2 rounded-lg border border-cyan-200 bg-white px-3 py-2 text-xs font-semibold text-cyan-900 shadow-sm transition-colors group-hover:bg-cyan-50"><span className="hidden sm:inline">View checks</span><span className="sm:hidden">View</span><ChevronDown className="h-4 w-4 transition-transform duration-200 group-open:rotate-180" /></span>
+      </summary>
+      <div className="divide-y divide-slate-100 border-t border-slate-200 bg-white">{sourceChecks.controls.map((control) => { const passed = control.status === 'verified'; const requiresReview = control.status === 'attention'; const statusLabel = passed ? 'Passed' : requiresReview ? 'Review required' : control.status === 'not-applicable' ? 'Not applicable' : 'Evidence unavailable'; return <article key={control.id} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-start sm:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="text-xs font-semibold text-slate-800">{control.name}</h3><span className={cn('rounded-full border px-2 py-0.5 text-[10px] font-medium', passed ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : requiresReview ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-slate-200 bg-slate-100 text-slate-600')}>{statusLabel}</span></div><p className="mt-1 text-xs leading-5 text-slate-600">{control.detail}</p><p className="mt-1 text-[10px] text-slate-400">Source: {control.evidence} · {displayDate(control.referenceDate)}</p></div></article>; })}</div>
+    </details>}
     <p className="border-t border-slate-200 px-4 py-3 text-[11px] leading-5 text-slate-500">Management-only journals help prepare the management view. They are not Xero journals and do not confirm that the accounting period has been formally closed.</p>
   </section>;
 }
