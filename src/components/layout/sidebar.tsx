@@ -27,7 +27,7 @@ import {
   Cpu,
   Settings,
   ChevronDown,
-  Menu,
+  ChevronLeft,
   X,
   Lock,
   HelpCircle,
@@ -109,6 +109,7 @@ export function Sidebar() {
     'Payment Gateways': false
   });
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
+  const [hoveredItemTop, setHoveredItemTop] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   // Dynamic drawer state
@@ -482,8 +483,7 @@ export function Sidebar() {
 
   const sidebarContent = (
     <div className={cn(
-      "flex h-full flex-col bg-sidebar-background text-sidebar-foreground select-none border-r border-sidebar-border no-scrollbar",
-      isCollapsed ? "overflow-visible" : "overflow-y-auto overflow-x-hidden"
+      "flex h-full min-h-0 flex-col overflow-hidden bg-sidebar-background text-sidebar-foreground select-none border-r border-sidebar-border no-scrollbar",
     )}>
       {/* Brand Header */}
       <div className={cn(
@@ -512,13 +512,13 @@ export function Sidebar() {
             onClick={toggleSidebar}
             className="hidden md:flex h-7 w-7 items-center justify-center rounded-md border border-sidebar-border/40 bg-sidebar-accent/30 text-sidebar-foreground/80 hover:text-white hover:bg-sidebar-accent transition cursor-pointer outline-none"
           >
-            <Menu className="h-4 w-4" />
+            <ChevronLeft className="h-4 w-4" />
           </button>
         )}
       </div>
 
       {/* Navigation Menu List */}
-      <nav className="flex-1 px-3 py-3 space-y-3">
+      <nav aria-label="Main navigation" className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 py-3 space-y-3 no-scrollbar">
         {navSections.map((section, idx) => (
           <div key={idx} className="space-y-1">
             {section.title && !isCollapsed && (
@@ -539,8 +539,10 @@ export function Sidebar() {
                   <div
                     key={item.name}
                     className="py-0.5 relative"
-                    onMouseEnter={() => {
+                    onMouseEnter={(event) => {
                       setHoveredItem(item.name);
+                      const bounds = event.currentTarget.getBoundingClientRect();
+                      setHoveredItemTop(bounds.top + bounds.height / 2);
                       playWoosh();
                     }}
                     onMouseLeave={() => setHoveredItem(null)}
@@ -577,7 +579,7 @@ export function Sidebar() {
 
                     {/* Tooltip on hover */}
                     {hoveredItem === item.name && (
-                      <div className="absolute left-[54px] top-1/2 z-50 pointer-events-none whitespace-nowrap animate-tooltip-swipe">
+                      <div style={{ top: hoveredItemTop }} className="fixed left-[72px] z-50 -translate-y-1/2 pointer-events-none whitespace-nowrap animate-tooltip-swipe">
                         <div className="bg-[#0b1329]/95 backdrop-blur-xs text-white text-[11.5px] font-bold py-1.5 px-3.5 rounded-lg border border-slate-700/50 shadow-md flex items-center gap-1.5">
                           <span className={cn("h-1.5 w-1.5 rounded-full", isLocked ? "bg-amber-400" : "bg-[#00b7e2]")} />
                           <span>{item.name}</span>
@@ -733,7 +735,7 @@ export function Sidebar() {
     <>
       {/* Desktop Sidebar */}
       <aside className={cn(
-        "hidden md:block h-screen shrink-0 transition-all duration-300",
+        "fixed inset-y-0 left-0 z-30 hidden md:block min-h-0 shrink-0 transition-all duration-300",
         isCollapsed ? "w-16 overflow-visible" : "w-64"
       )}>
         {sidebarContent}
@@ -748,7 +750,7 @@ export function Sidebar() {
             onClick={() => setOpenMobile(false)}
           />
           {/* Content panel */}
-          <div className="relative flex w-64 max-w-xs flex-col animate-in slide-in-from-left duration-250">
+          <div className="relative flex h-dvh max-h-dvh w-64 max-w-xs flex-col animate-in slide-in-from-left duration-250">
             {sidebarContent}
             {/* Close button inside panel */}
             <div className="absolute top-3.5 right-3.5 flex items-center justify-center z-50">

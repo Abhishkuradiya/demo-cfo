@@ -51,8 +51,15 @@ export async function GET(req: Request) {
       });
     }
 
-    return NextResponse.json({ success: false, message: 'Database connection inactive' }, { status: 500 });
-  } catch (err: any) {
+    return NextResponse.json(
+      {
+        success: false,
+        message: 'Database connection is unavailable. Check the PostgreSQL settings in .env.local and restart the app.'
+      },
+      { status: 503 }
+    );
+  } catch (err: unknown) {
+    console.error('Failed to verify invitation link:', err);
     return NextResponse.json({ success: false, message: 'Failed to verify invitation link' }, { status: 500 });
   }
 }

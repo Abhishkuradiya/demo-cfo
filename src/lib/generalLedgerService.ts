@@ -1,6 +1,8 @@
 import { db, parseXeroDate } from './db';
 import { getXeroAccessToken } from './xero';
 
+type XeroLedgerRecord = Record<string, unknown>;
+
 export interface GeneralLedgerSummary {
   total_transactions: number;
   this_month: number;
@@ -11,7 +13,7 @@ export const XeroGeneralLedgerService = {
   /**
    * Fetch system journals using the offset-based pagination.
    */
-  fetchXeroJournals: async (accessToken: string, xeroTenantId: string, offset = 0, retriesLeft = 3): Promise<any[]> => {
+  fetchXeroJournals: async (accessToken: string, xeroTenantId: string, offset = 0): Promise<XeroLedgerRecord[]> => {
     const url = `https://api.xero.com/api.xro/2.0/Journals?offset=${offset}`;
     
     // Throttle to naturally pace concurrent requests
@@ -31,22 +33,22 @@ export const XeroGeneralLedgerService = {
 
     if (!res.ok) {
       const text = await res.text();
-      // Gracefully handle 403 (Advanced tier journals restriction) or 401 (scope not authorized yet)
+      // Preserve the distinction between an empty ledger and an endpoint the
+      // connected Xero app is not permitted to read.
       if (res.status === 403 || res.status === 401) {
-        console.warn(`Journals endpoint is restricted/unauthorized (${res.status}). Skipping journals sync.`);
-        return [];
+        throw new Error(`Xero journal access is unavailable (HTTP ${res.status}). The app may need the Journals endpoint approval and required Xero plan/scope.`);
       }
       throw new Error(`Xero Journals API error (Status ${res.status}): ${text}`);
     }
 
     const data = await res.json();
-    return data.Journals || [];
+    return (data.Journals || []) as XeroLedgerRecord[];
   },
 
   /**
    * Fetch manual journals using page-based pagination.
    */
-  fetchXeroManualJournals: async (accessToken: string, xeroTenantId: string, page = 1): Promise<any[]> => {
+  fetchXeroManualJournals: async (accessToken: string, xeroTenantId: string, page = 1): Promise<XeroLedgerRecord[]> => {
     const url = `https://api.xero.com/api.xro/2.0/ManualJournals?page=${page}`;
     
     // Throttle to naturally pace concurrent requests
@@ -70,22 +72,58 @@ export const XeroGeneralLedgerService = {
     }
 
     const data = await res.json();
-    return data.ManualJournals || [];
+    return (data.ManualJournals || []) as XeroLedgerRecord[];
+  },
+
+  /** Refresh manual journals independently when the restricted system Journals
+   * endpoint is not enabled for this Xero connection. */
+  syncManualJournals: async (tenantId: number, strictPostgres = false): Promise<void> => {
+    const tokenInfo = await getXeroAccessToken(tenantId);
+    if (!tokenInfo) return;
+
+    let existing: XeroLedgerRecord[] = [];
+    try {
+      const cached = strictPostgres
+        ? await db.getPostgresReport(tenantId, 'ManualJournals')
+        : await db.getReport(tenantId, 'ManualJournals');
+      if (Array.isArray(cached)) existing = cached as XeroLedgerRecord[];
+    } catch (error) {
+      console.warn('Unable to read cached Xero manual journals before refresh:', error);
+    }
+
+    const refreshed: XeroLedgerRecord[] = [];
+    let page = 1;
+    while (page <= 100) {
+      const batch = await XeroGeneralLedgerService.fetchXeroManualJournals(tokenInfo.accessToken, tokenInfo.xeroTenantId, page);
+      refreshed.push(...batch);
+      if (batch.length < 100) break;
+      page++;
+    }
+
+    const merged = new Map<string, XeroLedgerRecord>();
+    for (const journal of [...existing, ...refreshed]) {
+      const identity = String(journal.ManualJournalID ?? `${journal.Date ?? ''}|${journal.Narration ?? ''}`);
+      merged.set(identity, journal);
+    }
+    const data = [...merged.values()];
+    if (strictPostgres) await db.savePostgresReport(tenantId, 'ManualJournals', data);
+    else await db.saveReport(tenantId, 'ManualJournals', data);
   },
 
   /**
    * Synchronizes general ledger journals and manual journals.
    */
-  syncGeneralLedger: async (tenantId: number): Promise<void> => {
+  syncGeneralLedger: async (tenantId: number, strictPostgres = false): Promise<void> => {
     const tokenInfo = await getXeroAccessToken(tenantId);
     if (!tokenInfo) return;
 
     const { accessToken, xeroTenantId } = tokenInfo;
 
     // 1. Fetch Manual Journals (all pages)
-    const allManual: any[] = [];
+    const allManual: XeroLedgerRecord[] = [];
     let page = 1;
     let manualHasMore = true;
+    let manualSyncError: unknown = null;
     while (manualHasMore) {
       try {
         const batch = await XeroGeneralLedgerService.fetchXeroManualJournals(accessToken, xeroTenantId, page);
@@ -97,40 +135,67 @@ export const XeroGeneralLedgerService = {
         }
       } catch (e) {
         console.error(`Error syncing manual journals page ${page}:`, e);
+        manualSyncError = e;
         manualHasMore = false;
       }
     }
-    await db.saveReport(tenantId, 'ManualJournals', allManual);
+    if (strictPostgres) await db.savePostgresReport(tenantId, 'ManualJournals', allManual);
+    else await db.saveReport(tenantId, 'ManualJournals', allManual);
 
-    // 2. Fetch System Journals (offset pagination up to 10 pages / 1000 journals for rate limits)
-    const allSystem: any[] = [];
-    let offset = 0;
+    // 2. Fetch system journals incrementally. The API's offset is a JournalNumber,
+    // so continue from the newest cached number instead of repeatedly reading only
+    // the first 1,000 journals (which can leave recent account activity missing).
+    let existingSystem: XeroLedgerRecord[] = [];
+    try {
+      const cached = strictPostgres
+        ? await db.getPostgresReport(tenantId, 'Journals')
+        : await db.getReport(tenantId, 'Journals');
+      if (Array.isArray(cached)) existingSystem = cached as XeroLedgerRecord[];
+    } catch (error) {
+      console.warn('Unable to read cached Xero journals before refresh:', error);
+    }
+    const allSystem: XeroLedgerRecord[] = [...existingSystem];
+    const knownJournalIds = new Set(existingSystem.map((journal) => String(journal.JournalID ?? journal.JournalNumber ?? '')).filter(Boolean));
+    let offset = existingSystem.reduce((max, journal) => Math.max(max, Number(journal.JournalNumber) || 0), 0);
     let systemHasMore = true;
     let calls = 0;
-    while (systemHasMore && calls < 10) {
+    // Xero notes that a partial page may still be followed by more results, so
+    // continue until it returns an empty page or the safety limit is reached.
+    let systemSyncError: unknown = null;
+    while (systemHasMore && calls < 100) {
       try {
         const batch = await XeroGeneralLedgerService.fetchXeroJournals(accessToken, xeroTenantId, offset);
         if (batch.length === 0) {
           systemHasMore = false;
         } else {
-          allSystem.push(...batch);
-          const maxNum = Math.max(...batch.map(j => j.JournalNumber || 0));
+          for (const journal of batch) {
+            const id = String(journal.JournalID ?? journal.JournalNumber ?? '');
+            if (!id || !knownJournalIds.has(id)) allSystem.push(journal);
+            if (id) knownJournalIds.add(id);
+          }
+          const maxNum = Math.max(...batch.map(j => Number(j.JournalNumber) || 0));
           if (maxNum > offset) {
             offset = maxNum;
           } else {
-            systemHasMore = false;
-          }
-          if (batch.length < 100) {
             systemHasMore = false;
           }
         }
         calls++;
       } catch (e) {
         console.error(`Error syncing system journals offset ${offset}:`, e);
+        systemSyncError = e;
         systemHasMore = false;
       }
     }
-    await db.saveReport(tenantId, 'Journals', allSystem);
+    if (calls >= 100 && systemHasMore) {
+      console.warn(`Xero journal refresh stopped at the safety limit for tenant ${tenantId}.`);
+    }
+    if (strictPostgres) await db.savePostgresReport(tenantId, 'Journals', allSystem);
+    else await db.saveReport(tenantId, 'Journals', allSystem);
+    if (systemSyncError instanceof Error && systemSyncError.message.includes('Xero journal access is unavailable')) {
+      throw systemSyncError;
+    }
+    if (manualSyncError) throw manualSyncError;
   },
 
   /**
@@ -163,7 +228,7 @@ export const XeroGeneralLedgerService = {
     }
 
     // Combine journals and track dates
-    const allEntries: { date: Date; raw: any }[] = [];
+    const allEntries: { date: Date; raw: XeroLedgerRecord }[] = [];
     const now = new Date();
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth();

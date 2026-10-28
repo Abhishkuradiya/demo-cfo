@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { UserMenu } from './user-menu';
 import { useSidebarStore } from '@/store/sidebar-store';
-import { Bell, Calendar, RefreshCw, Menu, Star, Filter, ChevronDown, Trash2, Building2, Check, Loader2, Clock, Globe, DollarSign } from 'lucide-react';
+import { Bell, Calendar, RefreshCw, Menu, Filter, ChevronDown, Trash2, Building2, Check, Loader2, Clock, Globe, DollarSign } from 'lucide-react';
 import { toast } from 'sonner';
 import { DateRangePicker } from '../ui/date-range-picker';
 import { CFOAiDrawer } from '../common/cfo-ai-drawer';
@@ -265,171 +265,6 @@ export function Header() {
     };
   }, []);
 
-  // Custom headers based on route path
-  const getHeaderInfo = () => {
-    switch (pathname) {
-      case '/overview':
-      case '/':
-        return {
-          title: "Dashboard Overview",
-          subtitle: "Real-time overview of your Xero organization"
-        };
-      case '/sales':
-        return {
-          title: "Sales Dashboard",
-          subtitle: "Real-time consolidated sales overview across all connected sources"
-        };
-      case '/cash-flow':
-        return {
-          title: "Cash Flow Analytics",
-          subtitle: "Real-time monitor of receipts, payments, and liquidity"
-        };
-      case '/forecast':
-        return {
-          title: "Financial Forecast",
-          subtitle: "Projected cash runway, burn rate, and scenario modeling"
-        };
-      case '/revenue':
-        return {
-          title: "Revenue Insights",
-          subtitle: "Analyze revenue patterns and growth projections"
-        };
-      case '/customers':
-        return {
-          title: "Customers & Contacts",
-          subtitle: "Manage accounts receivable and customer invoice logs"
-        };
-      case '/invoices':
-      case '/reports/account-receivable':
-      case '/reports/aged-receivables':
-      case '/reports/invoice-status-summary':
-        return {
-          title: "Account Receivable",
-          subtitle: "Real-time overview of your outstanding invoices and collections"
-        };
-      case '/bills':
-      case '/reports/account-payable':
-      case '/reports/aged-payables':
-      case '/reports/bill-status-summary':
-        return {
-          title: "Account Payable",
-          subtitle: "Real-time overview of your vendor bills and payment obligations"
-        };
-      case '/products':
-        return {
-          title: "Inventory & Products",
-          subtitle: "Stock valuation, units sold, and pricing models"
-        };
-      case '/reports':
-        return {
-          title: "Financial Reports",
-          subtitle: "Balance sheets, cash flow statements, and profit & loss logs"
-        };
-      case '/reports/profit-and-loss':
-        return {
-          title: "Profit & Loss Statement",
-          subtitle: "Consolidated income statement, turnover, cost of sales, and operating expenses"
-        };
-      case '/reports/balance-sheet':
-        return {
-          title: "Balance Sheet",
-          subtitle: "Real-time view of assets, liabilities, and equity"
-        };
-      case '/reports/cash-flow':
-        return {
-          title: "Cash Flow Statement",
-          subtitle: "Operating, investing, and financing cash movement"
-        };
-      case '/reports/trial-balance':
-        return {
-          title: "Trial Balance",
-          subtitle: "Summary of debit and credit balances for all chart of accounts"
-        };
-      case '/ai-insights':
-        return {
-          title: "AI CFO Insights",
-          subtitle: "Machine learning anomalies, forecasts, and suggestions"
-        };
-      case '/alerts':
-        return {
-          title: "Threshold Alerts",
-          subtitle: "Custom notifications for financial health parameters"
-        };
-      case '/automation':
-        return {
-          title: "Automation Workflows",
-          subtitle: "Configure automatic bank reconciliation and email reminders"
-        };
-      case '/data-sources':
-        return {
-          title: "Connectors",
-          subtitle: "Connect and manage your data sources. All your business data in one place."
-        };
-      case '/settings':
-        return {
-          title: "Configuration Settings",
-          subtitle: "Manage company configurations, tax rules, and user accesses"
-        };
-      case '/cash-flow/13-week':
-        return {
-          title: "13-Week Cash Forecast",
-          subtitle: "See your expected cash position, key inflows and outflows, and AI-powered insights for the next 13 weeks."
-        };
-      case '/management-accounts':
-        return {
-          title: "Management Accounts",
-          subtitle: "Executive management report pack, P&L bridge, working capital, and core financial ratios"
-        };
-      case '/budgeting':
-        return {
-          title: "Budgeting & Variances",
-          subtitle: "Compare monthly & YTD financial targets vs actual P&L performance"
-        };
-      case '/kpi-scorecard':
-        return {
-          title: "Financial KPI Scorecard",
-          subtitle: "Comprehensive financial efficiency ratios, debtor days, working capital cycle, and liquidity metrics"
-        };
-      case '/profitability':
-        return {
-          title: "Profitability Analysis",
-          subtitle: "Customer, product, and department gross & net margin insights"
-        };
-      case '/cfo':
-        return {
-          title: "CFO Command Center",
-          subtitle: "Unified financial intelligence, burn rate, and executive overview"
-        };
-      case '/xero-dashboard':
-        return {
-          title: "Executive Overview",
-          subtitle: "High-level executive dashboard and key financial summary"
-        };
-      case '/bookkeeping-health':
-        return {
-          title: "Bookkeeping Health",
-          subtitle: "Reconciliation status, unallocated transactions, and ledger integrity checks"
-        };
-      case '/amazon':
-        return {
-          title: "Amazon Seller Analytics",
-          subtitle: "Real-time Amazon Seller Central order performance, fees & multi-currency CFO insights"
-        };
-      case '/stripe':
-        return {
-          title: "Stripe Command Center",
-          subtitle: "Complete financial intelligence for your Stripe business — Revenue, Subscriptions, Payouts & Disputes"
-        };
-      default:
-        return {
-          title: "Xero Analytics",
-          subtitle: "Real-time overview of your Xero organization"
-        };
-    }
-  };
-
-  const { title, subtitle } = getHeaderInfo();
-
   const handleSync = async () => {
     setIsSyncing(true);
     toast.loading("Syncing latest transactions from Xero...", { id: "sync-toast" });
@@ -478,6 +313,7 @@ export function Header() {
   };
 
   const isSales = pathname === '/sales';
+  const isManagementAccounts = pathname === '/management-accounts';
 
   const isDemoMode = searchParams.get('mode') === 'demo';
 
@@ -510,10 +346,8 @@ export function Header() {
               }
             }}
             className={cn(
-              "flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer outline-none transition shrink-0 shadow-2xs",
-              isCollapsed
-                ? "md:flex bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100 hover:text-blue-700 dark:bg-blue-950/50 dark:text-blue-400 dark:border-blue-800"
-                : "md:hidden"
+              "flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer outline-none transition shrink-0 shadow-2xs md:flex",
+              isCollapsed && "bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100 hover:text-blue-700 dark:bg-blue-950/50 dark:text-blue-400 dark:border-blue-800"
             )}
             aria-label="Toggle navigation menu"
             title={isCollapsed ? "Expand Sidebar (Ctrl+B)" : "Collapse Sidebar (Ctrl+B)"}
@@ -521,64 +355,6 @@ export function Header() {
             <Menu className="h-5 w-5" />
           </button>
 
-          {isAmazon ? (
-            /* Amazon Command Center Title Block */
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-9 h-9 md:w-10 md:h-10 rounded-xl bg-white p-1.5 flex items-center justify-center shadow-xs border border-slate-200 dark:border-slate-700 shrink-0">
-                <img
-                  src="/Amazon_icon.png"
-                  alt="Amazon Logo"
-                  className="w-full h-full object-contain"
-                  onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
-                />
-              </div>
-              <div className="flex flex-col select-none min-w-0">
-                <h1 className="text-lg md:text-xl font-bold tracking-tight text-slate-900 dark:text-slate-100 leading-tight truncate">
-                  Amazon Dashboard
-                </h1>
-                <p className="text-[11.5px] md:text-xs text-slate-400 font-normal mt-0.5 truncate">
-                  Complete view of your Amazon business — Sales, Orders, Inventory, Fulfillment, Finances and more.
-                </p>
-              </div>
-            </div>
-          ) : isStripe ? (
-            /* Stripe Command Center Title Block */
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-9 h-9 md:w-10 md:h-10 rounded-xl bg-white p-1.5 flex items-center justify-center shadow-xs border border-slate-200 dark:border-slate-700 shrink-0">
-                <img
-                  src="/stripe-com-logo.png"
-                  alt="Stripe Logo"
-                  className="w-full h-full object-contain"
-                  onError={(e) => { (e.target as HTMLImageElement).src = '/stripe_logo.png'; }}
-                />
-              </div>
-              <div className="flex flex-col select-none min-w-0">
-                <h1 className="text-lg md:text-xl font-bold tracking-tight text-slate-900 dark:text-slate-100 leading-tight truncate">
-                  Stripe Command Center
-                </h1>
-                <p className="text-[11.5px] md:text-xs text-slate-400 font-normal mt-0.5 truncate">
-                  Complete financial intelligence for your Stripe business — Revenue, Subscriptions, Payouts & Disputes
-                </p>
-              </div>
-            </div>
-          ) : (
-            /* Dynamic Title and Subtitle */
-            <div className="flex flex-col select-none">
-              <div className="flex items-center gap-2">
-                <h1 className="text-xl md:text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100 leading-tight">
-                  {title}
-                </h1>
-                {isSales && (
-                  <button className="outline-none">
-                    <Star className="h-[15px] w-[15px] text-slate-350 hover:text-amber-400 cursor-pointer transition fill-none" />
-                  </button>
-                )}
-              </div>
-              <p className="text-[12px] md:text-xs text-slate-400 font-normal mt-0.5">
-                {subtitle}
-              </p>
-            </div>
-          )}
         </div>
 
         {(isAmazon || isStripe) ? (
@@ -603,6 +379,7 @@ export function Header() {
                 <button
                   onClick={() => !isSwitchingOrg && setShowOrgSwitcher(!showOrgSwitcher)}
                   disabled={isSwitchingOrg}
+                  aria-label={activeOrgName || "Select organisation"}
                   className="flex items-center gap-2 px-3.5 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-bold text-slate-750 shadow-2xs transition cursor-pointer outline-none h-9.5 disabled:opacity-60"
                 >
                   {isSwitchingOrg ? (
@@ -610,7 +387,7 @@ export function Header() {
                   ) : (
                     <Building2 className="h-3.5 w-3.5 text-slate-450" />
                   )}
-                  <span className="truncate max-w-[130px] font-bold text-slate-700">{activeOrgName || "Select Company"}</span>
+                  <span className={cn("truncate max-w-[130px] font-bold text-slate-700", isManagementAccounts && "max-lg:hidden")}>{activeOrgName || "Select Company"}</span>
                   {connections.length > 1 && <ChevronDown className="h-3.5 w-3.5 text-slate-400" />}
                 </button>
 
@@ -751,7 +528,7 @@ export function Header() {
             )}
 
             {/* Sync Status Section */}
-            <div className="flex items-center gap-1.5 select-none h-9.5">
+            <div className={cn("flex items-center gap-1.5 select-none h-9.5", isManagementAccounts && "max-lg:hidden")}>
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 inline-block shrink-0" />
               <span className="text-[11px] text-slate-400 font-semibold leading-none">Updated {syncTime}</span>
             </div>
@@ -761,7 +538,7 @@ export function Header() {
                 <button
                   onClick={handleClearCache}
                   disabled={isClearingCache}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 text-xs font-bold text-slate-655 bg-white hover:bg-slate-50 transition disabled:opacity-55 cursor-pointer outline-none shadow-2xs h-9.5"
+                  className={cn("flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 text-xs font-bold text-slate-655 bg-white hover:bg-slate-50 transition disabled:opacity-55 cursor-pointer outline-none shadow-2xs h-9.5", isManagementAccounts && "max-lg:hidden")}
                   title="Purges local report cache and fetches fresh live data directly from Xero API"
                 >
                   <Trash2 className={`h-3.5 w-3.5 ${isClearingCache ? 'animate-pulse text-red-500' : 'text-slate-450'}`} />
@@ -771,7 +548,7 @@ export function Header() {
                 <button
                   onClick={handleSync}
                   disabled={isSyncing}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-primary text-xs font-bold text-primary bg-white hover:bg-primary/5 active:bg-primary/10 transition disabled:opacity-50 cursor-pointer outline-none shadow-2xs h-9.5"
+                  className={cn("flex items-center gap-1.5 px-4 py-2 rounded-lg border border-primary text-xs font-bold text-primary bg-white hover:bg-primary/5 active:bg-primary/10 transition disabled:opacity-50 cursor-pointer outline-none shadow-2xs h-9.5", isManagementAccounts && "max-lg:hidden")}
                 >
                   <RefreshCw className={`h-3.5 w-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
                   {pathname === '/data-sources' ? 'Sync All' : 'Sync Now'}

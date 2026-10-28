@@ -18,14 +18,21 @@ export function parseXeroDate(dateStr: any): Date | null {
   return isNaN(parsed.getTime()) ? null : parsed;
 }
 
-export const pgPool = new Pool({
-  host: process.env.DB_HOST || '127.0.0.1',
-  port: parseInt(process.env.DB_PORT || '5432'),
-  user: process.env.DB_USER || 'postgres',
-  password: process.env.DB_PASSWORD || 'postgres',
-  database: process.env.DB_NAME || 'virtual_cfo',
-  connectionTimeoutMillis: 5000 // Stable timeout to connect, falls back to JSON if pg is truly down
-});
+export const pgPool = new Pool(
+  process.env.DATABASE_URL
+    ? {
+        connectionString: process.env.DATABASE_URL,
+        connectionTimeoutMillis: 5000
+      }
+    : {
+        host: process.env.DB_HOST || '127.0.0.1',
+        port: parseInt(process.env.DB_PORT || '5432', 10),
+        user: process.env.DB_USER || 'postgres',
+        password: process.env.DB_PASSWORD || undefined,
+        database: process.env.DB_NAME || 'virtual_cfo',
+        connectionTimeoutMillis: 5000
+      }
+);
 
 pgPool.on('error', (err) => {
   console.error('Unexpected error on idle PostgreSQL client:', err.message);
@@ -63,9 +70,11 @@ const initPgTables = async () => {
         email VARCHAR(255) UNIQUE NOT NULL,
         password_hash VARCHAR(255) NOT NULL,
         tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        role VARCHAR(100) NOT NULL DEFAULT 'Finance Manager',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
+    await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(100) NOT NULL DEFAULT 'Finance Manager';");
 
     // Create Sessions Table
     await client.query(`
@@ -205,11 +214,131 @@ const initPgTables = async () => {
       CREATE TABLE IF NOT EXISTS reports (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
-        report_type VARCHAR(50) NOT NULL,
+        report_type VARCHAR(150) NOT NULL,
         raw_data JSONB NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(tenant_id, report_type)
       );
+    `);
+    await client.query('ALTER TABLE reports ALTER COLUMN report_type TYPE VARCHAR(150);');
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS management_account_adjustments (
+        id BIGSERIAL PRIMARY KEY,
+        tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        adjustment_ref VARCHAR(80) NOT NULL,
+        account_id VARCHAR(255) NOT NULL,
+        account_code VARCHAR(50),
+        account_name VARCHAR(255) NOT NULL,
+        account_classification VARCHAR(80) NOT NULL,
+        period_start DATE NOT NULL,
+        period_end DATE NOT NULL,
+        adjustment_date DATE NOT NULL,
+        adjustment_type VARCHAR(60) NOT NULL,
+        direction VARCHAR(6) NOT NULL CHECK (direction IN ('DEBIT', 'CREDIT')),
+        amount NUMERIC(18, 2) NOT NULL CHECK (amount > 0),
+        description TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        evidence_reference TEXT,
+        source_classification VARCHAR(32) NOT NULL DEFAULT 'INTERNAL_ADJUSTMENT' CHECK (source_classification = 'INTERNAL_ADJUSTMENT'),
+        idempotency_key VARCHAR(100),
+        status VARCHAR(24) NOT NULL DEFAULT 'PENDING_REVIEW' CHECK (status IN ('PENDING_REVIEW', 'APPROVED', 'REVERSED')),
+        reversal_of BIGINT,
+        created_by_user_id INTEGER NOT NULL,
+        created_by_email VARCHAR(255) NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        reviewed_by_user_id INTEGER,
+        reviewed_by_email VARCHAR(255),
+        reviewed_at TIMESTAMPTZ,
+        UNIQUE (tenant_id, adjustment_ref),
+        UNIQUE (tenant_id, idempotency_key),
+        UNIQUE (tenant_id, reversal_of),
+        FOREIGN KEY (reversal_of) REFERENCES management_account_adjustments(id),
+        CHECK (period_start <= period_end),
+        CHECK (adjustment_date BETWEEN period_start AND period_end)
+      );
+      CREATE INDEX IF NOT EXISTS management_account_adjustments_period_idx
+        ON management_account_adjustments (tenant_id, period_start, period_end, account_id);
+      CREATE INDEX IF NOT EXISTS management_account_adjustments_status_idx
+        ON management_account_adjustments (tenant_id, status);
+
+      CREATE TABLE IF NOT EXISTS management_account_adjustment_audit (
+        id BIGSERIAL PRIMARY KEY,
+        tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        adjustment_id BIGINT NOT NULL REFERENCES management_account_adjustments(id),
+        event_type VARCHAR(30) NOT NULL,
+        actor_user_id INTEGER NOT NULL,
+        actor_email VARCHAR(255) NOT NULL,
+        event_reason TEXT NOT NULL,
+        before_state JSONB,
+        after_state JSONB,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS management_account_adjustment_audit_idx
+        ON management_account_adjustment_audit (tenant_id, adjustment_id, created_at);
+
+      CREATE TABLE IF NOT EXISTS management_account_ledger_snapshots (
+        tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        account_id VARCHAR(255) NOT NULL,
+        period_start DATE NOT NULL,
+        period_end DATE NOT NULL,
+        source_classification VARCHAR(16) NOT NULL DEFAULT 'XERO_SOURCE' CHECK (source_classification = 'XERO_SOURCE'),
+        raw_report JSONB NOT NULL,
+        parsed_ledger JSONB NOT NULL,
+        fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (tenant_id, account_id, period_start, period_end),
+        CHECK (period_start <= period_end)
+      );
+
+      CREATE OR REPLACE FUNCTION reject_management_adjustment_audit_mutation()
+      RETURNS TRIGGER AS $$
+      BEGIN
+        RAISE EXCEPTION 'Management account adjustment audit history is immutable';
+      END;
+      $$ LANGUAGE plpgsql;
+      DROP TRIGGER IF EXISTS management_account_adjustment_audit_immutable ON management_account_adjustment_audit;
+      CREATE TRIGGER management_account_adjustment_audit_immutable
+        BEFORE UPDATE OR DELETE ON management_account_adjustment_audit
+        FOR EACH ROW EXECUTE FUNCTION reject_management_adjustment_audit_mutation();
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS management_manual_journals (
+        id BIGSERIAL PRIMARY KEY,
+        tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        journal_ref VARCHAR(80) NOT NULL,
+        period_start DATE NOT NULL,
+        period_end DATE NOT NULL,
+        journal_date DATE NOT NULL,
+        description VARCHAR(500) NOT NULL,
+        reason TEXT NOT NULL,
+        created_by_user_id INTEGER NOT NULL,
+        created_by_email VARCHAR(255) NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        source_classification VARCHAR(32) NOT NULL DEFAULT 'MANAGEMENT_ONLY' CHECK (source_classification = 'MANAGEMENT_ONLY'),
+        UNIQUE (tenant_id, journal_ref),
+        CHECK (period_start <= period_end),
+        CHECK (journal_date BETWEEN period_start AND period_end)
+      );
+      CREATE TABLE IF NOT EXISTS management_manual_journal_lines (
+        id BIGSERIAL PRIMARY KEY,
+        tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        journal_id BIGINT NOT NULL REFERENCES management_manual_journals(id) ON DELETE CASCADE,
+        account_id VARCHAR(255) NOT NULL,
+        account_code VARCHAR(50),
+        account_name VARCHAR(255) NOT NULL,
+        account_classification VARCHAR(80) NOT NULL,
+        line_description VARCHAR(500),
+        debit NUMERIC(18,2) NOT NULL DEFAULT 0 CHECK (debit >= 0),
+        credit NUMERIC(18,2) NOT NULL DEFAULT 0 CHECK (credit >= 0),
+        source_classification VARCHAR(32) NOT NULL DEFAULT 'MANAGEMENT_ONLY' CHECK (source_classification = 'MANAGEMENT_ONLY'),
+        CHECK ((debit > 0 AND credit = 0) OR (credit > 0 AND debit = 0))
+      );
+      CREATE INDEX IF NOT EXISTS management_manual_journals_period_idx
+        ON management_manual_journals (tenant_id, period_start, period_end, journal_date);
+      CREATE INDEX IF NOT EXISTS management_manual_journal_lines_account_idx
+        ON management_manual_journal_lines (tenant_id, account_id, journal_id);
     `);
 
     await client.query(`
@@ -1554,7 +1683,7 @@ export const db = {
           CREATE TABLE IF NOT EXISTS reports (
             id SERIAL PRIMARY KEY,
             tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
-            report_type VARCHAR(100) NOT NULL,
+            report_type VARCHAR(150) NOT NULL,
             raw_data JSONB NOT NULL,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(tenant_id, report_type)
@@ -1577,6 +1706,46 @@ export const db = {
     if (idx >= 0) json.reports[idx].raw_data = rawData;
     else json.reports.push({ tenant_id: tid, report_type: reportType, raw_data: rawData });
     writeJsonDb(json);
+  },
+
+  getPostgresReport: async (tenantId: number, reportType: string): Promise<any | null> => {
+    try {
+      const { rows } = await pgPool.query(
+        'SELECT raw_data FROM reports WHERE tenant_id = $1 AND report_type = $2 LIMIT 1',
+        [tenantId, reportType]
+      );
+      isPgConnected = true;
+      return rows[0]?.raw_data ?? null;
+    } catch (error) {
+      isPgConnected = false;
+      throw error;
+    }
+  },
+
+  savePostgresReport: async (tenantId: number, reportType: string, rawData: unknown): Promise<void> => {
+    try {
+      await pgPool.query(
+        `INSERT INTO reports (tenant_id, report_type, raw_data)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (tenant_id, report_type)
+         DO UPDATE SET raw_data = EXCLUDED.raw_data, updated_at = CURRENT_TIMESTAMP`,
+        [tenantId, reportType, JSON.stringify(rawData)]
+      );
+      isPgConnected = true;
+    } catch (error) {
+      isPgConnected = false;
+      throw error;
+    }
+  },
+
+  assertPostgres: async (): Promise<void> => {
+    try {
+      await pgPool.query('SELECT 1');
+      isPgConnected = true;
+    } catch (error) {
+      isPgConnected = false;
+      throw error;
+    }
   },
 
   getAccounts: async (tenantId: string | number): Promise<any[]> => {
@@ -2631,12 +2800,12 @@ export const db = {
     return item ? item.raw_data : null;
   },
 
-  createUser: async (email: string, passwordHash: string, tenantId: number): Promise<any> => {
+  createUser: async (email: string, passwordHash: string, tenantId: number, role = 'Finance Manager'): Promise<any> => {
     if (isPgConnected) {
       try {
         const { rows } = await pgPool.query(
-          'INSERT INTO users (email, password_hash, tenant_id) VALUES ($1, $2, $3) RETURNING *',
-          [email, passwordHash, tenantId]
+          'INSERT INTO users (email, password_hash, tenant_id, role) VALUES ($1, $2, $3, $4) RETURNING *',
+          [email, passwordHash, tenantId, role]
         );
         return rows[0];
       } catch (e) {
@@ -2645,7 +2814,7 @@ export const db = {
     }
     const json = readJsonDb();
     const newId = json.users.length > 0 ? Math.max(...json.users.map(u => u.id)) + 1 : 1;
-    const newUser = { id: newId, email, password_hash: passwordHash, tenant_id: tenantId, created_at: new Date().toISOString() };
+    const newUser = { id: newId, email, password_hash: passwordHash, tenant_id: tenantId, role, created_at: new Date().toISOString() };
     json.users.push(newUser);
     writeJsonDb(json);
     return newUser;
@@ -2688,7 +2857,7 @@ export const db = {
     if (isPgConnected) {
       try {
         const { rows } = await pgPool.query(
-          `SELECT s.*, u.email, u.tenant_id 
+          `SELECT s.*, u.email, u.tenant_id, u.role
            FROM sessions s 
            JOIN users u ON s.user_id = u.id 
            WHERE s.session_token = $1 AND s.expires_at > NOW()`,

@@ -5,6 +5,7 @@ export interface AuthenticatedUserSession {
   userId: number;
   email: string;
   tenantId: number;
+  role: string;
 }
 
 export async function getAuthenticatedSession(): Promise<AuthenticatedUserSession | null> {
@@ -17,7 +18,8 @@ export async function getAuthenticatedSession(): Promise<AuthenticatedUserSessio
         return {
           userId: Number(session.user_id),
           email: String(session.email || ''),
-          tenantId: Number(session.tenant_id)
+          tenantId: Number(session.tenant_id),
+          role: String(session.role || 'Finance Manager')
         };
       }
     }
