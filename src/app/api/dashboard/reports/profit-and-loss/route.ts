@@ -2,15 +2,21 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getTenantIdFromSession } from '@/lib/auth';
 import { getXeroAccessToken, fetchXeroReport, fetchXeroResource } from '@/lib/xero';
-import { ProfitAndLossService } from '@/lib/services/ProfitAndLossService';
+import { getOrFetchManagementReport } from '@/lib/managementAccountsStorage';
 
 export const dynamic = 'force-dynamic';
+
+function isValidIsoDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
 
 function parseProfitAndLoss(report: any) {
   const income = { operating: [] as any[], other: [] as any[] };
   const cogs = [] as any[];
   const expenses = { operating: [] as any[], other: [] as any[] };
-  let currency = 'USD';
+  let currency: string | null = null;
 
   if (!report || !report.Rows) {
     return { income, cogs, expenses, currency };
@@ -89,6 +95,46 @@ function parseProfitAndLoss(report: any) {
   return { income, cogs, expenses, currency };
 }
 
+function hasUsablePnlAccountRows(report: any): boolean {
+  const visit = (rows: any[]): boolean => rows.some((item) => {
+    if (item?.RowType === 'Section') return visit(item.Rows || []);
+    if (item?.RowType !== 'Row' || !Array.isArray(item.Cells) || item.Cells.length < 2) return false;
+    const label = String(item.Cells[0]?.Value || '').trim().toLowerCase();
+    const raw = String(item.Cells[1]?.Value ?? '').trim();
+    return Boolean(label && !/(^|\b)(total|gross profit|net profit)(\b|$)/i.test(label) && raw !== '' && Number.isFinite(Number(raw.replace(/,/g, ''))));
+  });
+  return Boolean(Array.isArray(report?.Rows) && visit(report.Rows));
+}
+
+function findPnlSummaryValue(report: any, labels: string[]): number | null {
+  const expected = new Set(labels.map((label) => label.trim().toLowerCase()));
+  const parseAmount = (raw: unknown): number | null => {
+    if (raw === null || raw === undefined || String(raw).trim() === '') return null;
+    const text = String(raw).trim();
+    const parenthesized = /^\(.*\)$/.test(text);
+    const numeric = text.replace(/[^0-9,().-]/g, '').replace(/,/g, '');
+    const amount = Number(numeric);
+    return Number.isFinite(amount) ? (parenthesized ? -Math.abs(amount) : amount) : null;
+  };
+  const visit = (rows: any[]): number | null => {
+    for (const item of rows || []) {
+      if (item?.RowType === 'Row' || item?.RowType === 'SummaryRow') {
+        const label = String(item.Cells?.[0]?.Value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+        if (expected.has(label)) {
+          const value = parseAmount(item.Cells?.[1]?.Value);
+          if (value !== null) return value;
+        }
+      }
+      if (Array.isArray(item?.Rows)) {
+        const value = visit(item.Rows);
+        if (value !== null) return value;
+      }
+    }
+    return null;
+  };
+  return visit(report?.Rows || []);
+}
+
 export async function GET(req: NextRequest) {
   const tenantId = await getTenantIdFromSession();
   if (tenantId === null) {
@@ -98,6 +144,7 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const fromDate = searchParams.get('fromDate');
   const toDate = searchParams.get('toDate');
+  const postgresStorage = searchParams.get('storage') === 'postgres';
 
   try {
     const tokenInfo = await getXeroAccessToken(tenantId);
@@ -115,51 +162,47 @@ export async function GET(req: NextRequest) {
       start = `${sixMonthsAgo.getFullYear()}-${String(sixMonthsAgo.getMonth() + 1).padStart(2, '0')}-01`;
       end = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     } else {
-      // Ensure date range never exceeds 364 days for Xero API limits
+      if (!isValidIsoDate(start) || !isValidIsoDate(end) || start > end) {
+        return NextResponse.json({ error: 'Provide a valid date range with fromDate on or before toDate.' }, { status: 400 });
+      }
+      // Match the UI's maximum selectable interval instead of silently changing it.
       const dStart = new Date(start);
       const dEnd = new Date(end);
       const diffDays = Math.ceil((dEnd.getTime() - dStart.getTime()) / (1000 * 60 * 60 * 24));
-      if (diffDays > 365) {
-        const clampedStart = new Date(dEnd.getTime() - 364 * 24 * 60 * 60 * 1000);
-        const y = clampedStart.getFullYear();
-        const m = String(clampedStart.getMonth() + 1).padStart(2, '0');
-        const d = String(clampedStart.getDate()).padStart(2, '0');
-        start = `${y}-${m}-${d}`;
-      }
+      if (diffDays > 364) return NextResponse.json({ error: 'The reporting period cannot exceed 365 days.' }, { status: 400 });
     }
 
+    const getStoredReport = async (key: string, fetchFromXero: () => Promise<unknown | null>) => {
+      if (postgresStorage) return getOrFetchManagementReport(tenantId, key, fetchFromXero);
+      const cached = await db.getReport(tenantId, key);
+      if (cached !== null) return cached;
+      const fresh = await fetchFromXero();
+      if (fresh !== null) await db.saveReport(tenantId, key, fresh);
+      return fresh;
+    };
     const cacheKey = `ProfitAndLoss_${start}_${end}`;
-    let report = await db.getReport(tenantId, cacheKey);
-
-    if (!report && tokenInfo) {
-      try {
-        report = await fetchXeroReport(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'ProfitAndLoss', `fromDate=${start}&toDate=${end}`);
-        if (report) {
-          await db.saveReport(tenantId, cacheKey, report);
-        }
-      } catch (e: any) {
-        console.error('Failed to fetch Profit & Loss from Xero:', e);
-      }
+    let report = null;
+    try {
+      report = await getStoredReport(cacheKey, () => fetchXeroReport(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'ProfitAndLoss', `fromDate=${start}&toDate=${end}`));
+    } catch (error) {
+      console.error('Failed to load Profit & Loss from PostgreSQL/Xero:', error);
+      if (postgresStorage) throw error;
     }
 
-    let org = await db.getReport(tenantId, 'Organisation');
-    if (!org && tokenInfo) {
-      try {
-        const organisations = await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Organisations');
-        if (organisations && organisations.length > 0) {
-          org = organisations[0];
-          await db.saveReport(tenantId, 'Organisation', org);
-        }
-      } catch (err: any) {
-        console.error('Failed to dynamically sync Organisation details:', err.message);
-      }
+    let org = null;
+    try {
+      org = await getStoredReport('Organisation', async () => (await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Organisations'))[0] ?? null);
+    } catch (error) {
+      console.error('Failed to load Organisation details from PostgreSQL/Xero:', error);
+      if (postgresStorage) throw error;
     }
-    const orgCurrency = org?.BaseCurrency || 'USD';
+    const orgCurrency = org?.BaseCurrency || null;
 
     // If report is completely missing, return clean zero structured layout
     if (!report) {
       return NextResponse.json({
         connected: true,
+        available: false,
         summary: { revenue: 0, expenses: 0, grossProfit: 0, netProfit: 0, profitMargin: 0, grossProfitMargin: 0 },
         income: { operating: [], other: [] },
         expenses: { operating: [], other: [] },
@@ -173,11 +216,7 @@ export async function GET(req: NextRequest) {
     const hasExplicitCurrency = report?.ReportTitles?.some((t: string) => 
       t.toLowerCase().includes('currency:') || t.toLowerCase().includes('amounts in')
     );
-    if (!hasExplicitCurrency || finalCurrency === 'USD') {
-      if (org && org.BaseCurrency) {
-        finalCurrency = org.BaseCurrency;
-      }
-    }
+    if (!hasExplicitCurrency && orgCurrency) finalCurrency = orgCurrency;
 
     // Compute sums dynamically
     const operatingIncomeSum = parsed.income.operating.reduce((sum, item) => sum + item.value, 0);
@@ -195,69 +234,69 @@ export async function GET(req: NextRequest) {
 
     const netProfit = (grossProfit + otherIncomeSum) - totalExpenses;
 
-    const profitMargin = totalIncome > 0 ? (netProfit / totalIncome) * 100 : 0;
-    const grossProfitMargin = operatingIncomeSum > 0 ? (grossProfit / operatingIncomeSum) * 100 : 0;
+    const profitMargin = totalIncome !== 0 ? (netProfit / totalIncome) * 100 : null;
+    const grossProfitMargin = operatingIncomeSum !== 0 ? (grossProfit / operatingIncomeSum) * 100 : null;
 
     // Generate monthly trend
     const trends = [];
-    const pad = (n: number) => String(n).padStart(2, '0');
-    
     // Get list of months in the range
-    const monthsList = [];
-    const parsedStart = new Date(start);
-    const parsedEnd = new Date(end);
-    let curr = new Date(parsedStart.getFullYear(), parsedStart.getMonth(), 1);
-    const endMonth = new Date(parsedEnd.getFullYear(), parsedEnd.getMonth(), 1);
+    const monthsList: { year: number; month: number; label: string; start: string; end: string }[] = [];
+    const parsedStart = new Date(`${start}T00:00:00Z`);
+    const parsedEnd = new Date(`${end}T00:00:00Z`);
+    const curr = new Date(Date.UTC(parsedStart.getUTCFullYear(), parsedStart.getUTCMonth(), 1));
+    const endMonth = new Date(Date.UTC(parsedEnd.getUTCFullYear(), parsedEnd.getUTCMonth(), 1));
     
-    // Safety cap at 12 months to prevent API timeouts/rate-limiting
-    while (curr <= endMonth && monthsList.length < 12) {
+    // At most 13 calendar buckets can intersect a valid 365-day inclusive range.
+    while (curr <= endMonth && monthsList.length < 13) {
       monthsList.push({
-        year: curr.getFullYear(),
-        month: curr.getMonth(),
-        label: curr.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+        year: curr.getUTCFullYear(),
+        month: curr.getUTCMonth(),
+        label: curr.toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' }),
+        start: curr.toISOString().slice(0, 10),
+        end: new Date(Date.UTC(curr.getUTCFullYear(), curr.getUTCMonth() + 1, 0)).toISOString().slice(0, 10)
       });
-      curr.setMonth(curr.getMonth() + 1);
+      curr.setUTCMonth(curr.getUTCMonth() + 1);
     }
 
     for (const m of monthsList) {
-      const mStart = `${m.year}-${pad(m.month + 1)}-01`;
-      const lastDay = new Date(m.year, m.month + 1, 0).getDate();
-      const mEnd = `${m.year}-${pad(m.month + 1)}-${pad(lastDay)}`;
+      const mStart = m.start < start ? start : m.start;
+      const mEnd = m.end > end ? end : m.end;
       const mCacheKey = `ProfitAndLoss_${mStart}_${mEnd}`;
       
-      let mReport = await db.getReport(tenantId, mCacheKey);
-      if (!mReport && tokenInfo) {
-        try {
-          mReport = await fetchXeroReport(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'ProfitAndLoss', `fromDate=${mStart}&toDate=${mEnd}`);
-          if (mReport) {
-            await db.saveReport(tenantId, mCacheKey, mReport);
-          }
-        } catch (e) {
-          console.error(`Failed to fetch P&L for trend month ${mStart}:`, e);
-        }
+      let mReport = null;
+      try {
+        mReport = await getStoredReport(mCacheKey, () => fetchXeroReport(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'ProfitAndLoss', `fromDate=${mStart}&toDate=${mEnd}`));
+      } catch (error) {
+        console.error(`Failed to fetch P&L for trend month ${mStart}:`, error);
+        if (postgresStorage) throw error;
       }
       
-      let mRevenue = 0;
-      let mExpenses = 0;
-      let mNetProfit = 0;
-      
-      if (mReport) {
-        const mSummary = ProfitAndLossService.parseReport(mReport);
-        mRevenue = mSummary.revenue;
-        mExpenses = mSummary.operatingExpenses + mSummary.otherExpenses;
-        mNetProfit = mSummary.netProfit;
-      }
+      const monthParsed = mReport ? parseProfitAndLoss(mReport) : null;
+      const hasAccountDetail = Boolean(monthParsed && hasUsablePnlAccountRows(mReport) && (monthParsed.income.operating.length || monthParsed.income.other.length || monthParsed.cogs.length || monthParsed.expenses.operating.length || monthParsed.expenses.other.length));
+      const sourceRevenue = mReport ? findPnlSummaryValue(mReport, ['total turnover', 'turnover', 'total trading income', 'total revenue', 'total income', 'revenue']) : null;
+      const sourceOperatingExpenses = mReport ? findPnlSummaryValue(mReport, ['total operating expenses', 'total administrative costs', 'total overheads', 'operating expenses']) : null;
+      const sourceTotalExpenses = mReport ? findPnlSummaryValue(mReport, ['total expenses']) : null;
+      const sourceCogs = mReport ? findPnlSummaryValue(mReport, ['total cost of sales', 'total cost of goods sold', 'cost of goods sold', 'total direct costs', 'direct costs']) : null;
+      const sourceNetProfit = mReport ? findPnlSummaryValue(mReport, ['net profit', 'net profit / loss', 'net income', 'profit for the year']) : null;
+      const sourceExpenseTotal = sourceTotalExpenses ?? (sourceOperatingExpenses !== null && sourceCogs !== null ? sourceOperatingExpenses + sourceCogs : sourceOperatingExpenses);
+      const monthHasDetail = Boolean(hasAccountDetail || (sourceRevenue !== null && sourceExpenseTotal !== null && sourceNetProfit !== null));
+      const monthRevenue = hasAccountDetail && monthParsed ? monthParsed.income.operating.reduce((sum, item) => sum + item.value, 0) + monthParsed.income.other.reduce((sum, item) => sum + item.value, 0) : sourceRevenue;
+      const monthExpenses = hasAccountDetail && monthParsed ? monthParsed.cogs.reduce((sum, item) => sum + item.value, 0) + monthParsed.expenses.operating.reduce((sum, item) => sum + item.value, 0) + monthParsed.expenses.other.reduce((sum, item) => sum + item.value, 0) : sourceExpenseTotal;
+      const monthNet = hasAccountDetail && monthParsed ? monthParsed.income.operating.reduce((sum, item) => sum + item.value, 0) - monthParsed.cogs.reduce((sum, item) => sum + item.value, 0) + monthParsed.income.other.reduce((sum, item) => sum + item.value, 0) - monthParsed.expenses.operating.reduce((sum, item) => sum + item.value, 0) - monthParsed.expenses.other.reduce((sum, item) => sum + item.value, 0) : sourceNetProfit;
       
       trends.push({
         month: m.label,
-        revenue: mRevenue,
-        expenses: mExpenses,
-        netProfit: mNetProfit
+        available: monthHasDetail,
+        revenue: monthHasDetail ? monthRevenue : null,
+        expenses: monthHasDetail ? monthExpenses : null,
+        netProfit: monthNet,
+        reason: monthHasDetail ? null : (mReport ? 'Xero returned no usable P&L account detail for this month.' : 'No monthly Xero report was returned.')
       });
     }
 
     return NextResponse.json({
       connected: true,
+      available: hasUsablePnlAccountRows(report),
       summary: {
         revenue: totalIncome,
         turnover: operatingIncomeSum,
@@ -267,8 +306,8 @@ export async function GET(req: NextRequest) {
         totalExpenses: cogsSum + operatingExpensesSum + otherExpensesSum,
         grossProfit,
         netProfit,
-        profitMargin: Math.round(profitMargin * 10) / 10,
-        grossProfitMargin: Math.round(grossProfitMargin * 10) / 10
+        profitMargin: profitMargin === null ? null : Math.round(profitMargin * 10) / 10,
+        grossProfitMargin: grossProfitMargin === null ? null : Math.round(grossProfitMargin * 10) / 10
       },
       income: parsed.income,
       cogs: parsed.cogs,
@@ -276,7 +315,10 @@ export async function GET(req: NextRequest) {
       trends,
       meta: {
         currency: finalCurrency,
-        calculatedAt: new Date().toISOString()
+        calculatedAt: new Date().toISOString(),
+        fromDate: start,
+        toDate: end,
+        organizationName: org?.Name || org?.LegalName || org?.OrganisationName || null
       }
     });
 

@@ -20,8 +20,25 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, message: 'Password must be at least 6 characters' }, { status: 400 });
     }
 
+    const normalizedEmail = String(email).toLowerCase().trim();
+    let accountRole = 'Founder / Owner';
+    if (token) {
+      if (!db.isPgActive()) return NextResponse.json({ success: false, message: 'Invitations require the PostgreSQL database.' }, { status: 503 });
+      const invitation = await db.query(
+        `SELECT email, role FROM user_invitations
+         WHERE token = $1 AND status = 'Pending' AND expires_at > NOW()
+         LIMIT 1`,
+        [token],
+      );
+      const invited = invitation.rows[0];
+      if (!invited || String(invited.email).toLowerCase().trim() !== normalizedEmail) {
+        return NextResponse.json({ success: false, message: 'This invitation is invalid, expired, or belongs to another email address.' }, { status: 400 });
+      }
+      accountRole = String(invited.role || 'Finance Manager');
+    }
+
     // Check if user already exists
-    const existingUser = await db.getUserByEmail(email);
+    const existingUser = await db.getUserByEmail(normalizedEmail);
     if (existingUser) {
       return NextResponse.json({ success: false, message: 'User already exists with this email' }, { status: 400 });
     }
@@ -32,12 +49,12 @@ export async function POST(req: Request) {
 
     // 2. Create User
     const hashedPassword = hashPassword(password);
-    const user = await db.createUser(email.toLowerCase().trim(), hashedPassword, tenant.id);
+    const user = await db.createUser(normalizedEmail, hashedPassword, tenant.id, accountRole);
 
     // 3. Mark invitation as Accepted if token provided
     if (token && db.isPgActive()) {
       try {
-        await db.query("UPDATE user_invitations SET status = 'Accepted' WHERE token = $1", [token]);
+        await db.query("UPDATE user_invitations SET status = 'Accepted' WHERE token = $1 AND status = 'Pending'", [token]);
       } catch (e) {
         console.warn('Could not update invitation status:', e);
       }

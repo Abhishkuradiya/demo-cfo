@@ -1,5 +1,11 @@
 # Virtual CFO Intelligence Platform
 
+## Local PostgreSQL setup
+
+The Next.js app in this folder connects to PostgreSQL on `127.0.0.1:5432` and uses the `virtual_cfo` database by default. Install/start the PostgreSQL server (pgAdmin alone is only a management tool), then create a database named `virtual_cfo` in pgAdmin if it does not already exist.
+
+Copy `.env.example` to `.env.local`, set `DB_PASSWORD` to the password for the PostgreSQL user shown in your pgAdmin server connection, and restart `npm run dev`. Keep `.env.local` private; it is ignored by Git. Alternatively, configure a `DATABASE_URL` connection string instead of the individual `DB_*` settings.
+
 ## Xero Sync Architecture & Data Flow (`Sync Now` Documentation)
 
 Is document me **"Sync Now"** button par click hone ke baad hone wali execution, Live Xero API Data Retrieval, PostgreSQL storage strategy, aur **JSONB `reports` Table Deep-Dive** ko point-by-point track kiya gaya hai.

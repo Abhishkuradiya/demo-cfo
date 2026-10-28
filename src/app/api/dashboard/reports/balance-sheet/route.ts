@@ -3,21 +3,29 @@ import { db } from '@/lib/db';
 import { getTenantIdFromSession } from '@/lib/auth';
 import { getXeroAccessToken, fetchXeroReport, fetchXeroResource } from '@/lib/xero';
 import { BalanceSheetParser } from '@/lib/services/BalanceSheetParser';
+import { getOrFetchManagementReport } from '@/lib/managementAccountsStorage';
 
 export const dynamic = 'force-dynamic';
 
+function isValidIsoDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
 // Helper to parse Xero Balance Sheet rows into categorized assets, liabilities, and equity
 function parseBalanceSheet(report: any) {
-  const assets = { current: [] as any[], nonCurrent: [] as any[] };
-  const liabilities = { current: [] as any[], nonCurrent: [] as any[] };
+  const assets = { current: [] as any[], nonCurrent: [] as any[], unclassified: [] as any[] };
+  const liabilities = { current: [] as any[], nonCurrent: [] as any[], unclassified: [] as any[] };
   const equity = [] as any[];
+  const unclassified = [] as any[];
 
   if (!report || !report.Rows) {
-    return { assets, liabilities, equity, currency: 'USD' };
+    return { assets, liabilities, equity, unclassified, currency: null as string | null };
   }
 
   // Parse currency from report titles
-  let currency = 'USD';
+  let currency: string | null = null;
   if (report.ReportTitles) {
     for (const title of report.ReportTitles) {
       if (title.toLowerCase().includes('currency:')) {
@@ -88,18 +96,18 @@ function parseBalanceSheet(report: any) {
           section.includes('retained earnings')
         ) {
           equity.push({ name, value });
+        } else if (/\bbank accounts?\b|\bcash at bank\b/i.test(name)) {
+          // Xero's balance-sheet labels explicitly identify a bank account; retain it
+          // as a current asset even when the report omits a parent section label.
+          assets.current.push({ name, value });
+        } else if (section.includes('asset')) {
+          assets.unclassified.push({ name, value });
+        } else if (section.includes('liabilit')) {
+          liabilities.unclassified.push({ name, value });
+        } else if (section.includes('equity') || section.includes('capital') || section.includes('reserve') || section.includes('retained earnings')) {
+          equity.push({ name, value });
         } else {
-          // General fallback based on name keywords if parent section is vague
-          const nameLower = name.toLowerCase();
-          if (nameLower.includes('cash') || nameLower.includes('bank') || nameLower.includes('receivable')) {
-            assets.current.push({ name, value });
-          } else if (nameLower.includes('payable') || nameLower.includes('tax') || nameLower.includes('gst')) {
-            liabilities.current.push({ name, value });
-          } else if (nameLower.includes('equity') || nameLower.includes('retained earnings')) {
-            equity.push({ name, value });
-          } else {
-            assets.current.push({ name, value });
-          }
+          unclassified.push({ name, value });
         }
       } else if (item.Rows) {
         traverse(item.Rows, parentSection);
@@ -109,7 +117,7 @@ function parseBalanceSheet(report: any) {
 
   traverse(report.Rows);
 
-  return { assets, liabilities, equity, currency };
+  return { assets, liabilities, equity, unclassified, currency };
 }
 
 export async function GET(req: NextRequest) {
@@ -120,6 +128,7 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const dateStr = searchParams.get('date');
+  const postgresStorage = searchParams.get('storage') === 'postgres';
 
   try {
     const tokenInfo = await getXeroAccessToken(tenantId);
@@ -133,42 +142,46 @@ export async function GET(req: NextRequest) {
       const now = new Date();
       date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     }
+    if (!isValidIsoDate(date)) {
+      return NextResponse.json({ error: 'Provide a valid balance-sheet date.' }, { status: 400 });
+    }
 
+    const getStoredReport = async (key: string, fetchFromXero: () => Promise<unknown | null>) => {
+      if (postgresStorage) return getOrFetchManagementReport(tenantId, key, fetchFromXero);
+      const cached = await db.getReport(tenantId, key);
+      if (cached !== null) return cached;
+      const fresh = await fetchFromXero();
+      if (fresh !== null) await db.saveReport(tenantId, key, fresh);
+      return fresh;
+    };
     const cacheKey = `BalanceSheet_${date}`;
-    let report = await db.getReport(tenantId, cacheKey);
-
-    if (!report && tokenInfo) {
-      try {
-        report = await fetchXeroReport(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'BalanceSheet', `date=${date}`);
-        if (report) {
-          await db.saveReport(tenantId, cacheKey, report);
-        }
-      } catch (e: any) {
-        console.error('Failed to fetch Balance Sheet from Xero API:', e);
-      }
+    let report = null;
+    try {
+      report = await getStoredReport(cacheKey, () => fetchXeroReport(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'BalanceSheet', `date=${date}`));
+    } catch (error) {
+      console.error('Failed to load Balance Sheet from PostgreSQL/Xero:', error);
+      if (postgresStorage) throw error;
     }
 
-    let org = await db.getReport(tenantId, 'Organisation');
-    if (!org && tokenInfo) {
-      try {
-        const organisations = await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Organisations');
-        if (organisations && organisations.length > 0) {
-          org = organisations[0];
-          await db.saveReport(tenantId, 'Organisation', org);
-        }
-      } catch (err: any) {
-        console.error('Failed to dynamically sync Organisation details:', err.message);
-      }
+    let org = null;
+    try {
+      org = await getStoredReport('Organisation', async () => (await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Organisations'))[0] ?? null);
+    } catch (error) {
+      console.error('Failed to load Organisation details from PostgreSQL/Xero:', error);
+      if (postgresStorage) throw error;
     }
-    const orgCurrency = org?.BaseCurrency || 'USD';
+    const orgCurrency = org?.BaseCurrency || null;
 
     if (!report) {
       return NextResponse.json({ 
         connected: true,
+        available: false,
+        sourceSummary: { assets: null, liabilities: null, equity: null, difference: null, isBalanced: null, reconciliation: 'unavailable', workingCapital: null },
         summary: { assets: 0, liabilities: 0, equity: 0, isBalanced: true, difference: 0 },
-        assets: { current: [], nonCurrent: [] },
-        liabilities: { current: [], nonCurrent: [] },
+        assets: { current: [], nonCurrent: [], unclassified: [] },
+        liabilities: { current: [], nonCurrent: [], unclassified: [] },
         equity: [],
+        unclassified: [],
         meta: { currency: orgCurrency, calculatedAt: new Date().toISOString() }
       });
     }
@@ -178,13 +191,10 @@ export async function GET(req: NextRequest) {
     const hasExplicitCurrency = report?.ReportTitles?.some((t: string) => 
       t.toLowerCase().includes('currency:') || t.toLowerCase().includes('amounts in')
     );
-    if (!hasExplicitCurrency || finalCurrency === 'USD') {
-      if (org && org.BaseCurrency) {
-        finalCurrency = org.BaseCurrency;
-      }
-    }
+    if (!hasExplicitCurrency && orgCurrency) finalCurrency = orgCurrency;
 
-    // Compute totals dynamically to ensure it is perfectly balanced
+    // Grouped detail is useful for display, but only source-reported Xero totals
+    // can establish a balance-sheet reconciliation. Tolerance is 0.05 currency units.
     const currentAssetsSum = parsed.assets.current.reduce((sum, item) => sum + item.value, 0);
     const nonCurrentAssetsSum = parsed.assets.nonCurrent.reduce((sum, item) => sum + item.value, 0);
     const assetsSum = currentAssetsSum + nonCurrentAssetsSum;
@@ -195,8 +205,22 @@ export async function GET(req: NextRequest) {
 
     const equitySum = parsed.equity.reduce((sum, item) => sum + item.value, 0);
 
-    const difference = assetsSum - (liabilitiesSum + equitySum);
-    const isBalanced = Math.abs(difference) < 0.05;
+    const sourceAssets = BalanceSheetParser.findTotalAssets(report.Rows);
+    const sourceLiabilities = BalanceSheetParser.findTotalLiabilities(report.Rows);
+    const sourceEquity = BalanceSheetParser.findTotalEquity(report.Rows);
+    const sourceTotalsAvailable = sourceAssets !== null && sourceLiabilities !== null && sourceEquity !== null;
+    const difference = sourceTotalsAvailable ? sourceAssets - (sourceLiabilities + sourceEquity) : null;
+    const isBalanced = difference === null ? null : Math.abs(difference) <= 0.05;
+    const currentAssets = BalanceSheetParser.findCurrentAssets(report.Rows);
+    const currentLiabilities = BalanceSheetParser.findCurrentLiabilities(report.Rows);
+    const cashSummary = [
+      'total cash at bank and in hand', 'total cash and bank', 'total cash',
+      'total bank accounts', 'total bank balances', 'cash and bank'
+    ].map((label) => BalanceSheetParser.findSummary(report.Rows, label)).find((value) => value !== null) ?? null;
+    const bankAccountRows = parsed.assets.current.filter((line) => /\bbank accounts?\b|\bcash at bank\b/i.test(line.name));
+    const cashBalance = cashSummary ?? (bankAccountRows.length ? bankAccountRows.reduce((total, line) => total + line.value, 0) : null);
+    const receivablesBalance = BalanceSheetParser.findTotalAR(report.Rows);
+    const payablesBalance = BalanceSheetParser.findTotalAP(report.Rows);
 
     // Calculate last 6 months ending on the selected date for Equity Trend
     const targetDate = new Date(date);
@@ -218,17 +242,12 @@ export async function GET(req: NextRequest) {
       const mDateStr = `${m.year}-${pad(m.month + 1)}-${pad(lastDayOfMonth)}`;
       
       const mBsCacheKey = `BalanceSheet_${mDateStr}`;
-      let mBsReport = await db.getReport(tenantId, mBsCacheKey);
-      
-      if (!mBsReport && tokenInfo) {
-        try {
-          mBsReport = await fetchXeroReport(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'BalanceSheet', `date=${mDateStr}`);
-          if (mBsReport) {
-            await db.saveReport(tenantId, mBsCacheKey, mBsReport);
-          }
-        } catch (err) {
-          console.error(`Failed to fetch dynamic BalanceSheet for trend point ${mDateStr}`);
-        }
+      let mBsReport = null;
+      try {
+        mBsReport = await getStoredReport(mBsCacheKey, () => fetchXeroReport(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'BalanceSheet', `date=${mDateStr}`));
+      } catch (error) {
+        console.error(`Failed to fetch dynamic BalanceSheet for trend point ${mDateStr}:`, error);
+        if (postgresStorage) throw error;
       }
       
       const mEquity = mBsReport ? (BalanceSheetParser.findTotalEquity(mBsReport.Rows) || 0) : 0;
@@ -240,20 +259,51 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       connected: true,
+      available: true,
       summary: {
-        assets: assetsSum,
-        liabilities: liabilitiesSum,
-        equity: equitySum,
+        assets: sourceAssets ?? assetsSum,
+        liabilities: sourceLiabilities ?? liabilitiesSum,
+        equity: sourceEquity ?? equitySum,
         isBalanced,
-        difference: Math.round(difference * 100) / 100
+        difference: difference === null ? null : Math.round(difference * 100) / 100
+      },
+      balanceSummary: {
+        assets: sourceAssets,
+        liabilities: sourceLiabilities,
+        equity: sourceEquity,
+        isBalanced,
+        difference: difference === null ? null : Math.round(difference * 100) / 100,
+        reconciliation: difference === null ? 'unavailable' : isBalanced ? 'balanced' : 'unbalanced'
+      },
+      sourceSummary: {
+        assets: sourceAssets,
+        liabilities: sourceLiabilities,
+        equity: sourceEquity,
+        difference: difference === null ? null : Math.round(difference * 100) / 100,
+        isBalanced,
+        reconciliation: difference === null ? 'unavailable' : isBalanced ? 'balanced' : 'unbalanced',
+        workingCapital: {
+          cash: cashBalance,
+          receivables: receivablesBalance,
+          payables: payablesBalance,
+          currentAssets,
+          currentLiabilities,
+          netWorkingCapital: currentAssets !== null && currentLiabilities !== null ? currentAssets - currentLiabilities : null,
+          currentRatio: currentAssets !== null && currentLiabilities !== null && currentLiabilities !== 0 ? currentAssets / currentLiabilities : null,
+          receivablesToPayables: receivablesBalance !== null && payablesBalance !== null && payablesBalance !== 0 ? receivablesBalance / payablesBalance : null,
+          cashToPayables: cashBalance !== null && payablesBalance !== null && payablesBalance !== 0 ? cashBalance / payablesBalance : null
+        }
       },
       assets: parsed.assets,
       liabilities: parsed.liabilities,
       equity: parsed.equity,
+      unclassified: parsed.unclassified,
       equityTrend,
       meta: {
         currency: finalCurrency,
-        calculatedAt: new Date().toISOString()
+        calculatedAt: new Date().toISOString(),
+        asOfDate: date,
+        organizationName: org?.Name || org?.LegalName || org?.OrganisationName || null
       }
     });
 
