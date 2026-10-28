@@ -356,6 +356,18 @@ const initPgTables = async () => {
     `);
 
     await client.query(`
+      CREATE TABLE IF NOT EXISTS custom_budget_plans (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER NOT NULL,
+        plan_key VARCHAR(255) DEFAULT 'default_plan',
+        plan_data JSONB NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, plan_key)
+      );
+    `);
+
+    await client.query(`
       CREATE TABLE IF NOT EXISTS tax_cache (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -1498,6 +1510,7 @@ interface JsonSchema {
   contact_credit_limits?: any[];
   tenant_account_mappings?: any[];
   tenant_engine_settings?: any[];
+  custom_budget_plans?: any[];
 }
 
 const memoryDb: JsonSchema = {
@@ -1524,7 +1537,8 @@ const memoryDb: JsonSchema = {
   budgets_cache: [],
   tax_cache: [],
   gl_cache: [],
-  tax_transactions: []
+  tax_transactions: [],
+  custom_budget_plans: []
 };
 
 const readJsonDb = (): JsonSchema => memoryDb;
@@ -3938,5 +3952,108 @@ export const db = {
       writeJsonDb(json);
       return true;
     }
+  },
+
+  getCustomBudgetPlan: async (tenantId: number | string = 1, planKey = 'default_plan'): Promise<any | null> => {
+    const tid = typeof tenantId === 'string' ? parseInt(tenantId) || 1 : tenantId;
+    if (isPgConnected) {
+      try {
+        await pgPool.query(`
+          CREATE TABLE IF NOT EXISTS custom_budget_plans (
+            id SERIAL PRIMARY KEY,
+            tenant_id INTEGER NOT NULL,
+            plan_key VARCHAR(255) DEFAULT 'default_plan',
+            plan_data JSONB NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(tenant_id, plan_key)
+          );
+        `);
+        const { rows } = await pgPool.query(
+          'SELECT plan_data FROM custom_budget_plans WHERE tenant_id = $1 AND plan_key = $2',
+          [tid, planKey]
+        );
+        return rows[0]?.plan_data || null;
+      } catch (err: any) {
+        console.error('Failed to get custom budget plan in PG:', err.message);
+      }
+    }
+    const json: any = readJsonDb();
+    const found = (json.custom_budget_plans || []).find(
+      (p: any) => p.tenant_id === tid && p.plan_key === planKey
+    );
+    return found?.plan_data || null;
+  },
+
+  saveCustomBudgetPlan: async (tenantId: number | string = 1, planData: any, planKey = 'default_plan'): Promise<boolean> => {
+    const tid = typeof tenantId === 'string' ? parseInt(tenantId) || 1 : tenantId;
+    if (isPgConnected) {
+      try {
+        await pgPool.query(`
+          CREATE TABLE IF NOT EXISTS custom_budget_plans (
+            id SERIAL PRIMARY KEY,
+            tenant_id INTEGER NOT NULL,
+            plan_key VARCHAR(255) DEFAULT 'default_plan',
+            plan_data JSONB NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(tenant_id, plan_key)
+          );
+        `);
+        await pgPool.query(
+          `INSERT INTO custom_budget_plans (tenant_id, plan_key, plan_data, updated_at)
+           VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+           ON CONFLICT (tenant_id, plan_key)
+           DO UPDATE SET plan_data = EXCLUDED.plan_data, updated_at = CURRENT_TIMESTAMP`,
+          [tid, planKey, JSON.stringify(planData)]
+        );
+        return true;
+      } catch (err: any) {
+        console.error('Failed to save custom budget plan in PG:', err.message);
+      }
+    }
+    const json: any = readJsonDb();
+    if (!json.custom_budget_plans) json.custom_budget_plans = [];
+    const idx = json.custom_budget_plans.findIndex(
+      (p: any) => p.tenant_id === tid && p.plan_key === planKey
+    );
+    if (idx >= 0) {
+      json.custom_budget_plans[idx].plan_data = planData;
+      json.custom_budget_plans[idx].updated_at = new Date().toISOString();
+    } else {
+      json.custom_budget_plans.push({
+        id: json.custom_budget_plans.length + 1,
+        tenant_id: tid,
+        plan_key: planKey,
+        plan_data: planData,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      });
+    }
+    writeJsonDb(json);
+    return true;
+  },
+
+  deleteCustomBudgetPlan: async (tenantId: number | string = 1, planKey = 'default_plan'): Promise<boolean> => {
+    const tid = typeof tenantId === 'string' ? parseInt(tenantId) || 1 : tenantId;
+    if (isPgConnected) {
+      try {
+        await pgPool.query(
+          'DELETE FROM custom_budget_plans WHERE tenant_id = $1 AND plan_key = $2',
+          [tid, planKey]
+        );
+        return true;
+      } catch (err: any) {
+        console.error('Failed to delete custom budget plan in PG:', err.message);
+      }
+    }
+    const json: any = readJsonDb();
+    if (json.custom_budget_plans) {
+      json.custom_budget_plans = json.custom_budget_plans.filter(
+        (p: any) => !(p.tenant_id === tid && p.plan_key === planKey)
+      );
+      writeJsonDb(json);
+    }
+    return true;
   }
 };

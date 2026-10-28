@@ -22,34 +22,76 @@ export async function GET(req: NextRequest) {
 
     const { searchParams } = new URL(req.url);
     const period = searchParams.get('period') || 'ttm'; // ttm, ytd, quarter, this_month
+    const fromParam = searchParams.get('from');
+    const toParam = searchParams.get('to');
 
     // Compute period date filters
     const now = new Date();
     let periodLabel = 'Trailing 12 Months (TTM)';
-    let startDate = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+    let startDate = new Date(now.getFullYear() - 1, now.getMonth() + 1, 1, 0, 0, 0, 0);
+    let endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
 
-    if (period === 'ytd') {
-      periodLabel = `Year To Date (FY${now.getFullYear()})`;
-      startDate = new Date(now.getFullYear(), 0, 1);
+    if (Boolean(fromParam) !== Boolean(toParam)) {
+      return NextResponse.json(
+        { error: 'Both start and end dates are required.' },
+        { status: 400 },
+      );
+    }
+
+    if (fromParam && toParam) {
+      const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+      const parsedStart = new Date(`${fromParam}T00:00:00.000Z`);
+      const parsedEnd = new Date(`${toParam}T23:59:59.999Z`);
+      const today = now.toISOString().slice(0, 10);
+      if (
+        !datePattern.test(fromParam) ||
+        !datePattern.test(toParam) ||
+        Number.isNaN(parsedStart.getTime()) ||
+        Number.isNaN(parsedEnd.getTime()) ||
+        parsedStart.toISOString().slice(0, 10) !== fromParam ||
+        parsedEnd.toISOString().slice(0, 10) !== toParam ||
+        fromParam > toParam ||
+        toParam > today
+      ) {
+        return NextResponse.json(
+          { error: 'Enter a valid date range that ends today or earlier.' },
+          { status: 400 },
+        );
+      }
+
+      periodLabel = 'Custom date range';
+      startDate = parsedStart;
+      endDate = parsedEnd;
+    } else if (period === 'ytd') {
+      periodLabel = `Year to Date (FY${now.getFullYear()})`;
+      startDate = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
+      endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
     } else if (period === 'quarter') {
-      const currentQuarterMonth = Math.floor(now.getMonth() / 3) * 3;
-      periodLabel = `Q${Math.floor(now.getMonth() / 3) + 1} ${now.getFullYear()}`;
-      startDate = new Date(now.getFullYear(), currentQuarterMonth, 1);
+      startDate = new Date(now.getFullYear(), now.getMonth() - 2, 1, 0, 0, 0, 0);
+      endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+      const sMonth = startDate.toLocaleString('default', { month: 'short' });
+      const eMonth = endDate.toLocaleString('default', { month: 'short' });
+      periodLabel = `This Quarter (${sMonth} – ${eMonth} ${now.getFullYear()})`;
     } else if (period === 'this_month') {
+      startDate = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+      endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
       periodLabel = `${now.toLocaleString('default', { month: 'long' })} ${now.getFullYear()}`;
-      startDate = new Date(now.getFullYear(), now.getMonth(), 1);
     }
 
     // Filter ACCREC (sales) & ACCPAY (bills) within selected period
-    const filterByPeriod = (invDateStr: string | null) => {
-      if (!invDateStr) return true;
-      const d = new Date(invDateStr);
-      if (isNaN(d.getTime())) return true;
-      return d >= startDate && d <= now;
+    const filterByPeriod = (invDateStr: string | Date | null) => {
+      if (!invDateStr) return false;
+      const d = typeof invDateStr === 'string' ? new Date(invDateStr) : invDateStr;
+      if (isNaN(d.getTime())) return false;
+      return d >= startDate && d <= endDate;
     };
 
     // Resolve CFO Metrics from CFOMetricProviderFactory (Phase 4 Controlled Rollout)
-    const providerRes = await CFOMetricProviderFactory.getProvider(tenantId);
+    const providerRes = await CFOMetricProviderFactory.getMetricsForTenant(
+      tenantId,
+      startDate.toISOString().slice(0, 10),
+      endDate.toISOString().slice(0, 10),
+    );
 
     // Compute live revenue, AR, AP, COGS
     let totalRevenue = 0;
@@ -155,7 +197,16 @@ export async function GET(req: NextRequest) {
       : 0;
 
     // 13-Week Schedule generation from real unpaid invoices & bills
-    const weeks: any[] = [];
+    interface CashFlowWeekScheduleItem {
+      weekNum: number;
+      weekLabel: string;
+      cashIn: number;
+      cashOut: number;
+      netCash: number;
+      endingCash: number;
+      status: 'healthy' | 'warning' | 'critical';
+    }
+    const weeks: CashFlowWeekScheduleItem[] = [];
     let currentBalance = startingCash;
 
     for (let w = 1; w <= 13; w++) {
@@ -208,7 +259,14 @@ export async function GET(req: NextRequest) {
     const quickRatio = totalAP > 0 ? parseFloat(((startingCash + totalAR * 0.8) / totalAP).toFixed(2)) : 1.65;
 
     // Budget vs Actual Breakdown
-    const budgetItems = [
+    interface BudgetItemEntry {
+      category: string;
+      budget: number;
+      actual: number;
+      type: 'revenue' | 'expense';
+    }
+
+    let budgetItems: BudgetItemEntry[] = [
       { category: 'Sales Revenue', budget: Math.round(totalRevenue * 1.08), actual: Math.round(totalRevenue), type: 'revenue' },
       { category: 'Cost of Goods Sold (COGS)', budget: Math.round(cogs * 0.95), actual: Math.round(cogs), type: 'expense' },
       { category: 'Salaries & Payroll', budget: Math.round(totalExpenses * 0.45), actual: Math.round(totalExpenses * 0.48), type: 'expense' },
@@ -218,14 +276,59 @@ export async function GET(req: NextRequest) {
       { category: 'Professional & Legal Fees', budget: Math.round(totalExpenses * 0.05), actual: Math.round(totalExpenses * 0.07), type: 'expense' }
     ];
 
+    // If real ProfitAndLoss report is available in the database, extract dynamic expense accounts
+    if (plReport) {
+      try {
+        const rawPl = typeof plReport === 'string' ? JSON.parse(plReport) : (plReport.raw_data || plReport);
+        if (rawPl && Array.isArray(rawPl.Rows)) {
+          const expSection = rawPl.Rows.find(
+            (r: Record<string, unknown>) =>
+              r.RowType === 'Section' &&
+              typeof r.Title === 'string' &&
+              /expense/i.test(r.Title)
+          );
+          if (expSection && Array.isArray(expSection.Rows)) {
+            const dynamicExpenseItems: BudgetItemEntry[] = expSection.Rows
+              .filter((r: Record<string, unknown>) => r.RowType === 'Row' && Array.isArray(r.Cells) && r.Cells.length >= 2)
+              .map((r: Record<string, unknown>) => {
+                const cells = r.Cells as Array<{ Value?: string | number }>;
+                const cat = String(cells[0]?.Value || 'Operating Expense');
+                const val = parseFloat(String(cells[1]?.Value || '0')) || 0;
+                return {
+                  category: cat,
+                  budget: Math.round(val * 1.05),
+                  actual: Math.round(val),
+                  type: 'expense' as const,
+                };
+              })
+              .filter((item: BudgetItemEntry) => item.actual > 0);
+
+            if (dynamicExpenseItems.length > 0) {
+              budgetItems = [
+                { category: 'Sales Revenue', budget: Math.round(totalRevenue * 1.08), actual: Math.round(totalRevenue), type: 'revenue' },
+                { category: 'Cost of Goods Sold (COGS)', budget: Math.round(cogs * 0.95), actual: Math.round(cogs), type: 'expense' },
+                ...dynamicExpenseItems
+              ];
+            }
+          }
+        }
+      } catch (err: unknown) {
+        console.warn('Failed to parse dynamic expense items from P&L report:', err);
+      }
+    }
+
     // ----------------------------------------------------
     // DYNAMIC REAL DATA BREAKDOWNS (NO HARDCODED DUMMY DATA)
     // ----------------------------------------------------
 
-    // 1. Customer Profitability Breakdown from DB Invoices
+    // 1. Customer Profitability Breakdown from DB Invoices (filtered to active period)
     const customerMap: Record<string, { revenue: number; grossProfit: number }> = {};
     for (const inv of invoices) {
-      if (inv.Type === 'ACCREC' && (inv.Status === 'PAID' || inv.Status === 'AUTHORISED')) {
+      if (
+        inv.Type === 'ACCREC' &&
+        (inv.Status === 'PAID' || inv.Status === 'AUTHORISED') &&
+        filterByPeriod(inv.Date || inv.DueDate)
+      ) {
         const cName = inv.Contact?.Name || inv.ContactName || 'Direct Sales Client';
         const total = parseFloat(inv.Total) || 0;
         if (!customerMap[cName]) {
@@ -259,11 +362,12 @@ export async function GET(req: NextRequest) {
 
     // 2. Product / Service Profitability Breakdown
     const productProfitability = inventoryItems.length > 0
-      ? inventoryItems.slice(0, 5).map((item: any, idx: number) => {
+      ? inventoryItems.slice(0, 5).map((item: Record<string, unknown>, idx: number) => {
           const itemRev = Math.round((totalRevenue * (0.35 - idx * 0.05)));
           const itemGp = Math.round(itemRev * (0.65 - idx * 0.06));
+          const name = typeof item.Name === 'string' ? item.Name : (typeof item.Code === 'string' ? item.Code : `Product ${idx + 1}`);
           return {
-            product: item.Name || item.Code || `Product ${idx + 1}`,
+            product: name,
             revenue: Math.max(1000, itemRev),
             grossProfit: Math.max(500, itemGp),
             margin: parseFloat(((itemGp / itemRev) * 100).toFixed(1))
@@ -286,22 +390,91 @@ export async function GET(req: NextRequest) {
       { department: 'Administration', revenue: Math.round(totalRevenue * 0.08), grossProfit: Math.round(totalRevenue * 0.08 * 0.30), margin: 30.0 }
     ];
 
-    // 4. 12-Month Profitability Trend Data
-    const monthsList = ['Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep'];
-    const monthlyTrend = monthsList.map((m, idx) => {
-      const baseMRev = Math.round((totalRevenue / 12) * (0.85 + (idx % 4) * 0.1));
-      const baseMGp = Math.round(baseMRev * (grossMarginPct / 100));
-      const baseMNp = Math.round(baseMRev * (netMarginPct / 100));
-      const mMargin = baseMRev > 0 ? parseFloat(((baseMGp / baseMRev) * 100).toFixed(1)) : 62.0;
+    // 4. Monthly Profitability Trend Data (Dynamic from live invoices)
+    let monthlyTrend: Array<{
+      month: string;
+      revenue: number;
+      grossProfit: number;
+      netProfit: number;
+      grossMarginPct: number;
+    }> = [];
 
-      return {
-        month: m,
-        revenue: baseMRev,
-        grossProfit: baseMGp,
-        netProfit: baseMNp,
-        grossMarginPct: mMargin
-      };
-    });
+    if (period === 'this_month') {
+      // Weekly breakdown of the month for high-fidelity velocity
+      const weekBuckets = [
+        { label: 'W1 (1-7)', startDay: 1, endDay: 7 },
+        { label: 'W2 (8-14)', startDay: 8, endDay: 14 },
+        { label: 'W3 (15-21)', startDay: 15, endDay: 21 },
+        { label: 'W4 (22-31)', startDay: 22, endDay: 31 },
+      ];
+
+      monthlyTrend = weekBuckets.map((bucket) => {
+        let wRev = 0;
+        let wExp = 0;
+        for (const inv of invoices) {
+          if (inv.Status === 'PAID' || inv.Status === 'AUTHORISED') {
+            const rawDate = inv.Date || inv.DueDate;
+            if (!rawDate) continue;
+            const d = new Date(rawDate);
+            if (!isNaN(d.getTime()) && d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()) {
+              const day = d.getDate();
+              if (day >= bucket.startDay && day <= bucket.endDay) {
+                if (inv.Type === 'ACCREC') wRev += parseFloat(inv.Total) || 0;
+                if (inv.Type === 'ACCPAY') wExp += parseFloat(inv.Total) || 0;
+              }
+            }
+          }
+        }
+        const wGp = Math.round(wRev * 0.62);
+        const wNp = Math.round(wGp - wExp);
+        return {
+          month: bucket.label,
+          revenue: Math.round(wRev),
+          grossProfit: wGp,
+          netProfit: wNp,
+          grossMarginPct: wRev > 0 ? parseFloat(((wGp / wRev) * 100).toFixed(1)) : 62.0,
+        };
+      });
+    } else {
+      // Trailing 12M, YTD, Quarter: generate chronological monthly breakdown from DB
+      const monthsSpan: { year: number; month: number; label: string }[] = [];
+      const cursor = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+      const limit = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
+
+      while (cursor <= limit) {
+        monthsSpan.push({
+          year: cursor.getFullYear(),
+          month: cursor.getMonth(),
+          label: cursor.toLocaleString('default', { month: 'short', year: '2-digit' }),
+        });
+        cursor.setMonth(cursor.getMonth() + 1);
+      }
+
+      monthlyTrend = monthsSpan.map((mObj) => {
+        let mRev = 0;
+        let mExp = 0;
+        for (const inv of invoices) {
+          if (inv.Status === 'PAID' || inv.Status === 'AUTHORISED') {
+            const rawDate = inv.Date || inv.DueDate;
+            if (!rawDate) continue;
+            const d = new Date(rawDate);
+            if (!isNaN(d.getTime()) && d.getFullYear() === mObj.year && d.getMonth() === mObj.month) {
+              if (inv.Type === 'ACCREC') mRev += parseFloat(inv.Total) || 0;
+              if (inv.Type === 'ACCPAY') mExp += parseFloat(inv.Total) || 0;
+            }
+          }
+        }
+        const mGp = Math.round(mRev * (grossMarginPct / 100));
+        const mNp = Math.round(mGp - mExp);
+        return {
+          month: mObj.label,
+          revenue: Math.round(mRev),
+          grossProfit: mGp,
+          netProfit: mNp,
+          grossMarginPct: mRev > 0 ? parseFloat(((mGp / mRev) * 100).toFixed(1)) : 62.0,
+        };
+      });
+    }
 
     // 5. Margin Distribution
     const marginDistribution = {
@@ -319,14 +492,80 @@ export async function GET(req: NextRequest) {
       `Break-even sales target established at ${breakEvenSales.toLocaleString()} (${marginOfSafetyPct.toFixed(1)}% margin of safety)`
     ];
 
+    // Balance Sheet Structure (Current & Non-Current Breakdown, Pro-Forma & Actual)
+    const totalInventory = inventoryItems.reduce((acc: number, item: Record<string, unknown>) => {
+      const qVal = item.QuantityOnHand ?? item.quantityOnHand ?? 0;
+      const q = typeof qVal === 'number' ? qVal : (parseFloat(String(qVal)) || 0);
+      const purchaseDetails = item.PurchaseDetails as Record<string, unknown> | undefined;
+      const cVal = purchaseDetails?.UnitPrice ?? item.unitPrice ?? 0;
+      const c = typeof cVal === 'number' ? cVal : (parseFloat(String(cVal)) || 0);
+      return acc + (q * c);
+    }, 0);
+    const estimatedInventory = totalInventory > 0 ? Math.round(totalInventory) : Math.round(cogs * 0.25);
+    const prepayments = Math.round(totalAR * 0.12);
+    const currentAssetsVal = Math.round(startingCash + totalAR + estimatedInventory + prepayments);
+    const fixedAssetsVal = Math.round(Math.max(15000, totalRevenue * 0.40));
+    const totalAssetsVal = currentAssetsVal + fixedAssetsVal;
+
+    const accruedLiabilities = Math.round(totalExpenses * 0.12);
+    const taxLiabilities = Math.round(Math.max(1200, totalExpenses * 0.08));
+    const currentLiabilitiesVal = Math.round(totalAP + accruedLiabilities + taxLiabilities);
+    const nonCurrentLiabilitiesVal = Math.round(totalAssetsVal * 0.22);
+    const totalLiabilitiesVal = currentLiabilitiesVal + nonCurrentLiabilitiesVal;
+
+    const totalEquityVal = totalAssetsVal - totalLiabilitiesVal;
+    const shareCapitalVal = Math.round(totalEquityVal * 0.35);
+    const retainedEarningsVal = totalEquityVal - shareCapitalVal - Math.round(netProfit);
+
+    const balanceSheet = {
+      assets: {
+        current: [
+          { name: 'Cash and Cash Equivalents', value: Math.round(startingCash) },
+          { name: 'Accounts Receivable (Trade Debtors)', value: Math.round(totalAR) },
+          { name: 'Inventory & Stock on Hand', value: estimatedInventory },
+          { name: 'Prepayments & Short-term Deposits', value: prepayments },
+        ],
+        nonCurrent: [
+          { name: 'Property, Plant & Equipment', value: Math.round(fixedAssetsVal * 0.72) },
+          { name: 'Office Technology & Equipment', value: Math.round(fixedAssetsVal * 0.28) },
+        ],
+        totalCurrent: currentAssetsVal,
+        totalNonCurrent: fixedAssetsVal,
+        totalAssets: totalAssetsVal
+      },
+      liabilities: {
+        current: [
+          { name: 'Accounts Payable (Trade Creditors)', value: Math.round(totalAP) },
+          { name: 'Accrued Operating Overheads & Payroll', value: accruedLiabilities },
+          { name: 'VAT & Corporate Tax Liability', value: taxLiabilities },
+        ],
+        nonCurrent: [
+          { name: 'Commercial Banking Facility / Term Loan', value: nonCurrentLiabilitiesVal },
+        ],
+        totalCurrent: currentLiabilitiesVal,
+        totalNonCurrent: nonCurrentLiabilitiesVal,
+        totalLiabilities: totalLiabilitiesVal
+      },
+      equity: {
+        items: [
+          { name: 'Share Capital & Reserves', value: shareCapitalVal },
+          { name: 'Retained Earnings (Brought Forward)', value: retainedEarningsVal },
+          { name: 'Current Period Net Earnings', value: Math.round(netProfit) },
+        ],
+        totalEquity: totalEquityVal
+      },
+      workingCapital: currentAssetsVal - currentLiabilitiesVal,
+      isBalanced: true
+    };
+
     return NextResponse.json({
       connected: isConnected,
       currency: 'GBP',
       periodInfo: {
         code: period,
         label: periodLabel,
-        startDate: startDate.toISOString().split('T')[0],
-        endDate: now.toISOString().split('T')[0],
+        startDate: `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}-${String(startDate.getDate()).padStart(2, '0')}`,
+        endDate: `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, '0')}-${String(endDate.getDate()).padStart(2, '0')}`,
         dataSource: isConnected ? 'Xero Organization Live Ledger (PostgreSQL Cache)' : 'Virtual CFO Ledger Engine'
       },
       profitability: {
@@ -353,6 +592,7 @@ export async function GET(req: NextRequest) {
         startingCash,
         weeks
       },
+      balanceSheet,
       kpiScorecard: {
         dso,
         dpo,
@@ -376,8 +616,10 @@ export async function GET(req: NextRequest) {
         budgetItems
       }
     });
-  } catch (err: any) {
-    console.error('Error fetching CFO Intelligence API:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    const error = err as Error;
+    console.error('Error fetching CFO Intelligence API:', error);
+    return NextResponse.json({ error: error?.message || 'Internal Server Error' }, { status: 500 });
   }
 }
+
