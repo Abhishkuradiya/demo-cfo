@@ -15,13 +15,14 @@ export function verifyPassword(password: string, stored: string): boolean {
 export async function POST(req: Request) {
   try {
     const { email, password } = await req.json();
+    const cleanEmail = typeof email === 'string' ? email.trim() : '';
 
-    if (!email || !password) {
+    if (!cleanEmail || !password) {
       return NextResponse.json({ success: false, message: 'Email and password are required' }, { status: 400 });
     }
 
     // 1. Fetch user by email
-    const user = await db.getUserByEmail(email);
+    const user = await db.getUserByEmail(cleanEmail);
     if (!user) {
       return NextResponse.json({ success: false, message: 'Invalid email or password' }, { status: 401 });
     }
