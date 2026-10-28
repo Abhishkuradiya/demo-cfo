@@ -4203,6 +4203,25 @@ export const db = {
     return true;
   },
 
+  listCustomBudgetPlans: async (tenantId: number | string = 1): Promise<{ planKey: string; updatedAt: string }[]> => {
+    const tid = typeof tenantId === 'string' ? parseInt(tenantId) || 1 : tenantId;
+    if (isPgConnected) {
+      try {
+        const { rows } = await pgPool.query(
+          'SELECT plan_key, updated_at FROM custom_budget_plans WHERE tenant_id = $1 ORDER BY plan_key ASC',
+          [tid]
+        );
+        return rows.map((r: any) => ({ planKey: r.plan_key, updatedAt: r.updated_at }));
+      } catch (err: any) {
+        console.error('Failed to list custom budget plans in PG:', err.message);
+      }
+    }
+    const json: any = readJsonDb();
+    return (json.custom_budget_plans || [])
+      .filter((p: any) => p.tenant_id === tid)
+      .map((p: any) => ({ planKey: p.plan_key, updatedAt: p.updated_at }));
+  },
+
   deleteCustomBudgetPlan: async (tenantId: number | string = 1, planKey = 'default_plan'): Promise<boolean> => {
     const tid = typeof tenantId === 'string' ? parseInt(tenantId) || 1 : tenantId;
     if (isPgConnected) {

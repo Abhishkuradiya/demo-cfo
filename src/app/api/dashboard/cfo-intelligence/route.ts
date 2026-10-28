@@ -274,7 +274,7 @@ export async function GET(req: NextRequest) {
       { category: 'Software & Cloud Infrastructure', budget: Math.round(totalExpenses * 0.10), actual: Math.round(totalExpenses * 0.12), type: 'expense' },
       { category: 'Office Rent & Facilities', budget: Math.round(totalExpenses * 0.12), actual: Math.round(totalExpenses * 0.12), type: 'expense' },
       { category: 'Professional & Legal Fees', budget: Math.round(totalExpenses * 0.05), actual: Math.round(totalExpenses * 0.07), type: 'expense' }
-    ];
+    ].filter((item) => Math.abs(item.actual) > 0 || Math.abs(item.budget) > 0);
 
     // If real ProfitAndLoss report is available in the database, extract dynamic expense accounts
     if (plReport) {
@@ -301,14 +301,20 @@ export async function GET(req: NextRequest) {
                   type: 'expense' as const,
                 };
               })
-              .filter((item: BudgetItemEntry) => item.actual > 0);
+              .filter((item: BudgetItemEntry) => Math.abs(item.actual) > 0 || Math.abs(item.budget) > 0);
 
             if (dynamicExpenseItems.length > 0) {
+              const baseItems: BudgetItemEntry[] = [];
+              if (Math.abs(totalRevenue) > 0) {
+                baseItems.push({ category: 'Sales Revenue', budget: Math.round(totalRevenue * 1.08), actual: Math.round(totalRevenue), type: 'revenue' });
+              }
+              if (Math.abs(cogs) > 0) {
+                baseItems.push({ category: 'Cost of Goods Sold (COGS)', budget: Math.round(cogs * 0.95), actual: Math.round(cogs), type: 'expense' });
+              }
               budgetItems = [
-                { category: 'Sales Revenue', budget: Math.round(totalRevenue * 1.08), actual: Math.round(totalRevenue), type: 'revenue' },
-                { category: 'Cost of Goods Sold (COGS)', budget: Math.round(cogs * 0.95), actual: Math.round(cogs), type: 'expense' },
+                ...baseItems,
                 ...dynamicExpenseItems
-              ];
+              ].filter((item) => Math.abs(item.actual) > 0 || Math.abs(item.budget) > 0);
             }
           }
         }

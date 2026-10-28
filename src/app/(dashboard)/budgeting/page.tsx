@@ -1,14 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import * as echarts from 'echarts';
 import {
   Activity,
   ArrowDownRight,
   ArrowUpDown,
   ArrowUpRight,
-  Building,
-  CheckCircle2,
   CircleAlert,
   CircleCheck,
   Coins,
@@ -18,15 +17,12 @@ import {
   FileSpreadsheet,
   FileText,
   Landmark,
-  Layers,
+  LineChart,
   Loader2,
   RefreshCw,
-  Scale,
   ShieldCheck,
   SlidersHorizontal,
   Target,
-  TrendingDown,
-  TrendingUp,
   Wallet,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -217,9 +213,9 @@ function MetricCard({
 export default function BudgetingPage() {
   const setSidebarCollapsed = useSidebarStore((state) => state.setCollapsed);
   const [period, setPeriod] = useState<Period>('ttm');
-  const [scenario, setScenario] = useState<ScenarioType>('average');
+  const [scenario] = useState<ScenarioType>('average');
   const activeScenarioConfig = SCENARIOS[scenario];
-  const [statementView, setStatementView] = useState<'pnl' | 'cashflow' | 'balancesheet'>('pnl');
+  const [statementView, setStatementView] = useState<'pnl' | 'cashflow'>('pnl');
   const [data, setData] = useState<IntelligenceResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -241,6 +237,9 @@ export default function BudgetingPage() {
   const [hasCustomizedPlan, setHasCustomizedPlan] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [dbSavedAt, setDbSavedAt] = useState<string | null>(null);
+  const currentSystemYear = new Date().getFullYear();
+  const [budgetYear, setBudgetYear] = useState<number>(2026);
+  const [availableYears, setAvailableYears] = useState<number[]>([2025, 2026, 2027]);
   const revenueChartRef = useRef<HTMLDivElement>(null);
   const budgetChartRef = useRef<HTMLDivElement>(null);
   const cashFlowChartRef = useRef<HTMLDivElement>(null);
@@ -274,11 +273,38 @@ export default function BudgetingPage() {
     setHasCustomizedPlan(true);
   }, []);
 
+  const addNewPlanningYear = () => {
+    const nextYear = Math.max(...availableYears) + 1;
+    setAvailableYears((prev) => [...prev, nextYear].sort((a, b) => a - b));
+    setBudgetYear(nextYear);
+    toast.success(`Initialized planning workspace for FY ${nextYear}.`);
+  };
+
+  const copyPreviousYearBudget = () => {
+    const prevYear = budgetYear - 1;
+    const prevSaved =
+      window.localStorage.getItem(`virtual-cfo-budget-plans-${prevYear}`) ||
+      (prevYear === 2026 ? window.localStorage.getItem('virtual-cfo-budget-plans') : null);
+
+    if (prevSaved) {
+      try {
+        const parsed = JSON.parse(prevSaved);
+        applyPlanData(parsed);
+        toast.success(`Copied baseline plan from FY ${prevYear} into FY ${budgetYear}!`);
+        return;
+      } catch {
+        // ignore
+      }
+    }
+    toast.info(`No custom saved plan found for FY ${prevYear}; using standard baseline.`);
+  };
+
+  // Fetch plan when budgetYear changes
   useEffect(() => {
     let isMounted = true;
     const fetchBudgetPlan = async () => {
       try {
-        const res = await fetch('/api/dashboard/budget-plans', { cache: 'no-store' });
+        const res = await fetch(`/api/dashboard/budget-plans?year=${budgetYear}`, { cache: 'no-store' });
         if (res.ok) {
           const json = await res.json();
           if (json?.success && json?.plan) {
@@ -292,18 +318,29 @@ export default function BudgetingPage() {
           }
         }
       } catch (err) {
-        console.warn('Could not fetch custom plan from database, checking local fallback', err);
+        console.warn(`Could not fetch custom plan for FY ${budgetYear} from database`, err);
       }
 
       // Fallback to local storage if database hasn't stored one or network is offline
       try {
-        const saved = window.localStorage.getItem('virtual-cfo-budget-plans');
+        const saved =
+          window.localStorage.getItem(`virtual-cfo-budget-plans-${budgetYear}`) ||
+          (budgetYear === 2026 ? window.localStorage.getItem('virtual-cfo-budget-plans') : null);
         if (saved && isMounted) {
           const parsed = JSON.parse(saved);
           applyPlanData(parsed);
+          return;
         }
       } catch {
         // ignore
+      }
+
+      if (isMounted) {
+        // Reset to default benchmarks for this specific year if no custom plan exists
+        setDbSavedAt(null);
+        setHasCustomizedPlan(false);
+        setMonthlyByMonth({});
+        setBudgetPlans({});
       }
     };
 
@@ -311,7 +348,32 @@ export default function BudgetingPage() {
     return () => {
       isMounted = false;
     };
-  }, [applyPlanData]);
+  }, [applyPlanData, budgetYear]);
+
+  // Load available saved years on initial mount
+  useEffect(() => {
+    let isMounted = true;
+    const fetchSavedYears = async () => {
+      try {
+        const res = await fetch('/api/dashboard/budget-plans?action=list', { cache: 'no-store' });
+        if (res.ok) {
+          const json = await res.json();
+          if (json?.years && Array.isArray(json.years) && json.years.length > 0 && isMounted) {
+            setAvailableYears((prev) => {
+              const merged = Array.from(new Set([...prev, ...json.years])).sort((a, b) => a - b);
+              return merged;
+            });
+          }
+        }
+      } catch (err) {
+        console.warn('Could not load saved budget years:', err);
+      }
+    };
+    fetchSavedYears();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     setSidebarCollapsed(false);
@@ -447,7 +509,8 @@ export default function BudgetingPage() {
           budget: Math.round(baseBudget * multiplier),
           target: Math.round(baseTarget * multiplier),
         };
-      }),
+      })
+      .filter((item) => Math.abs(item.actual) > 0 || Math.abs(item.budget) > 0),
     [
       budgetItems,
       budgetPlans,
@@ -520,7 +583,13 @@ export default function BudgetingPage() {
         rawTarget,
         scaledActual,
       };
-    });
+    })
+    .filter(
+      (item) =>
+        Math.abs(item.scaledActual) > 0 ||
+        Math.abs(item.rawBudget) > 0 ||
+        Math.abs(item.rawTarget) > 0,
+    );
   }, [
     budgetItems,
     monthlyByMonth,
@@ -950,13 +1019,13 @@ export default function BudgetingPage() {
       });
       setHasCustomizedPlan(true);
 
-      // 1. Save directly to Database
+      // 1. Save directly to Database with fiscal year
       let savedToDb = false;
       try {
         const response = await fetch('/api/dashboard/budget-plans', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ plan: completeStorage }),
+          body: JSON.stringify({ year: budgetYear, plan: completeStorage }),
         });
         if (response.ok) {
           const resData = await response.json();
@@ -969,19 +1038,22 @@ export default function BudgetingPage() {
         console.error('Failed to save budget plan to database:', dbErr);
       }
 
-      // 2. Keep localStorage as offline/instant client backup
+      // 2. Keep localStorage as offline backup for this specific year
       try {
-        window.localStorage.setItem('virtual-cfo-budget-plans', JSON.stringify(completeStorage));
+        window.localStorage.setItem(
+          `virtual-cfo-budget-plans-${budgetYear}`,
+          JSON.stringify(completeStorage),
+        );
       } catch {
         // ignore
       }
 
       if (savedToDb) {
         toast.success(
-          '12-month budget saved to database! All 12 months, Q1–Q4 quarterly totals, and Annual sum have been synchronized.',
+          `FY ${budgetYear} budget plan saved to database! All 12 months, Q1–Q4 quarterly totals, and Annual sum synchronized.`,
         );
       } else {
-        toast.success('12-month budget saved locally. (Database sync pending)');
+        toast.success(`FY ${budgetYear} budget saved locally. (Database sync pending)`);
       }
     } catch {
       toast.error('Unable to save the budget plan.');
@@ -991,9 +1063,9 @@ export default function BudgetingPage() {
   };
 
   const resetBudgetPlan = async () => {
-    // Delete from Database
+    // Delete from Database for this year
     try {
-      await fetch('/api/dashboard/budget-plans', {
+      await fetch(`/api/dashboard/budget-plans?year=${budgetYear}`, {
         method: 'DELETE',
       });
     } catch (err) {
@@ -1001,7 +1073,7 @@ export default function BudgetingPage() {
     }
 
     try {
-      window.localStorage.removeItem('virtual-cfo-budget-plans');
+      window.localStorage.removeItem(`virtual-cfo-budget-plans-${budgetYear}`);
     } catch {
       // ignore storage error
     }
@@ -1023,7 +1095,7 @@ export default function BudgetingPage() {
       resetPlans[horizon] = horizonPlan;
     });
     setBudgetPlans(resetPlans);
-    toast.success('Budget plan reset from database and restored to default benchmarks.');
+    toast.success(`FY ${budgetYear} budget plan reset to default benchmarks.`);
   };
 
   const watchlist = useMemo(
@@ -1040,45 +1112,6 @@ export default function BudgetingPage() {
         .slice(0, 3),
     [effectiveBudgetItems],
   );
-
-  const scenarioMatrix = useMemo(() => {
-    const revItems = budgetItems.filter((i) => i.type === 'revenue');
-    const expItems = budgetItems.filter((i) => i.type === 'expense');
-
-    const baseRev =
-      actualRevenue > 0
-        ? actualRevenue
-        : revItems.length > 0
-          ? revItems.reduce((s, i) => s + i.actual, 0)
-          : (data?.budgeting?.revBudget ?? 770000);
-
-    const baseCost =
-      (profitability?.opexFixed ?? 0) +
-        (profitability?.opexVariable ?? 0) +
-        (profitability?.cogs ?? 0) ||
-      (expItems.length > 0
-        ? expItems.reduce((s, i) => s + i.actual, 0)
-        : (data?.budgeting?.expBudget ?? 552000));
-
-    const baseProfit = baseRev - baseCost;
-
-    return (['worst', 'average', 'best'] as const).map((key) => {
-      const cfg = SCENARIOS[key];
-      const projRev = Math.round(baseRev * cfg.revMultiplier);
-      const projCost = Math.round(baseCost * cfg.costMultiplier);
-      const projProfit = projRev - projCost;
-      const marginPct = projRev > 0 ? (projProfit / projRev) * 100 : 0;
-      const deltaProfit = projProfit - baseProfit;
-      return {
-        ...cfg,
-        projRev,
-        projCost,
-        projProfit,
-        marginPct,
-        deltaProfit,
-      };
-    });
-  }, [actualRevenue, budgetItems, data?.budgeting, profitability]);
 
   useEffect(() => {
     if (statementView !== 'pnl' || !profitability) return;
@@ -1164,6 +1197,7 @@ export default function BudgetingPage() {
             tooltip: {
               trigger: 'axis',
               axisPointer: { type: 'shadow' },
+              confine: true,
               valueFormatter: (value: number) => formatMoney.format(value),
             },
             legend: {
@@ -1539,46 +1573,12 @@ export default function BudgetingPage() {
 
       {data?.connected && profitability && !isLoading && (
         <>
-          {/* Control Bar: Scenarios & Periods */}
+          {/* Control Bar: Budgeting & Period Controls */}
           <section
             aria-label="Dashboard controls"
             className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-xs"
           >
             <div className="flex flex-wrap items-center justify-between gap-3">
-              {/* Scenario selector */}
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-semibold text-slate-600">Scenario:</span>
-                <div className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-100/90 p-1">
-                  {(['average', 'best', 'worst'] as const).map((scKey) => {
-                    const sc = SCENARIOS[scKey];
-                    const isActive = scenario === scKey;
-                    return (
-                      <button
-                        key={scKey}
-                        type="button"
-                        onClick={() => setScenario(scKey)}
-                        aria-pressed={isActive}
-                        className={cn(
-                          'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-600',
-                          isActive
-                            ? scKey === 'best'
-                              ? 'bg-emerald-600 font-semibold text-white shadow-xs'
-                              : scKey === 'worst'
-                                ? 'bg-rose-600 font-semibold text-white shadow-xs'
-                                : 'bg-slate-900 font-semibold text-white shadow-xs'
-                            : 'text-slate-600 hover:bg-white hover:text-slate-900',
-                        )}
-                      >
-                        {scKey === 'best' && <TrendingUp className="h-3 w-3" />}
-                        {scKey === 'worst' && <TrendingDown className="h-3 w-3" />}
-                        {scKey === 'average' && <SlidersHorizontal className="h-3 w-3" />}
-                        {sc.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
               {/* Period selector */}
               <div className="flex items-center gap-2">
                 <span className="text-[11px] font-semibold text-slate-600">Period:</span>
@@ -1590,7 +1590,7 @@ export default function BudgetingPage() {
                       onClick={() => handlePeriodChange(option.code)}
                       aria-pressed={period === option.code}
                       className={cn(
-                        'rounded-md px-2.5 py-1 text-[11px] font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900',
+                        'rounded-md px-2.5 py-1 text-[11px] font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900 cursor-pointer',
                         period === option.code
                           ? 'bg-slate-900 font-semibold text-white shadow-xs'
                           : 'text-slate-600 hover:bg-white hover:text-slate-900',
@@ -1600,6 +1600,18 @@ export default function BudgetingPage() {
                     </button>
                   ))}
                 </div>
+              </div>
+
+              {/* Dedicated Forecast Link Button */}
+              <div className="flex items-center gap-2">
+                <Link
+                  href="/forecast"
+                  className="inline-flex items-center gap-1.5 rounded-md border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-700 hover:bg-sky-100 transition-colors shadow-2xs"
+                  title="Open forward 12-month predictive modeling and sensitivity stress tests"
+                >
+                  <LineChart className="h-3.5 w-3.5 text-sky-600" />
+                  <span>Forecast &amp; Scenarios Cockpit &rarr;</span>
+                </Link>
               </div>
             </div>
           </section>
@@ -1653,30 +1665,8 @@ export default function BudgetingPage() {
                       statementView === 'cashflow' ? 'text-white' : 'text-emerald-600',
                     )}
                   />
-                  <span>Cash Flow (13-Week)</span>
+                  <span>Budgeted Cashflow</span>
                   {statementView === 'cashflow' && (
-                    <span className="ml-0.5 h-1.5 w-1.5 rounded-full bg-white shadow-xs" />
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setStatementView('balancesheet')}
-                  aria-pressed={statementView === 'balancesheet'}
-                  className={cn(
-                    'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600',
-                    statementView === 'balancesheet'
-                      ? 'bg-indigo-600 font-semibold text-white shadow-sm ring-1 ring-indigo-700/20'
-                      : 'text-slate-600 hover:bg-white hover:text-slate-900',
-                  )}
-                >
-                  <Scale
-                    className={cn(
-                      'h-3.5 w-3.5 transition-colors',
-                      statementView === 'balancesheet' ? 'text-white' : 'text-indigo-600',
-                    )}
-                  />
-                  <span>Balance Sheet &amp; Working Capital</span>
-                  {statementView === 'balancesheet' && (
                     <span className="ml-0.5 h-1.5 w-1.5 rounded-full bg-white shadow-xs" />
                   )}
                 </button>
@@ -1684,13 +1674,9 @@ export default function BudgetingPage() {
             </div>
             <div className="flex items-center gap-2 text-[10px] text-slate-500">
               <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
-              <span className="font-medium text-slate-600">Full 3-Statement Dynamic Model</span>
+              <span className="font-medium text-slate-600">Budgeted Financial Statements</span>
               <span className="hidden sm:inline-block rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[9px] font-semibold text-slate-600">
-                {statementView === 'pnl'
-                  ? 'P&L Active'
-                  : statementView === 'cashflow'
-                    ? 'Cash Flow Active'
-                    : 'Balance Sheet Active'}
+                {statementView === 'pnl' ? 'P&L Active' : 'Cashflow Active'}
               </span>
             </div>
           </section>
@@ -1702,7 +1688,7 @@ export default function BudgetingPage() {
                 <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-3">
                   <div>
                     <div className="flex items-center gap-2">
-                      <h2 className="text-xs font-semibold text-slate-900">Plan &amp; targets</h2>
+                      <h2 className="text-xs font-semibold text-slate-900">Plan &amp; targets (FY {budgetYear})</h2>
                       <span
                         className={cn(
                           'rounded-full px-2 py-0.5 text-[9px] font-semibold border inline-flex items-center gap-1',
@@ -1714,10 +1700,10 @@ export default function BudgetingPage() {
                         {hasCustomizedPlan ? (
                           <>
                             <Database className="h-2.5 w-2.5 text-sky-600" />
-                            <span>Custom Plan Active {dbSavedAt ? '(DB Synced)' : ''}</span>
+                            <span>Custom Plan Active (FY {budgetYear}) {dbSavedAt ? '(DB Synced)' : ''}</span>
                           </>
                         ) : (
-                          'Default Benchmarks'
+                          `Default Benchmarks (FY ${budgetYear})`
                         )}
                       </span>
                     </div>
@@ -1742,6 +1728,57 @@ export default function BudgetingPage() {
                 </div>
                 {plannerOpen && (
                   <div className="border-t border-slate-200">
+                    {/* Financial Year Selector Toolbar */}
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-slate-50/60 px-3 py-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                          Financial Year:
+                        </span>
+                        <div className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white p-0.5 shadow-2xs">
+                          {availableYears.map((yr) => (
+                            <button
+                              key={yr}
+                              type="button"
+                              onClick={() => setBudgetYear(yr)}
+                              className={cn(
+                                'rounded px-2.5 py-1 text-[11px] font-semibold transition-all cursor-pointer',
+                                budgetYear === yr
+                                  ? 'bg-sky-600 text-white shadow-xs'
+                                  : 'text-slate-600 hover:bg-slate-100',
+                              )}
+                            >
+                              FY {yr} {yr === currentSystemYear ? '(Active)' : yr < currentSystemYear ? '(Past)' : '(Draft)'}
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={addNewPlanningYear}
+                            className="rounded px-2 py-1 text-[10px] font-semibold text-sky-700 hover:bg-sky-50 transition cursor-pointer"
+                            title="Add next financial year"
+                          >
+                            + Add Year
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {budgetYear > 2025 && (
+                          <button
+                            type="button"
+                            onClick={copyPreviousYearBudget}
+                            className="inline-flex items-center gap-1 rounded border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-medium text-slate-600 hover:bg-slate-50 transition shadow-2xs cursor-pointer"
+                            title={`Copy baseline targets from FY ${budgetYear - 1} into FY ${budgetYear}`}
+                          >
+                            <Copy className="h-3 w-3 text-slate-400" />
+                            <span>Copy FY {budgetYear - 1} Baseline</span>
+                          </button>
+                        )}
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-semibold text-slate-600">
+                          Editing FY {budgetYear}
+                        </span>
+                      </div>
+                    </div>
+
                     <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
                       <div className="flex flex-wrap items-center gap-2.5">
                         <div className="flex rounded-md border border-slate-200 bg-white p-1">
@@ -1764,16 +1801,16 @@ export default function BudgetingPage() {
                         </div>
                         <span className="hidden sm:inline-block rounded-md border border-slate-200/80 bg-slate-50 px-2 py-1 text-[10px] font-medium text-slate-600">
                           {planningHorizon === 'monthly'
-                            ? `✍️ Editing ${MONTH_NAMES[selectedMonth]} manually (Month ${selectedMonth + 1} of 12)`
+                            ? `✍️ Editing ${MONTH_NAMES[selectedMonth]} ${budgetYear} manually (Month ${selectedMonth + 1} of 12)`
                             : planningHorizon === 'quarterly'
                               ? selectedQuarter === 'all'
-                                ? '📊 Viewing Quarterly Average (Annual ÷ 4)'
-                                : `📊 Viewing ${selectedQuarter} Sum (${QUARTERS.find(
+                                ? `📊 Viewing Quarterly Average · FY ${budgetYear} (Annual ÷ 4)`
+                                : `📊 Viewing ${selectedQuarter} ${budgetYear} Sum (${QUARTERS.find(
                                     (q) => q.key === selectedQuarter,
                                   )
                                     ?.months.map((m) => MONTH_SHORT[m])
                                     .join(' + ')})`
-                              : '🎯 Viewing Annual Total (Sum of all 12 months)'}
+                              : `🎯 Viewing FY ${budgetYear} Annual Total (Sum of all 12 months)`}
                         </span>
                       </div>
                       <div className="flex items-center gap-2">
@@ -1906,28 +1943,28 @@ export default function BudgetingPage() {
                             <th className="px-3 py-2.5">Line item</th>
                             <th className="px-3 py-2.5 text-right capitalize">
                               {planningHorizon === 'monthly'
-                                ? `Budget (${MONTH_NAMES[selectedMonth]})`
+                                ? `Budget (${MONTH_NAMES[selectedMonth]} ${budgetYear})`
                                 : planningHorizon === 'quarterly'
                                   ? selectedQuarter === 'all'
-                                    ? 'Budget (Quarterly Avg)'
-                                    : `Budget (${selectedQuarter})`
-                                  : 'Budget (Annual: 12-Mo Sum)'}
+                                    ? `Budget (Quarterly Avg · FY ${budgetYear})`
+                                    : `Budget (${selectedQuarter} ${budgetYear})`
+                                  : `Budget (FY ${budgetYear}: 12-Mo Sum)`}
                             </th>
                             <th className="px-3 py-2.5 text-right capitalize">
                               {planningHorizon === 'monthly'
-                                ? `Target (${MONTH_NAMES[selectedMonth]})`
+                                ? `Target (${MONTH_NAMES[selectedMonth]} ${budgetYear})`
                                 : planningHorizon === 'quarterly'
                                   ? selectedQuarter === 'all'
-                                    ? 'Target (Quarterly Avg)'
-                                    : `Target (${selectedQuarter})`
-                                  : 'Target (Annual: 12-Mo Sum)'}
+                                    ? `Target (Quarterly Avg · FY ${budgetYear})`
+                                    : `Target (${selectedQuarter} ${budgetYear})`
+                                  : `Target (FY ${budgetYear}: 12-Mo Sum)`}
                             </th>
                             <th className="px-3 py-2.5 text-right capitalize">
                               {planningHorizon === 'monthly'
-                                ? `Actual (${MONTH_SHORT[selectedMonth]} run-rate)`
+                                ? `Actual (${MONTH_SHORT[selectedMonth]} Run-Rate)`
                                 : planningHorizon === 'quarterly'
-                                  ? 'Actual (Quarterly run-rate)'
-                                  : 'Actual (Annual run-rate)'}
+                                  ? 'Actual (Quarterly Run-Rate)'
+                                  : 'Actual (Annual Run-Rate)'}
                             </th>
                           </tr>
                         </thead>
@@ -1983,12 +2020,12 @@ export default function BudgetingPage() {
                               <td className="px-3 py-2.5">
                                 Total Projected (
                                 {planningHorizon === 'monthly'
-                                  ? MONTH_SHORT[selectedMonth]
+                                  ? `${MONTH_SHORT[selectedMonth]} ${budgetYear}`
                                   : planningHorizon === 'quarterly'
                                     ? selectedQuarter === 'all'
-                                      ? 'Quarterly Avg'
-                                      : selectedQuarter
-                                    : 'Full Year'}
+                                      ? `Quarterly Avg · FY ${budgetYear}`
+                                      : `${selectedQuarter} ${budgetYear}`
+                                    : `Full Year ${budgetYear}`}
                                 )
                               </td>
                               <td className="px-3 py-2.5 text-right tabular-nums text-slate-900">
@@ -2009,174 +2046,22 @@ export default function BudgetingPage() {
                 )}
               </section>
 
-              {/* Scenario Sensitivity Modeling Panel */}
-              <section className="rounded-md border border-slate-200 bg-white p-3.5">
-                <div className="flex flex-col justify-between gap-2 border-b border-slate-100 pb-3 md:flex-row md:items-center">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Layers className="h-4 w-4 text-sky-700" />
-                      <h2 className="text-xs font-semibold text-slate-900">
-                        Scenario sensitivity modeling
-                      </h2>
-                      <span
-                        className={cn(
-                          'rounded-full border px-2 py-0.5 text-[10px] font-semibold',
-                          activeScenarioConfig.badgeClass,
-                        )}
-                      >
-                        Active: {activeScenarioConfig.label}
-                      </span>
-                    </div>
-                    <p className="mt-1 text-[11px] text-slate-500">
-                      Compare Worst Case, Average Case, and Best Case assumptions. Figures show
-                      projected performance for{' '}
-                      <span className="font-medium text-slate-700">
-                        {data?.periodInfo?.label ?? 'the selected period'}
-                      </span>{' '}
-                      with annualized run rates.
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] text-slate-400">Target multipliers:</span>
-                    <span className="rounded bg-slate-100 px-2 py-0.5 font-mono text-[10px] text-slate-700">
-                      Rev: {activeScenarioConfig.revMultiplier}x · Cost:{' '}
-                      {activeScenarioConfig.costMultiplier}x
-                    </span>
-                  </div>
-                </div>
-
-                <div className="mt-3 grid grid-cols-1 gap-2.5 md:grid-cols-3">
-                  {scenarioMatrix.map((item) => {
-                    const isCurrent = scenario === item.key;
-                    const annualizedProjRev = Math.round((item.projRev / periodMonths) * 12);
-                    return (
-                      <button
-                        key={item.key}
-                        type="button"
-                        onClick={() => setScenario(item.key)}
-                        className={cn(
-                          'group relative flex flex-col justify-between rounded-md border p-3 text-left transition-all',
-                          isCurrent
-                            ? cn('shadow-sm', item.cardBorderClass)
-                            : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/50',
-                        )}
-                      >
-                        <div>
-                          <div className="flex items-center justify-between">
-                            <span className="flex items-center gap-1.5 text-xs font-bold text-slate-900">
-                              {item.key === 'best' && (
-                                <TrendingUp className="h-3.5 w-3.5 text-emerald-600" />
-                              )}
-                              {item.key === 'worst' && (
-                                <TrendingDown className="h-3.5 w-3.5 text-rose-600" />
-                              )}
-                              {item.key === 'average' && (
-                                <SlidersHorizontal className="h-3.5 w-3.5 text-sky-600" />
-                              )}
-                              {item.label}
-                            </span>
-                            <span
-                              className={cn(
-                                'rounded-full px-2 py-0.5 text-[9px] font-semibold',
-                                item.key === 'best'
-                                  ? 'bg-emerald-100 text-emerald-800'
-                                  : item.key === 'worst'
-                                    ? 'bg-rose-100 text-rose-800'
-                                    : 'bg-slate-100 text-slate-700',
-                              )}
-                            >
-                              {isCurrent ? 'Active' : 'Select'}
-                            </span>
-                          </div>
-                          <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
-                            {item.description}
-                          </p>
-                        </div>
-
-                        <div className="mt-3 border-t border-slate-100 pt-2">
-                          <div className="grid grid-cols-2 gap-2 text-[10px]">
-                            <div>
-                              <span className="text-slate-400">
-                                Projected Rev ({period === 'ttm' ? 'TTM' : 'Period'}):
-                              </span>
-                              <p className="font-semibold tabular-nums text-slate-800">
-                                {formatMoney.format(item.projRev)}
-                              </p>
-                              {period !== 'ttm' && (
-                                <span className="text-[9px] text-slate-400">
-                                  FY run-rate: {formatMoney.format(annualizedProjRev)}
-                                </span>
-                              )}
-                            </div>
-                            <div>
-                              <span className="text-slate-400">Operating Costs:</span>
-                              <p className="font-semibold tabular-nums text-slate-800">
-                                {formatMoney.format(item.projCost)}
-                              </p>
-                            </div>
-                            <div>
-                              <span className="text-slate-400">Projected Profit:</span>
-                              <p
-                                className={cn(
-                                  'font-semibold tabular-nums',
-                                  item.projProfit >= 0 ? 'text-emerald-700' : 'text-rose-600',
-                                )}
-                              >
-                                {formatMoney.format(item.projProfit)}
-                              </p>
-                            </div>
-                            <div>
-                              <span className="text-slate-400">Margin &amp; Delta:</span>
-                              <p className="font-semibold tabular-nums text-slate-800">
-                                {item.marginPct.toFixed(1)}%{' '}
-                                {item.deltaProfit !== 0 && (
-                                  <span
-                                    className={cn(
-                                      'text-[9px]',
-                                      item.deltaProfit > 0 ? 'text-emerald-600' : 'text-rose-600',
-                                    )}
-                                  >
-                                    ({item.deltaProfit > 0 ? '+' : ''}
-                                    {formatMoney.format(item.deltaProfit)})
-                                  </span>
-                                )}
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </section>
-
               {(() => {
-                const isScenarioActive = scenario !== 'average';
-                const scenarioRevMultiplier = activeScenarioConfig.revMultiplier;
-                const scenarioCostMultiplier = activeScenarioConfig.costMultiplier;
-
                 const actualRev = profitability.revenue;
-                const projectedRev = Math.round(actualRev * scenarioRevMultiplier);
-
                 const rawOpex = profitability.opexFixed + profitability.opexVariable;
-                const projectedOpex = Math.round(rawOpex * scenarioCostMultiplier);
-
-                const actualCogs = profitability.cogs ?? Math.round(actualRev * 0.38);
-                const projectedCogs = Math.round(actualCogs * scenarioCostMultiplier);
-
                 const actualGrossProfit = profitability.grossProfit;
-                const projectedGrossProfit = projectedRev - projectedCogs;
                 const actualGrossMargin = profitability.grossMarginPct;
-                const projectedGrossMarginPct =
-                  projectedRev > 0
-                    ? (projectedGrossProfit / projectedRev) * 100
-                    : actualGrossMargin;
-
                 const actualEbitda = profitability.ebitda;
-                const projectedEbitda = projectedGrossProfit - Math.round(projectedOpex * 0.7);
                 const actualEbitdaMargin = profitability.ebitdaMarginPct;
-                const projectedEbitdaMarginPct =
-                  projectedRev > 0 ? (projectedEbitda / projectedRev) * 100 : 0;
+                const startingCash = data.cashFlow13Week?.startingCash ?? 0;
+
+                const totalActual = effectiveBudgetItems.reduce((acc, i) => acc + i.actual, 0);
+                const totalBudget = effectiveBudgetItems.reduce((acc, i) => acc + i.budget, 0);
+                const totalNetVariance = totalActual - totalBudget;
+                const revItem = effectiveBudgetItems.find((i) => i.type === 'revenue');
+                const revVariance = revItem ? revItem.actual - revItem.budget : 0;
+                const revVariancePct =
+                  revItem && revItem.budget > 0 ? (revVariance / revItem.budget) * 100 : 0;
 
                 return (
                   <section
@@ -2185,93 +2070,45 @@ export default function BudgetingPage() {
                   >
                     <MetricCard
                       title="Revenue"
-                      value={formatMoney.format(isScenarioActive ? projectedRev : actualRev)}
+                      value={formatMoney.format(actualRev)}
                       badge={
-                        isScenarioActive
-                          ? `${activeScenarioConfig.growthPct > 0 ? '+' : ''}${activeScenarioConfig.growthPct}%`
+                        revVariance !== 0
+                          ? `${revVariance >= 0 ? '+' : ''}${revVariancePct.toFixed(1)}% vs Budget`
                           : undefined
                       }
-                      badgeType={activeScenarioConfig.growthPct >= 0 ? 'favorable' : 'unfavorable'}
-                      detail={
-                        isScenarioActive
-                          ? `Proj · Actual: ${formatMoney.format(actualRev)}`
-                          : `Actual · ${data.periodInfo?.label ?? 'selected period'}`
-                      }
-                      accent={
-                        isScenarioActive
-                          ? scenario === 'best'
-                            ? 'border-l-emerald-600'
-                            : 'border-l-rose-600'
-                          : 'border-l-emerald-600'
-                      }
+                      badgeType={revVariance >= 0 ? 'favorable' : 'unfavorable'}
+                      detail={`Actual · ${data.periodInfo?.label ?? 'selected period'}`}
+                      accent="border-l-emerald-600"
                     />
                     <MetricCard
                       title="Gross margin"
-                      value={`${(isScenarioActive ? projectedGrossMarginPct : actualGrossMargin).toFixed(1)}%`}
-                      badge={
-                        isScenarioActive
-                          ? `${projectedGrossMarginPct >= actualGrossMargin ? '+' : ''}${(projectedGrossMarginPct - actualGrossMargin).toFixed(1)}%`
-                          : undefined
-                      }
-                      badgeType={
-                        projectedGrossMarginPct >= actualGrossMargin ? 'favorable' : 'unfavorable'
-                      }
-                      detail={`${formatMoney.format(isScenarioActive ? projectedGrossProfit : actualGrossProfit)} gross profit`}
-                      accent={
-                        isScenarioActive
-                          ? projectedGrossProfit >= actualGrossProfit
-                            ? 'border-l-emerald-600'
-                            : 'border-l-rose-600'
-                          : 'border-l-emerald-600'
-                      }
+                      value={`${actualGrossMargin.toFixed(1)}%`}
+                      badge={`${formatMoney.format(actualGrossProfit)} GP`}
+                      badgeType="favorable"
+                      detail={`${formatMoney.format(actualGrossProfit)} gross profit`}
+                      accent="border-l-emerald-600"
                     />
                     <MetricCard
                       title="Operating expenses"
-                      value={formatMoney.format(isScenarioActive ? projectedOpex : rawOpex)}
-                      badge={
-                        isScenarioActive
-                          ? `${scenarioCostMultiplier > 1 ? '+' : ''}${Math.round((scenarioCostMultiplier - 1) * 100)}%`
-                          : undefined
-                      }
-                      badgeType={scenarioCostMultiplier <= 1 ? 'favorable' : 'unfavorable'}
-                      detail={
-                        isScenarioActive
-                          ? `Proj · Actual: ${formatMoney.format(rawOpex)}`
-                          : `Operating costs · ${data.periodInfo?.label ?? 'selected period'}`
-                      }
-                      accent={
-                        isScenarioActive
-                          ? scenarioCostMultiplier <= 1
-                            ? 'border-l-emerald-600'
-                            : 'border-l-rose-600'
-                          : 'border-l-amber-600'
-                      }
+                      value={formatMoney.format(rawOpex)}
+                      detail={`Operating costs · ${data.periodInfo?.label ?? 'selected period'}`}
+                      accent="border-l-amber-600"
                     />
                     <MetricCard
                       title="EBITDA"
-                      value={formatMoney.format(isScenarioActive ? projectedEbitda : actualEbitda)}
-                      badge={
-                        isScenarioActive
-                          ? `${projectedEbitda >= actualEbitda ? '+' : ''}${formatMoney.format(projectedEbitda - actualEbitda)}`
-                          : undefined
-                      }
-                      badgeType={projectedEbitda >= actualEbitda ? 'favorable' : 'unfavorable'}
-                      detail={`${(isScenarioActive ? projectedEbitdaMarginPct : actualEbitdaMargin).toFixed(1)}% EBITDA margin`}
-                      accent={
-                        isScenarioActive
-                          ? projectedEbitda >= actualEbitda
-                            ? 'border-l-emerald-600'
-                            : 'border-l-rose-600'
-                          : 'border-l-emerald-600'
-                      }
+                      value={formatMoney.format(actualEbitda)}
+                      badge={`${actualEbitdaMargin.toFixed(1)}% margin`}
+                      badgeType={actualEbitda >= 0 ? 'favorable' : 'unfavorable'}
+                      detail={`${actualEbitdaMargin.toFixed(1)}% EBITDA margin`}
+                      accent={actualEbitda >= 0 ? 'border-l-emerald-600' : 'border-l-rose-600'}
                     />
                     <MetricCard
                       title="Cash position"
-                      value={formatMoney.format(data.cashFlow13Week?.startingCash ?? 0)}
+                      value={formatMoney.format(startingCash)}
                       badge={
-                        (data.cashFlow13Week?.startingCash ?? 0) > 15000
+                        startingCash > 15000
                           ? 'Healthy'
-                          : (data.cashFlow13Week?.startingCash ?? 0) > 8000
+                          : startingCash > 8000
                             ? 'Watch'
                             : undefined
                       }
@@ -2280,54 +2117,57 @@ export default function BudgetingPage() {
                       accent="border-l-amber-600"
                     />
                     <MetricCard
-                      title="FY forecast revenue"
-                      value={formatMoney.format(forecastRevenue)}
-                      badge={activeScenarioConfig.label}
-                      badgeType={
-                        scenario === 'best'
-                          ? 'favorable'
-                          : scenario === 'worst'
-                            ? 'unfavorable'
-                            : 'neutral'
-                      }
-                      detail={`Annualized run rate · ${activeScenarioConfig.tagline}`}
-                      accent={
-                        scenario === 'best'
-                          ? 'border-l-emerald-600'
-                          : scenario === 'worst'
-                            ? 'border-l-rose-600'
-                            : 'border-l-sky-600'
-                      }
+                      title="Net budget variance"
+                      value={formatMoney.format(totalNetVariance)}
+                      badge={totalNetVariance >= 0 ? 'Favorable' : 'Review'}
+                      badgeType={totalNetVariance >= 0 ? 'favorable' : 'unfavorable'}
+                      detail={`Budget deviation across ${effectiveBudgetItems.length} lines`}
+                      accent={totalNetVariance >= 0 ? 'border-l-emerald-600' : 'border-l-rose-600'}
                     />
                   </section>
                 );
               })()}
 
-              <section className="grid grid-cols-1 gap-2 xl:grid-cols-2">
-                <article className="rounded-md border border-slate-200 bg-white p-3">
-                  <div className="mb-2">
-                    <h2 className="text-xs font-semibold text-slate-900">Revenue trend</h2>
-                    <p className="mt-1 text-[10px] text-slate-500">
-                      Monthly revenue recorded in Xero
-                    </p>
+              <section className="grid grid-cols-1 gap-2 xl:grid-cols-2 items-stretch">
+                <article className="flex flex-col rounded-md border border-slate-200 bg-white p-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <div>
+                      <h2 className="text-xs font-semibold text-slate-900">Revenue trend</h2>
+                      <p className="mt-0.5 text-[10px] text-slate-500">
+                        Monthly revenue recorded in Xero
+                      </p>
+                    </div>
+                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-medium text-slate-600">
+                      Monthly Actuals
+                    </span>
                   </div>
-                  <div ref={revenueChartRef} className="h-60 w-full" />
+                  <div ref={revenueChartRef} className="h-72 w-full" />
                 </article>
-                <article className="rounded-md border border-slate-200 bg-white p-3">
-                  <div className="mb-2">
-                    <h2 className="text-xs font-semibold text-slate-900">Budget vs actual</h2>
-                    <p className="mt-1 text-[10px] text-slate-500">Performance by budget line</p>
+
+                <article className="flex flex-col rounded-md border border-slate-200 bg-white p-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <div>
+                      <h2 className="text-xs font-semibold text-slate-900">Budget vs actual</h2>
+                      <p className="mt-0.5 text-[10px] text-slate-500">Performance by budget line</p>
+                    </div>
+                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-medium text-slate-600">
+                      {effectiveBudgetItems.length} lines
+                    </span>
                   </div>
                   {effectiveBudgetItems.length > 0 ? (
-                    <div
-                      ref={budgetChartRef}
-                      className="w-full"
-                      style={{ height: Math.max(256, effectiveBudgetItems.length * 42) }}
-                    />
+                    <div className="h-72 w-full overflow-y-auto overflow-x-hidden pr-1.5 scrollbar-thin">
+                      <div
+                        ref={budgetChartRef}
+                        className="w-full"
+                        style={{ height: Math.max(288, effectiveBudgetItems.length * 36) }}
+                      />
+                    </div>
                   ) : (
-                    <p className="py-16 text-center text-sm text-slate-500">
-                      No budget lines are available for this period.
-                    </p>
+                    <div className="flex h-72 items-center justify-center">
+                      <p className="text-xs text-slate-500">
+                        No budget lines are available for this period.
+                      </p>
+                    </div>
                   )}
                 </article>
               </section>
@@ -2343,9 +2183,12 @@ export default function BudgetingPage() {
                       favorable below budget.
                     </p>
                   </div>
-                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">
-                    {effectiveBudgetItems.length} line items
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[10px] font-semibold text-emerald-700">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      Active items only ({effectiveBudgetItems.length})
+                    </span>
+                  </div>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[660px] text-left text-xs">
@@ -2450,7 +2293,7 @@ export default function BudgetingPage() {
                       {effectiveBudgetItems.length === 0 && (
                         <tr>
                           <td colSpan={8} className="px-3 py-8 text-center text-xs text-slate-500">
-                            No budget data is available for this period.
+                            No active budget line items found for this period.
                           </td>
                         </tr>
                       )}
@@ -2526,7 +2369,7 @@ export default function BudgetingPage() {
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-2">
                     <div>
                       <h2 className="text-xs font-semibold text-slate-900">
-                        13-Week Cash Flow Forecast
+                        Budgeted Cashflow Projections (13-Week)
                       </h2>
                       <p className="text-[10px] text-slate-500">
                         Rolling 13-week cash liquidity trajectory derived from your manual budget
@@ -2784,411 +2627,14 @@ export default function BudgetingPage() {
               );
             })()}
 
-          {statementView === 'balancesheet' &&
-            (() => {
-              const bs = effectiveBalanceSheet || data?.balanceSheet;
-              const caItems = bs?.assets?.current || [];
-              const ncaItems = bs?.assets?.nonCurrent || [];
-              const totalCurrentAssets = bs?.assets?.totalCurrent || 0;
-              const totalNonCurrentAssets = bs?.assets?.totalNonCurrent || 0;
-              const totalAssets =
-                bs?.assets?.totalAssets || totalCurrentAssets + totalNonCurrentAssets;
-
-              const clItems = bs?.liabilities?.current || [];
-              const nclItems = bs?.liabilities?.nonCurrent || [];
-              const totalCurrentLiabilities = bs?.liabilities?.totalCurrent || 0;
-              const totalNonCurrentLiabilities = bs?.liabilities?.totalNonCurrent || 0;
-              const totalLiabilities =
-                bs?.liabilities?.totalLiabilities ||
-                totalCurrentLiabilities + totalNonCurrentLiabilities;
-
-              const equityItems = bs?.equity?.items || [];
-              const totalEquity = bs?.equity?.totalEquity || totalAssets - totalLiabilities;
-              const totalLiabilitiesAndEquity = totalLiabilities + totalEquity;
-
-              const workingCapital =
-                bs?.workingCapital ?? totalCurrentAssets - totalCurrentLiabilities;
-              const currentRatio =
-                effectiveBalanceSheet?.currentRatio ??
-                data?.kpiScorecard?.currentRatio ??
-                (totalCurrentLiabilities > 0 ? totalCurrentAssets / totalCurrentLiabilities : 2.5);
-              const quickRatio =
-                effectiveBalanceSheet?.quickRatio ?? data?.kpiScorecard?.quickRatio ?? 2.1;
-              const debtToEquity =
-                effectiveBalanceSheet?.debtToEquity ??
-                data?.kpiScorecard?.debtToEquity ??
-                (totalEquity > 0 ? totalLiabilities / totalEquity : 0.45);
-              const isBalanced =
-                bs?.isBalanced ?? Math.abs(totalAssets - totalLiabilitiesAndEquity) < 1;
-
-              return (
-                <div className="space-y-4">
-                  {/* Balance Sheet Header with Live Sync Status */}
-                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-2">
-                    <div>
-                      <h2 className="text-xs font-semibold text-slate-900">
-                        Balance Sheet &amp; Working Capital Pro-Forma
-                      </h2>
-                      <p className="text-[10px] text-slate-500">
-                        Classified financial position, net worth, and working capital solvency
-                        synchronized with your manual plan
-                      </p>
-                    </div>
-                    <span
-                      className={cn(
-                        'rounded-full px-2.5 py-0.5 text-[10px] font-semibold border',
-                        hasCustomizedPlan
-                          ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                          : 'border-slate-200 bg-slate-100 text-slate-600',
-                      )}
-                    >
-                      {hasCustomizedPlan
-                        ? '✨ Live: Synchronized with Custom Plan & Targets'
-                        : 'Default Xero Benchmark'}
-                    </span>
-                  </div>
-
-                  {/* 4 Balance Sheet KPI Cards */}
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                    <div className="rounded-lg border border-slate-200 bg-white p-3.5 shadow-sm">
-                      <div className="flex items-center justify-between text-slate-500">
-                        <span className="text-[11px] font-medium uppercase tracking-wider">
-                          Total Assets
-                        </span>
-                        <Building className="h-4 w-4 text-emerald-600" />
-                      </div>
-                      <div className="mt-2 text-xl font-bold text-slate-900">
-                        {formatMoney.format(totalAssets)}
-                      </div>
-                      <p className="mt-1 text-[10px] text-slate-500">
-                        Current: {formatMoney.format(totalCurrentAssets)}
-                      </p>
-                    </div>
-
-                    <div className="rounded-lg border border-slate-200 bg-white p-3.5 shadow-sm">
-                      <div className="flex items-center justify-between text-slate-500">
-                        <span className="text-[11px] font-medium uppercase tracking-wider">
-                          Total Liabilities
-                        </span>
-                        <Coins className="h-4 w-4 text-rose-600" />
-                      </div>
-                      <div className="mt-2 text-xl font-bold text-slate-900">
-                        {formatMoney.format(totalLiabilities)}
-                      </div>
-                      <p className="mt-1 text-[10px] text-slate-500">
-                        Current: {formatMoney.format(totalCurrentLiabilities)}
-                      </p>
-                    </div>
-
-                    <div className="rounded-lg border border-slate-200 bg-white p-3.5 shadow-sm">
-                      <div className="flex items-center justify-between text-slate-500">
-                        <span className="text-[11px] font-medium uppercase tracking-wider">
-                          Net Worth (Equity)
-                        </span>
-                        <Scale className="h-4 w-4 text-sky-600" />
-                      </div>
-                      <div className="mt-2 text-xl font-bold text-sky-700">
-                        {formatMoney.format(totalEquity)}
-                      </div>
-                      <p className="mt-1 text-[10px] text-slate-500">
-                        Book value of enterprise equity
-                      </p>
-                    </div>
-
-                    <div className="rounded-lg border border-slate-200 bg-white p-3.5 shadow-sm">
-                      <div className="flex items-center justify-between text-slate-500">
-                        <span className="text-[11px] font-medium uppercase tracking-wider">
-                          Working Capital
-                        </span>
-                        <Activity className="h-4 w-4 text-indigo-600" />
-                      </div>
-                      <div
-                        className={cn(
-                          'mt-2 text-xl font-bold',
-                          workingCapital >= 0 ? 'text-indigo-600' : 'text-rose-600',
-                        )}
-                      >
-                        {formatMoney.format(workingCapital)}
-                      </div>
-                      <p className="mt-1 text-[10px] text-slate-500">
-                        Current Assets - Current Liab.
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Accounting Equation Verification Banner */}
-                  <div
-                    className={cn(
-                      'flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3 shadow-sm',
-                      isBalanced
-                        ? 'border-emerald-200 bg-emerald-50/70 text-emerald-900'
-                        : 'border-rose-200 bg-rose-50/70 text-rose-900',
-                    )}
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <CheckCircle2
-                        className={cn('h-5 w-5', isBalanced ? 'text-emerald-600' : 'text-rose-600')}
-                      />
-                      <div>
-                        <h4 className="text-xs font-bold uppercase tracking-wider">
-                          {isBalanced
-                            ? 'Balance Sheet Audit: Verified in Equilibrium'
-                            : 'Balance Sheet Audit: Imbalance Detected'}
-                        </h4>
-                        <p className="text-[11px] opacity-90">
-                          Assets ({formatMoney.format(totalAssets)}) = Liabilities (
-                          {formatMoney.format(totalLiabilities)}) + Equity (
-                          {formatMoney.format(totalEquity)})
-                        </p>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <span className="text-[10px] font-medium uppercase opacity-75">Variance</span>
-                      <div className="text-xs font-mono font-bold">
-                        {formatMoney.format(Math.abs(totalAssets - totalLiabilitiesAndEquity))}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Liquidity & Solvency Diagnostics */}
-                  <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                    <div className="rounded-md border border-slate-200 bg-white p-3.5 shadow-sm">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-semibold text-slate-900">Current Ratio</span>
-                        <span
-                          className={cn(
-                            'rounded-full px-2 py-0.5 text-[9px] font-semibold',
-                            currentRatio >= 1.5
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : 'bg-amber-100 text-amber-800',
-                          )}
-                        >
-                          {currentRatio >= 1.5 ? 'Strong' : 'Caution'}
-                        </span>
-                      </div>
-                      <div className="mt-1 text-2xl font-bold text-slate-800">
-                        {currentRatio.toFixed(2)}x
-                      </div>
-                      <p className="mt-1 text-[10px] text-slate-500">
-                        Benchmark &gt; 1.5x (Current Assets / Current Liabilities)
-                      </p>
-                    </div>
-
-                    <div className="rounded-md border border-slate-200 bg-white p-3.5 shadow-sm">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-semibold text-slate-900">
-                          Quick Ratio (Acid-Test)
-                        </span>
-                        <span
-                          className={cn(
-                            'rounded-full px-2 py-0.5 text-[9px] font-semibold',
-                            quickRatio >= 1.0
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : 'bg-amber-100 text-amber-800',
-                          )}
-                        >
-                          {quickRatio >= 1.0 ? 'Liquid' : 'Tight'}
-                        </span>
-                      </div>
-                      <div className="mt-1 text-2xl font-bold text-slate-800">
-                        {quickRatio.toFixed(2)}x
-                      </div>
-                      <p className="mt-1 text-[10px] text-slate-500">
-                        Benchmark &gt; 1.0x ((Cash + AR) / Current Liabilities)
-                      </p>
-                    </div>
-
-                    <div className="rounded-md border border-slate-200 bg-white p-3.5 shadow-sm">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-semibold text-slate-900">
-                          Debt to Equity Ratio
-                        </span>
-                        <span
-                          className={cn(
-                            'rounded-full px-2 py-0.5 text-[9px] font-semibold',
-                            debtToEquity < 1.0
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : 'bg-rose-100 text-rose-800',
-                          )}
-                        >
-                          {debtToEquity < 1.0 ? 'Conservative' : 'Leveraged'}
-                        </span>
-                      </div>
-                      <div className="mt-1 text-2xl font-bold text-slate-800">
-                        {debtToEquity.toFixed(2)}x
-                      </div>
-                      <p className="mt-1 text-[10px] text-slate-500">
-                        Benchmark &lt; 1.5x (Total Liabilities / Total Equity)
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Classified Balance Sheet Table */}
-                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                    {/* Assets Column */}
-                    <div className="rounded-md border border-slate-200 bg-white shadow-sm overflow-hidden">
-                      <div className="border-b border-slate-200 bg-emerald-50/50 px-4 py-2.5">
-                        <h3 className="text-xs font-bold text-emerald-950 uppercase tracking-wider">
-                          Assets
-                        </h3>
-                        <p className="text-[10px] text-emerald-800">
-                          Current &amp; long-term economic resources
-                        </p>
-                      </div>
-                      <div className="p-3 space-y-3">
-                        <div>
-                          <div className="text-[11px] font-bold text-slate-700 uppercase tracking-wide border-b border-slate-100 pb-1">
-                            Current Assets
-                          </div>
-                          <div className="mt-1.5 space-y-1 text-xs">
-                            {caItems.map((item: BalanceSheetItem, idx: number) => (
-                              <div key={idx} className="flex justify-between py-1">
-                                <span className="text-slate-600">{item.name}</span>
-                                <span className="font-mono font-medium text-slate-900">
-                                  {formatMoney.format(item.value)}
-                                </span>
-                              </div>
-                            ))}
-                            <div className="flex justify-between py-1.5 font-semibold text-slate-900 border-t border-slate-200">
-                              <span>Total Current Assets</span>
-                              <span className="font-mono text-emerald-700">
-                                {formatMoney.format(totalCurrentAssets)}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div>
-                          <div className="text-[11px] font-bold text-slate-700 uppercase tracking-wide border-b border-slate-100 pb-1">
-                            Non-Current Assets
-                          </div>
-                          <div className="mt-1.5 space-y-1 text-xs">
-                            {ncaItems.map((item: BalanceSheetItem, idx: number) => (
-                              <div key={idx} className="flex justify-between py-1">
-                                <span className="text-slate-600">{item.name}</span>
-                                <span className="font-mono font-medium text-slate-900">
-                                  {formatMoney.format(item.value)}
-                                </span>
-                              </div>
-                            ))}
-                            <div className="flex justify-between py-1.5 font-semibold text-slate-900 border-t border-slate-200">
-                              <span>Total Non-Current Assets</span>
-                              <span className="font-mono text-emerald-700">
-                                {formatMoney.format(totalNonCurrentAssets)}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="flex justify-between rounded-md bg-emerald-100/60 px-3 py-2 text-xs font-bold text-emerald-950 border border-emerald-200">
-                          <span className="uppercase tracking-wider">Total Assets</span>
-                          <span className="font-mono text-sm">
-                            {formatMoney.format(totalAssets)}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Liabilities & Equity Column */}
-                    <div className="rounded-md border border-slate-200 bg-white shadow-sm overflow-hidden">
-                      <div className="border-b border-slate-200 bg-slate-100 px-4 py-2.5">
-                        <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-                          Liabilities &amp; Equity
-                        </h3>
-                        <p className="text-[10px] text-slate-600">
-                          Obligations and shareholder net worth
-                        </p>
-                      </div>
-                      <div className="p-3 space-y-3">
-                        <div>
-                          <div className="text-[11px] font-bold text-slate-700 uppercase tracking-wide border-b border-slate-100 pb-1">
-                            Current Liabilities
-                          </div>
-                          <div className="mt-1.5 space-y-1 text-xs">
-                            {clItems.map((item: BalanceSheetItem, idx: number) => (
-                              <div key={idx} className="flex justify-between py-1">
-                                <span className="text-slate-600">{item.name}</span>
-                                <span className="font-mono font-medium text-slate-900">
-                                  {formatMoney.format(item.value)}
-                                </span>
-                              </div>
-                            ))}
-                            <div className="flex justify-between py-1.5 font-semibold text-slate-900 border-t border-slate-200">
-                              <span>Total Current Liabilities</span>
-                              <span className="font-mono text-rose-700">
-                                {formatMoney.format(totalCurrentLiabilities)}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div>
-                          <div className="text-[11px] font-bold text-slate-700 uppercase tracking-wide border-b border-slate-100 pb-1">
-                            Non-Current Liabilities
-                          </div>
-                          <div className="mt-1.5 space-y-1 text-xs">
-                            {nclItems.map((item: BalanceSheetItem, idx: number) => (
-                              <div key={idx} className="flex justify-between py-1">
-                                <span className="text-slate-600">{item.name}</span>
-                                <span className="font-mono font-medium text-slate-900">
-                                  {formatMoney.format(item.value)}
-                                </span>
-                              </div>
-                            ))}
-                            <div className="flex justify-between py-1.5 font-semibold text-slate-900 border-t border-slate-200">
-                              <span>Total Non-Current Liabilities</span>
-                              <span className="font-mono text-rose-700">
-                                {formatMoney.format(totalNonCurrentLiabilities)}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div>
-                          <div className="text-[11px] font-bold text-slate-700 uppercase tracking-wide border-b border-slate-100 pb-1">
-                            Shareholders&apos; Equity
-                          </div>
-                          <div className="mt-1.5 space-y-1 text-xs">
-                            {equityItems.map((item: BalanceSheetItem, idx: number) => (
-                              <div key={idx} className="flex justify-between py-1">
-                                <span className="text-slate-600">{item.name}</span>
-                                <span className="font-mono font-medium text-slate-900">
-                                  {formatMoney.format(item.value)}
-                                </span>
-                              </div>
-                            ))}
-                            <div className="flex justify-between py-1.5 font-semibold text-slate-900 border-t border-slate-200">
-                              <span>Total Shareholders&apos; Equity</span>
-                              <span className="font-mono text-sky-700">
-                                {formatMoney.format(totalEquity)}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="flex justify-between rounded-md bg-slate-200/80 px-3 py-2 text-xs font-bold text-slate-900 border border-slate-300">
-                          <span className="uppercase tracking-wider">
-                            Total Liabilities &amp; Equity
-                          </span>
-                          <span className="font-mono text-sm">
-                            {formatMoney.format(totalLiabilitiesAndEquity)}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })()}
 
           <p className="text-[10px] leading-relaxed text-slate-500">
-            Financial actuals and cash position are loaded from the Xero finance integration. FY
-            forecast revenue is an illustrative annualized run rate applying the selected{' '}
-            {activeScenarioConfig.label} ({activeScenarioConfig.revMultiplier}x revenue multiplier /{' '}
-            {activeScenarioConfig.growthPct > 0
-              ? `+${activeScenarioConfig.growthPct}%`
-              : `${activeScenarioConfig.growthPct}%`}{' '}
-            target assumption); it is not a Xero-reported forecast.
+            Financial actuals and cash position are loaded directly from the Xero finance integration.
+            Budget targets are managed in the Plan &amp; Targets schedule. For forward-looking 12-month
+            predictive modeling, sensitivity tests, and scenario stress testing, visit the{' '}
+            <Link href="/forecast" className="font-semibold text-sky-700 hover:underline">
+              Forecast &amp; Scenario Cockpit &rarr;
+            </Link>
           </p>
         </>
       )}
