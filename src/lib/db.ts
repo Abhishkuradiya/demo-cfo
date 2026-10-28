@@ -28,7 +28,7 @@ export const pgPool = new Pool(
         host: process.env.DB_HOST || '127.0.0.1',
         port: parseInt(process.env.DB_PORT || '5432', 10),
         user: process.env.DB_USER || 'postgres',
-        password: process.env.DB_PASSWORD || undefined,
+        password: process.env.DB_PASSWORD || 'postgres',
         database: process.env.DB_NAME || 'virtual_cfo',
         connectionTimeoutMillis: 5000
       }
@@ -2823,7 +2823,7 @@ export const db = {
   getUserByEmail: async (email: string): Promise<any | null> => {
     if (isPgConnected) {
       try {
-        const { rows } = await pgPool.query('SELECT * FROM users WHERE email = $1', [email]);
+        const { rows } = await pgPool.query('SELECT * FROM users WHERE LOWER(email) = LOWER($1)', [email.trim()]);
         return rows[0] || null;
       } catch (e) {
         console.error("Database query failed:", e); throw e;
