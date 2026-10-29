@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import ReactECharts from 'echarts-for-react';
+import { useSearchParams } from 'next/navigation';
 import { FormattedDatePicker } from '@/components/ui/formatted-date-picker';
 import { 
   FileText, 
@@ -82,14 +83,16 @@ function Tooltip({ text }: { text: string }) {
 }
 
 export default function BalanceSheetPage() {
-  const [selectedDate, setSelectedDate] = useState<string>(() => {
+  const searchParams = useSearchParams();
+  const defaultDate = searchParams.get('to_date') || (() => {
     const today = new Date();
     const currentYear = today.getFullYear();
     const currentMonth = today.getMonth(); // 0 = Jan, 11 = Dec
     // Last financial year ended on March 31st of previous year if current month is Jan-Mar, else current year
     const lastFYYear = currentMonth < 3 ? currentYear - 1 : currentYear;
     return `${lastFYYear}-03-31`;
-  });
+  })();
+  const [selectedDate, setSelectedDate] = useState(defaultDate);
   const [data, setData] = useState<BSData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -285,13 +288,11 @@ export default function BalanceSheetPage() {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {/* As At Date picker (Formatted DD/MM/YYYY) */}
           <FormattedDatePicker
             value={selectedDate}
             onChange={setSelectedDate}
             label="As at:"
           />
-
           <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-200 bg-white hover:bg-red-50/20 text-xs font-bold text-red-600 transition cursor-pointer">
             <FileText className="h-3.5 w-3.5" />
             <span>Export PDF</span>
@@ -305,18 +306,6 @@ export default function BalanceSheetPage() {
 
       {/* ─── Filter Bar ─── */}
       <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-sm mb-6 flex flex-wrap items-center gap-3 select-none text-[11px] font-semibold text-slate-500">
-        <div className="flex flex-col gap-1 min-w-[130px]">
-          <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold">Date</span>
-          <div className="flex items-center justify-between border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-700 bg-white">
-            <input 
-              type="date"
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-              className="text-xs font-bold text-slate-700 bg-transparent outline-none cursor-pointer"
-            />
-          </div>
-        </div>
-
         <div className="flex flex-col gap-1 min-w-[110px]">
           <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold">Currency</span>
           <div className="flex items-center justify-between border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-700 bg-slate-50">

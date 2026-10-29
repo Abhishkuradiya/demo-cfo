@@ -676,22 +676,6 @@ export function Sidebar() {
       {/* Footer Blocks */}
       {!isCollapsed && (
         <div className="p-4 space-y-3 border-t border-sidebar-border/30 bg-black/10 shrink-0">
-          {/* Quick Superadmin Dynamic Menu Control Drawer Trigger - HIDDEN FOR NON-ADMIN USERS */}
-          {isSuperAdmin && (
-            <button
-              onClick={() => setShowDrawer(true)}
-              className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 text-xs font-semibold transition-all group cursor-pointer"
-            >
-              <span className="flex items-center gap-2">
-                <SlidersHorizontal className="w-4 h-4 text-indigo-400 group-hover:rotate-90 transition-transform duration-300" />
-                Dynamic Menu Control
-              </span>
-              <span className="px-1.5 py-0.5 rounded text-[10px] bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 font-bold uppercase">
-                Admin
-              </span>
-            </button>
-          )}
-
           {/* Plan Card */}
           <div className="rounded-lg border border-sidebar-border/35 bg-sidebar-accent/10 p-3 space-y-2">
             <div className="space-y-0.5">
