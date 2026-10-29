@@ -30,7 +30,9 @@ import { toast } from 'sonner';
 import { FormattedDatePicker } from '@/components/ui/formatted-date-picker';
 
 // Standardized Currency Formatter with Credit Note / Negative Balance Support
-const formatAmount = (val: number, currencyStr: string = 'GBP') => {
+const formatAmountValue = (val: number | null | undefined, currencyStr?: string | null) => {
+  if (val === null || val === undefined || !Number.isFinite(val)) return 'Not available';
+  if (!currencyStr) return val.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const sym = currencyStr === 'USD' ? '$' : currencyStr === 'EUR' ? '€' : '£';
   if (val < 0) {
     return `(${sym}${Math.abs(val).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`;
@@ -84,7 +86,8 @@ const DynamicSparkline = ({ data = [], color = '#2563eb' }: { data?: number[]; c
   const height = 36;
   const padding = 8; // Top & bottom safety padding so stroke curve never flat-clips!
 
-  const pointsList = data.length >= 2 ? data : [10, 18, 14, 25, 20, 30];
+  if (data.length < 2) return null;
+  const pointsList = data;
   const minVal = Math.min(...pointsList);
   const maxVal = Math.max(...pointsList);
   const range = maxVal - minVal || 1;
@@ -141,7 +144,7 @@ export default function AccountPayableDashboard() {
   const handleOpenBillModal = (inv: any, vendorName?: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     const invId = inv.id || inv.InvoiceID || inv.billNumber || inv.invoiceNumber || inv.invoice_number || `bill-${Date.now()}`;
-    const displayRef = inv.billNumber || inv.invoiceNumber || inv.InvoiceNumber || inv.reference || inv.Reference || 'BILL-001';
+    const displayRef = inv.billNumber || inv.invoiceNumber || inv.InvoiceNumber || inv.reference || inv.Reference || 'Not available';
 
     const count = openInvoices.length;
     const startX = Math.min(80 + count * 35, typeof window !== 'undefined' ? window.innerWidth - 750 : 100);
@@ -167,9 +170,9 @@ export default function AccountPayableDashboard() {
         {
           id: invId,
           refNumber: displayRef,
-          contactName: vendorName || inv.vendorName || inv.contactName || inv.ContactName || (inv.Contact && inv.Contact.Name) || 'Vendor',
-          date: inv.date || inv.DateString || inv.Date || new Date().toISOString(),
-          dueDate: inv.dueDate || inv.DueDateString || inv.DueDate || inv.date || new Date().toISOString(),
+          contactName: vendorName || inv.vendorName || inv.contactName || inv.ContactName || (inv.Contact && inv.Contact.Name) || 'Not available',
+          date: inv.date || inv.DateString || inv.Date || 'Not available',
+          dueDate: inv.dueDate || inv.DueDateString || inv.DueDate || inv.date || 'Not available',
           paymentDate: inv.paymentDate || inv.date,
           desc: inv.reference || inv.Reference || inv.desc || `Bill ${displayRef}`,
           amount: grossTotal,
@@ -182,23 +185,16 @@ export default function AccountPayableDashboard() {
           lineItems: Array.isArray(rawLineItems) && rawLineItems.length > 0 ? rawLineItems.map((item: any) => ({
             desc: item.Description || item.description || item.desc || item.ItemCode || item.itemCode || `Line item for ${displayRef}`,
             Description: item.Description || item.description || item.desc || item.ItemCode || item.itemCode || `Line item for ${displayRef}`,
-            account: item.AccountCode ? `${item.AccountCode} - ${item.AccountName || 'Cost of Goods'}` : (item.accountCode ? `${item.accountCode} - Cost of Goods` : (item.account || '500 Cost of Goods')),
-            AccountCode: item.AccountCode || item.accountCode || item.account_code || '500',
-            taxRate: item.TaxType || item.taxType || item.tax_type || item.taxRate || '20% (VAT on Expenses)',
-            TaxType: item.TaxType || item.taxType || item.tax_type || 'INPUT2',
+            account: item.AccountCode ? `${item.AccountCode} - ${item.AccountName || 'Not available'}` : (item.accountCode ? `${item.accountCode} - Not available` : (item.account || 'Not available')),
+            AccountCode: item.AccountCode || item.accountCode || item.account_code || 'Not available',
+            taxRate: item.TaxType || item.taxType || item.tax_type || item.taxRate || 'Not available',
+            TaxType: item.TaxType || item.taxType || item.tax_type || 'Not available',
             amountGbp: parseFloat(item.LineAmount ?? item.lineAmount ?? item.line_amount ?? item.amountGbp ?? item.UnitAmount ?? item.unitAmount ?? grossTotal),
             LineAmount: item.LineAmount ?? item.lineAmount ?? item.line_amount,
             UnitAmount: item.UnitAmount ?? item.unitAmount ?? item.unit_amount,
             Quantity: item.Quantity ?? item.quantity,
             TaxAmount: item.TaxAmount ?? item.taxAmount ?? item.tax_amount
-          })) : [
-            {
-              desc: `Bill ${displayRef} - ${vendorName || inv.vendorName || 'Vendor Services'}`,
-              account: '500 Cost of Goods',
-              taxRate: '20% (VAT on Expenses)',
-              amountGbp: grossTotal
-            }
-          ],
+          })) : [],
           attachments: inv.attachments || inv.Attachments || [],
           x: startX,
           y: startY,
@@ -259,6 +255,11 @@ export default function AccountPayableDashboard() {
   useEffect(() => {
     fetchData();
   }, [asOnDate]);
+
+  const formatAmount = (val: number | null | undefined) => {
+    const formatted = formatAmountValue(val, data?.meta?.currency || null);
+    return formatted === 'Not available' ? 'Not\u00a0available' : formatted;
+  };
 
   // CSV Export Handler
   const handleExportCSV = () => {
@@ -334,41 +335,42 @@ export default function AccountPayableDashboard() {
   }, [data]);
 
   // Key KPI Figures
-  const totalPayablesVal = data?.summary?.totalPayables?.amount || 0;
-  const currentNotDueVal = data?.summary?.currentNotDue?.amount || 0;
-  const overdueTotalVal = (data?.summary?.days1to30?.amount || 0) + 
-                          (data?.summary?.days31to60?.amount || 0) + 
-                          (data?.summary?.days61to90?.amount || 0) + 
-                          (data?.summary?.days90Plus?.amount || 0);
-  const highRiskVal = data?.summary?.days90Plus?.amount || 0;
-  const overdueCountVal = data?.summary?.overdueBills?.count || 0;
+  const hasPayableData = data?.meta?.dataAvailable === true;
+  const totalPayablesVal = hasPayableData ? (data?.summary?.totalPayables?.amount ?? null) : null;
+  const currentNotDueVal = hasPayableData ? (data?.summary?.currentNotDue?.amount ?? null) : null;
+  const overdueTotalVal = hasPayableData
+    ? (data?.summary?.days1to30?.amount ?? 0) + (data?.summary?.days31to60?.amount ?? 0) + (data?.summary?.days61to90?.amount ?? 0) + (data?.summary?.days90Plus?.amount ?? 0)
+    : null;
+  const highRiskVal = hasPayableData ? (data?.summary?.days90Plus?.amount ?? null) : null;
+  const overdueCountVal = hasPayableData ? (data?.summary?.overdueBills?.count ?? null) : null;
 
   const totalPayablesTrend = useMemo(() => {
     const s = data?.trend?.series;
-    if (!s || !Array.isArray(s.current)) return [12000, 18000, 14000, 25000, 20000, 32000];
+    if (!hasPayableData || !s || !Array.isArray(s.current)) return [];
     return s.current.map((v: number, i: number) => 
       v + (s.days1to30[i] || 0) + (s.days31to60[i] || 0) + (s.days61to90[i] || 0) + (s.days90Plus[i] || 0)
     );
-  }, [data]);
+  }, [data, hasPayableData]);
 
   const currentNotDueTrend = useMemo(() => {
-    return data?.trend?.series?.current || [5000, 8000, 7000, 12000, 9000, 15000];
-  }, [data]);
+    return hasPayableData && Array.isArray(data?.trend?.series?.current) ? data.trend.series.current : [];
+  }, [data, hasPayableData]);
 
   const overdueTotalTrend = useMemo(() => {
     const s = data?.trend?.series;
-    if (!s || !Array.isArray(s.days1to30)) return [8000, 12000, 9000, 18000, 15000, 22000];
+    if (!hasPayableData || !s || !Array.isArray(s.days1to30)) return [];
     return s.days1to30.map((v: number, i: number) => 
       v + (s.days31to60[i] || 0) + (s.days61to90[i] || 0) + (s.days90Plus[i] || 0)
     );
-  }, [data]);
+  }, [data, hasPayableData]);
 
   const days90PlusTrend = useMemo(() => {
-    return data?.trend?.series?.days90Plus || [3000, 5000, 4000, 8000, 7000, 10000];
-  }, [data]);
+    return hasPayableData && Array.isArray(data?.trend?.series?.days90Plus) ? data.trend.series.days90Plus : [];
+  }, [data, hasPayableData]);
 
   // ECharts Options: Ageing Donut Chart
   const doughnutOption = useMemo(() => {
+    if (!hasPayableData) return {};
     const dist = data?.ageingDistribution || [];
     return {
       tooltip: {
@@ -412,15 +414,17 @@ export default function AccountPayableDashboard() {
         }
       ]
     };
-  }, [data]);
+  }, [data, hasPayableData]);
 
   // ECharts Options: Payables Trend Line Chart
   const trendLineOption = useMemo(() => {
+    if (!hasPayableData) return {};
     const trend = data?.trend || { labels: [], series: { current: [], days1to30: [], days31to60: [], days61to90: [], days90Plus: [] } };
     return {
       tooltip: {
         trigger: 'axis',
-        axisPointer: { type: 'cross' }
+        axisPointer: { type: 'cross' },
+        valueFormatter: (value: number) => formatAmount(value)
       },
       legend: {
         bottom: 0,
@@ -449,7 +453,7 @@ export default function AccountPayableDashboard() {
           color: '#64748b',
           fontSize: 10,
           formatter: (val: number) => `£${val >= 1000 ? (val / 1000).toFixed(0) + 'k' : val}`
-        }
+        },
       },
       series: [
         {
@@ -494,7 +498,7 @@ export default function AccountPayableDashboard() {
         }
       ]
     };
-  }, [data]);
+  }, [data, hasPayableData]);
 
   if (loading) {
     return (
@@ -558,7 +562,7 @@ export default function AccountPayableDashboard() {
             <ShieldAlert className="h-3.5 w-3.5 text-red-500" />
             <span>Overdue Bills</span>
             <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-red-500 text-white shadow-2xs">
-              {overdueCountVal}
+              {overdueCountVal ?? 'Not available'}
             </span>
           </button>
 
@@ -660,7 +664,7 @@ export default function AccountPayableDashboard() {
               {formatAmount(currentNotDueVal)}
             </div>
             <span className="text-[11px] text-blue-600 font-semibold mt-1 block">
-              {data?.summary?.currentNotDue?.pct || '0'}% (Click to drill down) →
+                  {data?.summary?.currentNotDue?.pct ?? 'Not available'}{data?.summary?.currentNotDue?.pct == null ? '' : '%'} (Click to drill down) →
             </span>
           </div>
           <div className="mt-2 -mx-4 -mb-4">
@@ -688,7 +692,7 @@ export default function AccountPayableDashboard() {
               {formatAmount(overdueTotalVal)}
             </div>
             <span className="text-[11px] text-amber-600 font-semibold mt-1 block">
-              {overdueCountVal} Bills (Click to inspect) →
+                  {overdueCountVal ?? 'Not available'} Bills (Click to inspect) →
             </span>
           </div>
           <div className="mt-2 -mx-4 -mb-4">
@@ -717,7 +721,7 @@ export default function AccountPayableDashboard() {
               {formatAmount(highRiskVal)}
             </div>
             <span className="text-[11px] text-red-600 font-semibold mt-1 block">
-              {data?.summary?.days90Plus?.pct || '0'}% (High Risk Drill-down) →
+                  {data?.summary?.days90Plus?.pct ?? 'Not available'}{data?.summary?.days90Plus?.pct == null ? '' : '%'} (High Risk Drill-down) →
             </span>
           </div>
           <div className="mt-2 -mx-4 -mb-4">
@@ -810,14 +814,14 @@ export default function AccountPayableDashboard() {
 
                 {/* Amount */}
                 <div className="text-base font-black text-slate-900 tracking-tight">
-                  {formatAmount(item.amount).split(' ')[0]}
+                  {formatAmount(hasPayableData ? item.amount : null).split(' ')[0]}
                 </div>
 
                 {/* Bottom Row: Percentage Badge + Proportion Bar */}
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between text-[10px] font-bold">
                     <span className={cn("px-1.5 py-0.2 rounded border text-[9.5px]", badgeBg)}>
-                      {item.pct}% Share
+                        {item.pct == null ? 'Not available' : `${item.pct}% Share`}
                     </span>
                     <span className="text-slate-400 text-[9.5px]">Filter →</span>
                   </div>
@@ -1134,7 +1138,7 @@ export default function AccountPayableDashboard() {
                             {Math.abs(vendor.days90Plus) > 0.001 ? formatAmount(vendor.days90Plus).split(' ')[0] : '—'}
                           </td>
                           <td className={cn("py-2.5 px-3 text-right font-black", totalOverdueVal < 0 ? "text-emerald-600" : "text-red-600")}>
-                            {Math.abs(totalOverdueVal) > 0.001 ? formatAmount(totalOverdueVal).split(' ')[0] : '—'}
+                            {totalOverdueVal !== null && Math.abs(totalOverdueVal) > 0.001 ? formatAmount(totalOverdueVal).split(' ')[0] : '—'}
                           </td>
                           <td className="py-2.5 px-3 text-right">
                             <span className={cn(

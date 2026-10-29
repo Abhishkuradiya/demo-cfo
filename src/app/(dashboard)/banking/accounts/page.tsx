@@ -59,7 +59,7 @@ interface BankAccount {
   balance: number;
   status: string;
   lastUpdated: string;
-  currency: string;
+  currency: string | null;
 }
 
 export default function BankAccountsPage() {
@@ -86,6 +86,7 @@ export default function BankAccountsPage() {
 
   const [cashPositions, setCashPositions] = useState<CashPosition[]>([]);
   const [accounts, setAccounts] = useState<BankAccount[]>([]);
+  const [currencyCode, setCurrencyCode] = useState<string | null>(null);
 
   // Filters state
   const [search, setSearch] = useState('');
@@ -142,6 +143,7 @@ export default function BankAccountsPage() {
         setSummary(data.summary);
         setCashPositions(data.cashPosition || []);
         setAccounts(data.accounts || []);
+        setCurrencyCode(data.meta?.currency || null);
         setTotalPages(data.pagination.totalPages);
         setTotalRecords(data.pagination.totalRecords);
       }
@@ -217,7 +219,7 @@ export default function BankAccountsPage() {
         formatter: (params: any) => {
           const item = params[0];
           const val = item.value;
-          const formatted = new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' }).format(val);
+          const formatted = currencyCode ? new Intl.NumberFormat('en-GB', { style: 'currency', currency: currencyCode, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val) : '—';
           return `<div class="font-bold text-xs">${item.name}</div><div class="text-xs ${val >= 0 ? 'text-emerald-400' : 'text-rose-400'} font-bold mt-1">Closing Balance: ${formatted}</div>`;
         }
       },
@@ -232,9 +234,10 @@ export default function BankAccountsPage() {
           fontWeight: '600',
           formatter: (val: number) => {
             const abs = Math.abs(val);
-            if (abs >= 1000000) return `£${(val / 1000000).toFixed(1)}M`;
-            if (abs >= 1000) return `£${(val / 1000).toFixed(0)}K`;
-            return `£${val}`;
+            if (!currencyCode) return '—';
+            if (abs >= 1000000) return `${currencyCode} ${(val / 1000000).toFixed(2)}M`;
+            if (abs >= 1000) return `${currencyCode} ${(val / 1000).toFixed(2)}K`;
+            return `${currencyCode} ${val.toFixed(2)}`;
           }
         }
       },
@@ -268,7 +271,7 @@ export default function BankAccountsPage() {
             color: '#475569',
             formatter: (params: any) => {
               if (Math.abs(params.value) === 0) return '£0.00';
-              return new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', minimumFractionDigits: 2 }).format(params.value);
+              return currencyCode ? new Intl.NumberFormat('en-GB', { style: 'currency', currency: currencyCode, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(params.value) : '—';
             }
           },
           data: values
@@ -283,7 +286,7 @@ export default function BankAccountsPage() {
       window.removeEventListener('resize', handleResize);
       chartInstance.dispose();
     };
-  }, [displayPositions, loading]);
+  }, [displayPositions, loading, currencyCode]);
 
   // ECharts Donut Chart Initialization (Cash Distribution)
   useEffect(() => {
@@ -307,7 +310,8 @@ export default function BankAccountsPage() {
         borderRadius: 8,
         textStyle: { color: '#ffffff', fontSize: 11 },
         formatter: (params: any) => {
-          return `<div class="font-bold text-xs">${params.name}</div><div class="text-xs text-slate-300 font-medium">£${params.value.toLocaleString('en-GB', { minimumFractionDigits: 2 })} (${params.percent}%)</div>`;
+          const amount = currencyCode ? new Intl.NumberFormat('en-GB', { style: 'currency', currency: currencyCode, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(params.value) : '—';
+          return `<div class="font-bold text-xs">${params.name}</div><div class="text-xs text-slate-300 font-medium">${amount} (${params.percent}%)</div>`;
         }
       },
       series: [
@@ -331,7 +335,7 @@ export default function BankAccountsPage() {
       window.removeEventListener('resize', handleResize);
       chartInstance.dispose();
     };
-  }, [displaySummary, loading]);
+  }, [displaySummary, loading, currencyCode]);
 
   const [tempFromDate, setTempFromDate] = useState(defaultFrom);
   const [tempToDate, setTempToDate] = useState(defaultTo);
@@ -402,8 +406,9 @@ export default function BankAccountsPage() {
     router.push(`${window.location.pathname}?${params.toString()}`);
   };
 
-  const formatCurrency = (val: number) => {
-    return new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', minimumFractionDigits: 2 }).format(val);
+  const formatCurrency = (val: number | null | undefined) => {
+    if (val === null || val === undefined || !currencyCode) return '—';
+    return new Intl.NumberFormat('en-GB', { style: 'currency', currency: currencyCode, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val);
   };
 
   const formatDateLabel = (dStr: string) => {

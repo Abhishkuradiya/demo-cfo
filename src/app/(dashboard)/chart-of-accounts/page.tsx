@@ -32,7 +32,7 @@ interface AccountItem {
   class: string;
   taxType: string;
   status: string;
-  currency: string;
+  currency: string | null;
   description: string;
   group: string;
 }

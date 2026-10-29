@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getTenantIdFromSession } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { getXeroAccessToken, fetchXeroReport, fetchXeroResource } from '@/lib/xero';
+import { getOrFetchManagementReport } from '@/lib/managementAccountsStorage';
 import { BalanceSheetParser } from '@/lib/services/BalanceSheetParser';
 import { BankAccountMergeService } from '@/lib/services/BankAccountMergeService';
 
@@ -9,7 +10,8 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 export async function GET(req: NextRequest) {
-  const tenantId = (await getTenantIdFromSession()) ?? 3;
+  const tenantId = await getTenantIdFromSession();
+  if (tenantId === null) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { searchParams } = new URL(req.url);
   const page = parseInt(searchParams.get('page') || '1', 10);
@@ -31,56 +33,35 @@ export async function GET(req: NextRequest) {
     const isConnected = !!tokenInfo;
 
     // 1. Fetch raw accounts metadata from DB or Xero API
-    let rawAccounts: any[] = (await db.getReport(tenantId, 'Accounts_metadata')) || [];
+    const rawAccounts = tokenInfo
+      ? (await getOrFetchManagementReport(
+          tenantId,
+          'Accounts_metadata',
+          () => fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Accounts'),
+        ) as any[] | null) ?? []
+      : (await db.getPostgresReport(tenantId, 'Accounts_metadata') as any[] | null) ?? [];
+    const activeRawAccounts = rawAccounts.filter((account) => {
+      const status = String(account.Status ?? account.status ?? 'ACTIVE').toUpperCase();
+      return status === 'ACTIVE';
+    });
 
-    if (rawAccounts.length === 0 && isConnected) {
-      try {
-        const xeroAccounts = await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Accounts');
-        if (Array.isArray(xeroAccounts) && xeroAccounts.length > 0) {
-          rawAccounts = xeroAccounts;
-          await db.saveReport(tenantId, 'Accounts_metadata', rawAccounts);
-        }
-      } catch (err: any) {
-        console.error('Failed to sync Xero accounts metadata:', err.message);
-      }
-    }
-
-    // Fallback: Query accounts from PostgreSQL accounts table if metadata is empty
-    if (rawAccounts.length === 0) {
-      try {
-        const res = await db.query(
-          `SELECT id as "AccountID", name as "Name", code as "Code", type as "Type", 'ACTIVE' as "Status", 'GBP' as "CurrencyCode" FROM accounts WHERE tenant_id = $1 AND (type = 'BANK' OR type ILIKE '%bank%') ORDER BY id ASC`,
-          [tenantId]
-        );
-        if (res.rows && res.rows.length > 0) {
-          rawAccounts = res.rows;
-        }
-      } catch (e) {
-        console.error('Failed to query postgres accounts table:', e);
-      }
-    }
+    const org = tokenInfo
+      ? await getOrFetchManagementReport(
+          tenantId,
+          'Organisation',
+          async () => (await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Organisations'))[0] ?? null,
+        ) as { BaseCurrency?: string } | null
+      : await db.getPostgresReport(tenantId, 'Organisation') as { BaseCurrency?: string } | null;
+    const baseCurrency = org?.BaseCurrency ?? null;
 
     // 2. Fetch Balance Sheet as of `toDateStr` to get point-in-time closing bank balances
-    let bsReport = await db.getReport(tenantId, `BalanceSheet_${toDateStr}`);
-    if (!bsReport) {
-      bsReport = await db.getReport(tenantId, `BalanceSheet`);
-    }
-
-    if (!bsReport && isConnected) {
-      try {
-        bsReport = await fetchXeroReport(
-          tokenInfo.accessToken,
-          tokenInfo.xeroTenantId,
-          'BalanceSheet',
-          `date=${toDateStr}`
-        );
-        if (bsReport) {
-          await db.saveReport(tenantId, `BalanceSheet_${toDateStr}`, bsReport);
-        }
-      } catch (err: any) {
-        console.error('Failed to fetch live Xero BalanceSheet for bank balances:', err.message);
-      }
-    }
+    const bsReport = tokenInfo
+      ? await getOrFetchManagementReport(
+          tenantId,
+          `BalanceSheet_${toDateStr}`,
+          () => fetchXeroReport(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'BalanceSheet', `date=${toDateStr}`),
+        )
+      : await db.getPostgresReport(tenantId, `BalanceSheet_${toDateStr}`);
 
     // 3. Extract bank account closing balances as of `toDateStr`
     let balanceSheetAccounts: { name: string; balance: number }[] = [];
@@ -89,23 +70,16 @@ export async function GET(req: NextRequest) {
     }
 
     // 4. Merge accounts metadata with closing balances as of date
-    let mergedAccounts = BankAccountMergeService.mergeAccounts(rawAccounts, balanceSheetAccounts);
+    let mergedAccounts = BankAccountMergeService.mergeAccounts(activeRawAccounts, balanceSheetAccounts);
 
     // If balances are 0 or unassigned, try matching by BankSummary report or fallback realistic balances for demo stability
-    let bankSummaryReport = await db.getReport(tenantId, `BankSummary_${fromDateStr}_${toDateStr}`);
-    if (!bankSummaryReport && isConnected) {
-      try {
-        bankSummaryReport = await fetchXeroReport(
-          tokenInfo.accessToken,
-          tokenInfo.xeroTenantId,
-          'BankSummary',
-          `fromDate=${fromDateStr}&toDate=${toDateStr}`
-        );
-        if (bankSummaryReport) {
-          await db.saveReport(tenantId, `BankSummary_${fromDateStr}_${toDateStr}`, bankSummaryReport);
-        }
-      } catch (e) {}
-    }
+    const bankSummaryReport = tokenInfo
+      ? await getOrFetchManagementReport(
+          tenantId,
+          `BankSummary_${fromDateStr}_${toDateStr}`,
+          () => fetchXeroReport(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'BankSummary', `fromDate=${fromDateStr}&toDate=${toDateStr}`),
+        )
+      : await db.getPostgresReport(tenantId, `BankSummary_${fromDateStr}_${toDateStr}`);
 
     if (bankSummaryReport && bankSummaryReport.Rows) {
       const summaryAccounts: Record<string, number> = {};
@@ -143,7 +117,7 @@ export async function GET(req: NextRequest) {
         balance: parseFloat(bal.toFixed(2)),
         status: acc.status === 'DELETED' || acc.status === 'ARCHIVED' ? 'Inactive' : 'Active',
         lastUpdated: new Date(toDateStr).toLocaleDateString('en-GB'),
-        currency: acc.currency || 'GBP'
+        currency: acc.currency || baseCurrency
       };
     });
 
@@ -187,7 +161,7 @@ export async function GET(req: NextRequest) {
         activePercentage:
           totalAccounts > 0
             ? Math.round((formattedAccounts.filter((a) => a.status === 'Active').length / totalAccounts) * 100)
-            : 100
+            : 0
       },
       cashPosition: formattedAccounts
         .map((a) => ({
@@ -201,7 +175,8 @@ export async function GET(req: NextRequest) {
         totalRecords: totalFilteredCount,
         totalPages: Math.ceil(totalFilteredCount / limit) || 1
       },
-      accounts: paginatedAccounts
+      accounts: paginatedAccounts,
+      meta: { currency: baseCurrency, xeroConnected: isConnected }
     });
   } catch (err: any) {
     console.error('Bank Accounts API error:', err);

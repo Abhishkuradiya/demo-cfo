@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getTenantIdFromSession } from '@/lib/auth';
 import { getXeroAccessToken, fetchXeroResource } from '@/lib/xero';
+import { getOrFetchManagementReport } from '@/lib/managementAccountsStorage';
 
 export async function GET(req: NextRequest) {
   const tenantId = await getTenantIdFromSession();
@@ -14,24 +15,13 @@ export async function GET(req: NextRequest) {
     const isConnected = !!tokenInfo;
 
     // 1. Fetch TrackingCategories from PostgreSQL
-    let trackingReport = await db.getReport(tenantId, 'TrackingCategories');
-
-    // 2. If empty in PostgreSQL and Xero is connected, fetch live from Xero API & cache to PostgreSQL
-    if (!trackingReport && isConnected) {
-      try {
-        const rawCategories = await fetchXeroResource(
-          tokenInfo.accessToken,
-          tokenInfo.xeroTenantId,
-          'TrackingCategories'
-        );
-        if (Array.isArray(rawCategories) && rawCategories.length > 0) {
-          await db.saveReport(tenantId, 'TrackingCategories', rawCategories);
-          trackingReport = rawCategories;
-        }
-      } catch (err: any) {
-        console.error('Failed to sync TrackingCategories from Xero API:', err.message);
-      }
-    }
+    const trackingReport = tokenInfo
+      ? await getOrFetchManagementReport(
+          tenantId,
+          'TrackingCategories',
+          () => fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'TrackingCategories'),
+        )
+      : await db.getPostgresReport(tenantId, 'TrackingCategories');
 
     const rawData = trackingReport?.raw_data || trackingReport || [];
     const categoriesList = Array.isArray(rawData) ? rawData : (rawData.TrackingCategories || []);
@@ -50,10 +40,10 @@ export async function GET(req: NextRequest) {
         return {
           id: opt.TrackingOptionID || `opt-${idx}`,
           name: opt.Name || 'Unnamed Option',
-          description: opt.Name === 'GENERAL' ? 'General transactions' : (opt.Name === 'GWL' ? 'Goods without ledger' : `${opt.Name} transactions`),
+        description: null,
           status: st,
-          usedInCount: 15 + (idx * 5) % 25,
-          lastTransaction: '03 Aug 2026'
+          usedInCount: null,
+          lastTransaction: null
         };
       });
 
@@ -62,7 +52,7 @@ export async function GET(req: NextRequest) {
         name: cat.Name || 'Trading Name',
         status: (cat.Status || 'ACTIVE').toUpperCase(),
         optionsCount: options.length,
-        createdOn: '12 May 2024',
+        createdOn: null,
         options: formattedOptions
       };
     });

@@ -61,12 +61,13 @@ echarts.use([
 
 // Dynamic SVG Sparkline Component matching real numbers array
 const DynamicSparkline = ({ data = [], color = '#2563eb' }: { data?: number[]; color?: string }) => {
+  if (data.length < 2) return null;
   const cleanColor = color.replace('#', '');
   const width = 160;
   const height = 36;
   const padding = 8; // Top & bottom safety padding so stroke curve never flat-clips!
 
-  const pointsList = data.length >= 2 ? data : [10, 18, 14, 25, 20, 30];
+  const pointsList = data;
   const minVal = Math.min(...pointsList);
   const maxVal = Math.max(...pointsList);
   const range = maxVal - minVal || 1;
@@ -285,9 +286,12 @@ export default function SalesDashboardPage() {
   }, [fromDate, toDate]);
 
   // Dynamic Currency Formatter
-  const currencyCode = salesData?.meta?.currency || 'GBP';
-  const formatAmount = (val: number) => {
-    return new Intl.NumberFormat('en-GB', { style: 'currency', currency: currencyCode, maximumFractionDigits: 0 }).format(val || 0);
+  const currencyCode = salesData?.meta?.currency || '';
+  const formatAmount = (val: number | null | undefined) => {
+    if (val === null || val === undefined || !Number.isFinite(val)) return 'Not available';
+    return currencyCode
+      ? new Intl.NumberFormat('en-GB', { style: 'currency', currency: currencyCode, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val)
+      : new Intl.NumberFormat('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val);
   };
 
   // Chart refs
@@ -330,7 +334,7 @@ export default function SalesDashboardPage() {
       change: snapshot?.totalRevenue ? snapshot.totalRevenue.change : '',
       isPositive: snapshot?.totalRevenue ? snapshot.totalRevenue.isPositive : true,
       color: "#10b981",
-      trendData: [1200, 2400, 1800, 3200, 2800, revVal || 4122],
+      trendData: salesData?.revenueTrend?.currentData || [],
       iconBg: "bg-emerald-50/80 border border-emerald-100/80 text-emerald-600",
       icon: <CreditCard className="h-4 w-4 text-emerald-600" />
     },
@@ -341,7 +345,7 @@ export default function SalesDashboardPage() {
       change: snapshot?.netSales ? snapshot.netSales.change : '',
       isPositive: snapshot?.netSales ? snapshot.netSales.isPositive : true,
       color: "#2563eb",
-      trendData: [1100, 2200, 1700, 3000, 2600, snapshot?.netSales?.value || 4122],
+      trendData: salesData?.revenueTrend?.currentData || [],
       iconBg: "bg-blue-50/80 border border-blue-100/80 text-blue-600",
       icon: <Briefcase className="h-4 w-4 text-blue-600" />
     },
@@ -352,7 +356,7 @@ export default function SalesDashboardPage() {
       change: snapshot?.grossProfit ? snapshot.grossProfit.change : '',
       isPositive: snapshot?.grossProfit ? snapshot.grossProfit.isPositive : false,
       color: "#a855f7",
-      trendData: [500, 900, 750, 1200, 1000, snapshot?.grossProfit?.value || 1566],
+      trendData: salesData?.revenueTrend?.currentData || [],
       iconBg: "bg-purple-50/80 border border-purple-100/80 text-purple-600",
       icon: <ShoppingCart className="h-4 w-4 text-purple-600" />
     },
@@ -363,7 +367,7 @@ export default function SalesDashboardPage() {
       change: snapshot?.grossMargin ? snapshot.grossMargin.change : '',
       isPositive: snapshot?.grossMargin ? snapshot.grossMargin.isPositive : false,
       color: "#f59e0b",
-      trendData: [35, 36, 38, 37, 39, snapshot?.grossMargin?.value || 38.0],
+      trendData: [],
       iconBg: "bg-amber-50/80 border border-amber-100/80 text-amber-600",
       icon: <Percent className="h-4 w-4 text-amber-600" />
     },
@@ -374,7 +378,7 @@ export default function SalesDashboardPage() {
       change: snapshot?.invoices ? snapshot.invoices.change : '',
       isPositive: snapshot?.invoices ? snapshot.invoices.isPositive : true,
       color: "#06b6d4",
-      trendData: [20, 35, 45, 55, 68, snapshot?.invoices?.value ?? 0],
+      trendData: [],
       iconBg: "bg-cyan-50/80 border border-cyan-100/80 text-cyan-600",
       icon: <FileText className="h-4 w-4 text-cyan-600" />
     },
@@ -386,7 +390,7 @@ export default function SalesDashboardPage() {
       change: snapshot?.accountsReceivable ? snapshot.accountsReceivable.change : '',
       isPositive: snapshot?.accountsReceivable ? !snapshot.accountsReceivable.isPositive : true,
       color: "#6366f1",
-      trendData: [200, 350, 420, 380, 490, snapshot?.accountsReceivable?.value || 519],
+      trendData: [],
       iconBg: "bg-indigo-50/80 border border-indigo-100/80 text-indigo-600",
       icon: <UserCheck className="h-4 w-4 text-indigo-600" />
     },
@@ -398,7 +402,7 @@ export default function SalesDashboardPage() {
       change: snapshot?.collectionRate ? snapshot.collectionRate.change : '',
       isPositive: snapshot?.collectionRate ? snapshot.collectionRate.isPositive : false,
       color: "#14b8a6",
-      trendData: [95, 92, 94, 90, 88, snapshot?.collectionRate?.value || 87.4],
+      trendData: [],
       iconBg: "bg-teal-50/80 border border-teal-100/80 text-teal-600",
       icon: <Target className="h-4 w-4 text-teal-600" />
     }
@@ -426,23 +430,9 @@ export default function SalesDashboardPage() {
     if (!revenueOverTimeRef.current) return;
     const chartInstance = echarts.init(revenueOverTimeRef.current);
 
-    const labels = salesData?.revenueTrend?.labels || ['Apr 26', 'May 26', 'Jun 26', 'Jul 26', 'Aug 26', 'Sep 26'];
-    const currentData = salesData?.revenueTrend?.currentData || [
-      Math.round(totalRev * 0.14),
-      Math.round(totalRev * 0.16),
-      Math.round(totalRev * 0.18),
-      Math.round(totalRev * 0.17),
-      Math.round(totalRev * 0.17),
-      Math.round(totalRev * 0.18)
-    ];
-    const prevData = salesData?.revenueTrend?.prevData || [
-      Math.round(totalRev * 0.12),
-      Math.round(totalRev * 0.13),
-      Math.round(totalRev * 0.15),
-      Math.round(totalRev * 0.14),
-      Math.round(totalRev * 0.14),
-      Math.round(totalRev * 0.15)
-    ];
+    const labels = salesData?.revenueTrend?.labels || [];
+    const currentData = salesData?.revenueTrend?.currentData || [];
+    const prevData = salesData?.revenueTrend?.prevData || [];
 
     const option = {
       grid: {
@@ -485,7 +475,7 @@ export default function SalesDashboardPage() {
         splitLine: { lineStyle: { color: '#f1f5f9', type: 'dashed' } },
         axisLabel: {
           formatter: (val: number) => {
-            const formatted = new Intl.NumberFormat('en-GB', { style: 'currency', currency: currencyCode, maximumFractionDigits: 0 }).format(val / 1000 || 0);
+            const formatted = currencyCode ? new Intl.NumberFormat('en-GB', { style: 'currency', currency: currencyCode, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val / 1000) : new Intl.NumberFormat('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val / 1000);
             return `${formatted}k`;
           },
           color: '#94a3b8',
@@ -579,11 +569,7 @@ export default function SalesDashboardPage() {
           },
           label: { show: false },
           labelLine: { show: false },
-          data: [
-            { value: Math.round((revVal || 4122) * 0.85), name: 'Xero', itemStyle: { color: '#0064eb' } },
-            { value: Math.round((revVal || 4122) * 0.10), name: 'Shopify', itemStyle: { color: '#10b981' } },
-            { value: Math.round((revVal || 4122) * 0.05), name: 'Stripe', itemStyle: { color: '#ec4899' } }
-          ]
+          data: (salesData?.turnoverStreams || []).map((item: any) => ({ value: item.value ?? item.revenue, name: item.name }))
         }
       ]
     };
@@ -623,11 +609,7 @@ export default function SalesDashboardPage() {
           },
           label: { show: false },
           labelLine: { show: false },
-          data: [
-            { value: Math.round((revVal || 4122) * 0.60), name: 'Pharmaceuticals', itemStyle: { color: '#0064eb' } },
-            { value: Math.round((revVal || 4122) * 0.25), name: 'Healthcare', itemStyle: { color: '#10b981' } },
-            { value: Math.round((revVal || 4122) * 0.15), name: 'Medical Supplies', itemStyle: { color: '#f59e0b' } }
-          ]
+          data: (salesData?.topProducts || []).map((item: any) => ({ value: item.revenue, name: item.name }))
         }
       ]
     };
@@ -1065,7 +1047,7 @@ export default function SalesDashboardPage() {
                 </div>
                 <div className="my-1">
                   <div className="text-[20px] font-black text-slate-900 dark:text-slate-100 tracking-tight leading-none select-all">
-                    {formatAmount(snapshot?.totalRevenue?.value || 0)}
+                    {formatAmount(snapshot?.totalRevenue?.value)}
                   </div>
                   <p className="text-[11px] font-semibold text-slate-400 mt-1.5">Total revenue from Xero P&L Report</p>
                 </div>
@@ -1090,7 +1072,7 @@ export default function SalesDashboardPage() {
                 </div>
                 <div className="my-1">
                   <div className="text-[20px] font-black text-rose-600 dark:text-rose-400 tracking-tight leading-none select-all">
-                    {formatAmount(salesData?.salesSnapshot?.creditNotesTotal ?? Math.max(0, (snapshot?.totalRevenue?.value || 0) - (snapshot?.netSales?.value || 0)))}
+                    {formatAmount(salesData?.salesSnapshot?.creditNotesTotal)}
                   </div>
                   <p className="text-[11px] font-semibold text-slate-400 mt-1.5">
                     <span className="text-rose-600 font-bold">{salesData?.salesSnapshot?.creditNotesCount ?? 0}</span>
@@ -1118,7 +1100,7 @@ export default function SalesDashboardPage() {
                 </div>
                 <div className="my-1">
                   <div className="text-[20px] font-black text-emerald-700 dark:text-emerald-400 tracking-tight leading-none select-all">
-                    {formatAmount(snapshot?.netSales?.value || 0)}
+                    {formatAmount(snapshot?.netSales?.value)}
                   </div>
                   <p className="text-[11px] font-semibold text-slate-400 mt-1.5">
                     <span className={snapshot?.netSales?.isPositive ? "text-emerald-600 font-bold" : "text-rose-600 font-bold"}>
@@ -1191,7 +1173,7 @@ export default function SalesDashboardPage() {
                 </div>
                 <div className="my-1">
                   <div className="text-[20px] font-black text-slate-900 dark:text-slate-100 tracking-tight leading-none select-all">
-                    {formatAmount(snapshot?.grossProfit?.value || 0)}
+                    {formatAmount(snapshot?.grossProfit?.value)}
                   </div>
                   <p className="text-[11px] font-semibold text-slate-400 mt-1.5">
                     <span className="text-emerald-600 font-bold">
@@ -1220,7 +1202,7 @@ export default function SalesDashboardPage() {
                 </div>
                 <div className="my-1">
                   <div className="text-[20px] font-black text-amber-600 dark:text-amber-400 tracking-tight leading-none select-all">
-                    {formatAmount(salesData?.salesSnapshot?.cogs?.value ?? salesData?.executiveRow4?.grossProfitAnalysis?.cogs ?? Math.max(0, (snapshot?.totalRevenue?.value || 0) - (snapshot?.grossProfit?.value || 0)))}
+                    {formatAmount(salesData?.salesSnapshot?.cogs?.value ?? salesData?.executiveRow4?.grossProfitAnalysis?.cogs)}
                   </div>
                   <p className="text-[11px] font-semibold text-slate-400 mt-1.5">
                     <span className="text-amber-600 font-bold">
@@ -1249,7 +1231,7 @@ export default function SalesDashboardPage() {
                 </div>
                 <div className="my-1">
                   <div className="text-[20px] font-black text-purple-600 dark:text-purple-400 tracking-tight leading-none select-all">
-                    {formatAmount(salesData?.salesSnapshot?.expenses?.value ?? 0)}
+                    {formatAmount(salesData?.salesSnapshot?.expenses?.value)}
                   </div>
                   <p className="text-[11px] font-semibold text-slate-400 mt-1.5">
                     <span className="text-purple-600 font-bold">{snapshot?.invoices?.value !== undefined ? snapshot.invoices.value : (salesData?.salesSnapshot?.invoicesCount ?? salesData?.allInvoices?.length ?? 0)} Invoices</span>
@@ -1277,7 +1259,7 @@ export default function SalesDashboardPage() {
                 </div>
                 <div className="my-1">
                   <div className="text-[20px] font-black text-emerald-700 dark:text-emerald-400 tracking-tight leading-none select-all">
-                    {formatAmount(salesData?.salesSnapshot?.netProfit?.value ?? 0)}
+                    {formatAmount(salesData?.salesSnapshot?.netProfit?.value)}
                   </div>
                   <p className="text-[11px] font-semibold text-slate-400 mt-1.5">
                     <span className="text-emerald-600 font-bold">
@@ -1568,7 +1550,7 @@ export default function SalesDashboardPage() {
                   <h3 className="text-[13.5px] font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">Revenue by Region</h3>
                   <CardTooltip text="Geographic breakdown of total turnover by customer country or region." />
                 </div>
-                {!(salesData?.regions && salesData.regions.length > 0) && (
+                {false && !(salesData?.regions && salesData.regions.length > 0) && (
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] font-bold text-slate-400">Demo Data</span>
                     <button
@@ -1852,7 +1834,7 @@ export default function SalesDashboardPage() {
                 <div>
                   <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Gross Profit</div>
                   <div className="text-[11.5px] font-extrabold text-slate-800 dark:text-slate-100 font-sans">
-                    {formatAmount(salesData?.executiveRow4?.grossProfitAnalysis?.grossProfit || 0)}
+                    {formatAmount(salesData?.executiveRow4?.grossProfitAnalysis?.grossProfit)}
                   </div>
                 </div>
                 <div>
@@ -2069,7 +2051,7 @@ export default function SalesDashboardPage() {
                     <CardTooltip text="Total Accounts Receivable balance currently outstanding as on the selected date." />
                   </span>
                   <span className="text-xl font-black text-slate-800 font-sans tracking-tight block">
-                    {formatAmount(salesData?.agingSummary?.totalAR || 0)}
+                    {formatAmount(salesData?.agingSummary?.totalAR)}
                   </span>
                 </div>
                 <span className="text-[9.5px] font-bold text-slate-500 bg-slate-100 dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 px-2 py-0.5 rounded-md">
@@ -2471,7 +2453,7 @@ export default function SalesDashboardPage() {
                   <h3 className="text-[13.5px] font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">Recent Invoices</h3>
                   <CardTooltip text="Latest customer sales invoices generated across all channels." />
                 </div>
-                {!(salesData?.recentInvoices && salesData.recentInvoices.length > 0) && (
+                {false && !(salesData?.recentInvoices && salesData.recentInvoices.length > 0) && (
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] font-bold text-slate-400">Demo Data</span>
                     <button
@@ -2567,7 +2549,7 @@ export default function SalesDashboardPage() {
                   />
                   <button
                     onClick={() => setShowDemoInvoices(true)}
-                    className="mt-3 px-3.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200/80 rounded-xl text-[10.5px] font-extrabold transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs"
+                    className="hidden"
                   >
                     <span>Preview with Demo Data</span>
                     <ArrowRight className="w-3.5 h-3.5" />
@@ -2600,7 +2582,7 @@ export default function SalesDashboardPage() {
                   <h3 className="text-[13.5px] font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">Recent Credit Notes</h3>
                   <CardTooltip text="Credit adjustments and refund notes issued against customer accounts." />
                 </div>
-                {!(salesData?.recentCreditNotes && salesData.recentCreditNotes.length > 0) && (
+                {false && !(salesData?.recentCreditNotes && salesData.recentCreditNotes.length > 0) && (
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] font-bold text-slate-400">Demo Data</span>
                     <button
@@ -2689,7 +2671,7 @@ export default function SalesDashboardPage() {
                   />
                   <button
                     onClick={() => setShowDemoCreditNotes(true)}
-                    className="mt-3 px-3.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200/80 rounded-xl text-[10.5px] font-extrabold transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs"
+                    className="hidden"
                   >
                     <span>Preview with Demo Data</span>
                     <ArrowRight className="w-3.5 h-3.5" />
@@ -2722,7 +2704,7 @@ export default function SalesDashboardPage() {
                   <h3 className="text-[13.5px] font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">Recent Payments</h3>
                   <CardTooltip text="Customer receipts and cash payments collected into bank accounts." />
                 </div>
-                {!(salesData?.recentPayments && salesData.recentPayments.length > 0) && (
+                {false && !(salesData?.recentPayments && salesData.recentPayments.length > 0) && (
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] font-bold text-slate-400">Demo Data</span>
                     <button
@@ -2811,7 +2793,7 @@ export default function SalesDashboardPage() {
                   />
                   <button
                     onClick={() => setShowDemoPayments(true)}
-                    className="mt-3 px-3.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200/80 rounded-xl text-[10.5px] font-extrabold transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs"
+                    className="hidden"
                   >
                     <span>Preview with Demo Data</span>
                     <ArrowRight className="w-3.5 h-3.5" />

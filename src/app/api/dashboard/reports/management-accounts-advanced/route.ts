@@ -222,7 +222,13 @@ export async function GET(request: NextRequest) {
     console.warn('Unable to load Xero account metadata from PostgreSQL/Xero:', error);
   }
   await db.assertPostgres();
-  const movementTargets = accountMovements.map((movement) => {
+  const activeAccountForMovement = (movement: AccountMovement) => xeroAccounts.some((account) => {
+    if (String(account.Status ?? account.status ?? '').trim().toUpperCase() !== 'ACTIVE') return false;
+    if (movement.accountId) return String(account.AccountID ?? '').toLowerCase() === movement.accountId.toLowerCase();
+    if (movement.accountCode) return String(account.Code ?? '').trim() === movement.accountCode;
+    return String(account.Name ?? '').trim().toLocaleLowerCase() === movement.name.toLocaleLowerCase();
+  });
+  const movementTargets = accountMovements.filter(activeAccountForMovement).map((movement) => {
     const metadata = xeroAccounts.find((account) => movement.accountId
       ? String(account.AccountID ?? '').toLowerCase() === movement.accountId.toLowerCase()
       : movement.accountCode

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
 import { getTenantIdFromSession } from '@/lib/auth';
 import { getXeroAccessToken, fetchXeroReport, fetchXeroResource } from '@/lib/xero';
+import { getOrFetchManagementReport } from '@/lib/managementAccountsStorage';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,7 +16,7 @@ interface TrialBalanceAccount {
 
 function parseTrialBalance(report: any) {
   const accounts: TrialBalanceAccount[] = [];
-  let currency = 'USD';
+  let currency: string | null = null;
 
   if (!report || !report.Rows) {
     return { accounts, currency };
@@ -169,42 +169,23 @@ export async function GET(req: NextRequest) {
     }
 
     const cacheKey = `TrialBalance_${targetDate}`;
-    let report = await db.getReport(tenantId, cacheKey);
-
-    if (!report && tokenInfo) {
-      try {
-        report = await fetchXeroReport(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'TrialBalance', `date=${targetDate}`);
-        if (report) {
-          await db.saveReport(tenantId, cacheKey, report);
-        }
-      } catch (e: any) {
-        console.error('Failed to fetch Trial Balance from Xero:', e);
-      }
-    }
-
-    let org = await db.getReport(tenantId, 'Organisation');
-    if (!org && tokenInfo) {
-      try {
-        const organisations = await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Organisations');
-        if (organisations && organisations.length > 0) {
-          org = organisations[0];
-          await db.saveReport(tenantId, 'Organisation', org);
-        }
-      } catch (err: any) {
-        console.error('Failed to dynamically sync Organisation details:', err.message);
-      }
-    }
-    const orgCurrency = org?.BaseCurrency || 'USD';
+    const report = await getOrFetchManagementReport(
+      tenantId,
+      cacheKey,
+      () => fetchXeroReport(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'TrialBalance', `date=${targetDate}`),
+    );
+    const org = await getOrFetchManagementReport(
+      tenantId,
+      'Organisation',
+      async () => (await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Organisations'))[0] ?? null,
+    );
+    const orgCurrency = org?.BaseCurrency || org?.CurrencyCode || null;
 
     if (!report) {
       return NextResponse.json({
         connected: !!tokenInfo,
-        summary: {
-          totalDebit: 0,
-          totalCredit: 0,
-          difference: 0,
-          balanced: true
-        },
+        available: false,
+        summary: null,
         accounts: [],
         meta: { currency: orgCurrency, calculatedAt: new Date().toISOString() }
       });
@@ -215,11 +196,7 @@ export async function GET(req: NextRequest) {
     const hasExplicitCurrency = report?.ReportTitles?.some((t: string) => 
       t.toLowerCase().includes('currency:') || t.toLowerCase().includes('amounts in')
     );
-    if (!hasExplicitCurrency || finalCurrency === 'USD') {
-      if (org && org.BaseCurrency) {
-        finalCurrency = org.BaseCurrency;
-      }
-    }
+    if ((!hasExplicitCurrency || finalCurrency === null) && orgCurrency) finalCurrency = orgCurrency;
 
     // Compute sums dynamically
     const totalDebit = parsed.accounts.reduce((sum, item) => sum + item.debit, 0);
@@ -229,6 +206,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       connected: true,
+      available: true,
       summary: {
         totalDebit: Math.round(totalDebit * 100) / 100,
         totalCredit: Math.round(totalCredit * 100) / 100,

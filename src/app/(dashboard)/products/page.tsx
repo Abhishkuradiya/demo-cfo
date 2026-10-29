@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { 
   FileText, 
@@ -30,7 +31,6 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageContainer } from '@/components/common/page-container';
-import { FormattedDatePicker } from '@/components/ui/formatted-date-picker';
 
 const ReactECharts = dynamic(() => import('echarts-for-react'), { ssr: false });
 
@@ -65,10 +65,11 @@ interface InventoryData {
 }
 
 export default function ProductsPage() {
-  const [date, setDate] = useState<string>(() => {
+  const searchParams = useSearchParams();
+  const date = searchParams.get('to_date') || (() => {
     const today = new Date();
     return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-  });
+  })();
   
   const [data, setData] = useState<InventoryData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -129,9 +130,10 @@ export default function ProductsPage() {
     fetchInventory();
   }, [date]);
 
-  const currencyCode = data?.meta?.currency || 'GBP';
+  const currencyCode = data?.meta?.currency;
 
-  const getCurrencySymbol = (code: string) => {
+  const getCurrencySymbol = (code: string | null | undefined) => {
+    if (!code) return '';
     try {
       const parts = new Intl.NumberFormat('en-US', { style: 'currency', currency: code }).formatToParts(0);
       return parts.find(p => p.type === 'currency')?.value || '';
@@ -142,7 +144,8 @@ export default function ProductsPage() {
 
   const currencySymbol = getCurrencySymbol(currencyCode);
 
-  const formatAmount = (val: number) => {
+  const formatAmount = (val: number | null | undefined) => {
+    if (val === null || val === undefined || !currencyCode) return '—';
     return `${currencySymbol}${val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currencyCode}`;
   };
 
@@ -410,8 +413,6 @@ export default function ProductsPage() {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap text-xs font-bold">
-          <FormattedDatePicker value={date} onChange={setDate} label="As at:" />
-
           <button 
             onClick={handleSyncLive}
             disabled={syncing || loading}

@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { getTenantIdFromSession } from '@/lib/auth';
 import { getXeroAccessToken, fetchXeroResource } from '@/lib/xero';
 import { XeroInventoryService } from '@/lib/inventoryService';
+import { getOrFetchManagementReport } from '@/lib/managementAccountsStorage';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,7 +18,7 @@ interface InventoryItemDTO {
   unitCost: number;
   totalValue: number;
   status: 'In Stock' | 'Low Stock' | 'Dead Stock';
-  lastMovement: string;
+  lastMovement: string | null;
 }
 
 export async function GET(req: NextRequest) {
@@ -28,15 +29,15 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const deadDays = parseInt(searchParams.get('dead_stock_days') || '90') || 90;
+  const asOfDateParam = searchParams.get('date');
+  const asOfDate = asOfDateParam ? new Date(`${asOfDateParam}T23:59:59.999`) : new Date();
 
   try {
     const tokenInfo = await getXeroAccessToken(tenantId);
-    if (!tokenInfo) {
-      return NextResponse.json({ connected: false });
-    }
-    
-    const org = await db.getReport(tenantId, 'Organisation');
-    const orgCurrency = org?.BaseCurrency || 'USD';
+    const org = tokenInfo
+      ? await getOrFetchManagementReport(tenantId, 'Organisation', async () => (await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Organisations'))[0] ?? null) as any
+      : await db.getPostgresReport(tenantId, 'Organisation');
+    const orgCurrency = org?.BaseCurrency ?? null;
 
     // Fetch items from DB
     let rawItems = await db.getInventoryItems(tenantId);
@@ -63,6 +64,7 @@ export async function GET(req: NextRequest) {
     for (const s of sales) {
       if (s.sold_at) {
         const d = new Date(s.sold_at);
+        if (Number.isNaN(asOfDate.getTime()) || d > asOfDate) continue;
         const prev = lastSoldMap.get(s.item_id);
         if (!prev || d > prev) {
           lastSoldMap.set(s.item_id, d);
@@ -107,44 +109,25 @@ export async function GET(req: NextRequest) {
       totalValue += totalVal;
 
       const itemName = (item.Name || item.Description || item.Code || 'Unnamed Item').trim();
-      const text = `${item.Code || ''} ${itemName}`.toLowerCase();
-
-      let group = 'General Products';
-      if (text.includes('tab') || text.includes('crm') || text.includes('eye') || text.includes('drop') || text.includes('powder') || text.includes('cream') || text.includes('ointment') || text.includes('suppositor') || text.includes('caps') || text.includes('med') || text.includes('inf')) {
-        group = 'Pharmacy & Healthcare';
-      } else if (text.includes('cable') || text.includes('mouse') || text.includes('keyboard') || text.includes('monitor') || text.includes('usb') || text.includes('adapter') || text.includes('electronic')) {
-        group = 'Electronics & Accessories';
-      } else if (text.includes('chair') || text.includes('stand') || text.includes('office') || text.includes('mat') || text.includes('desk')) {
-        group = 'Office Supplies';
-      } else if (text.includes('tape') || text.includes('pen') || text.includes('ink') || text.includes('battery') || text.includes('consumable')) {
-        group = 'Consumables';
-      }
-
-      let location = 'Main Warehouse';
-      if (group === 'Pharmacy & Healthcare') {
-        location = 'Pharmacy Dispensary';
-      } else if (group === 'Consumables') {
-        location = 'Store Room';
-      } else if (group === 'Office Supplies') {
-        location = 'Branch Office';
-      }
+      const group = item.ItemGroup || item.Group || item.group || '—';
+      const location = item.Location || item.location || '—';
 
       // Check status
       let status: 'In Stock' | 'Low Stock' | 'Dead Stock' = 'In Stock';
-      const minStock = thresholdMap.get(item.ItemID) || 5; // Default threshold is 5
+      const minStock = thresholdMap.get(item.ItemID);
       
-      if (qtyOnHand <= minStock && qtyOnHand > 0) {
+      if (minStock !== undefined && qtyOnHand <= minStock && qtyOnHand > 0) {
         status = 'Low Stock';
         lowStockCount++;
       } else {
         // Check for dead stock (no sales in deadDays)
         const lastSoldDate = lastSoldMap.get(item.ItemID);
-        let daysUnsold = 999;
+        let daysUnsold: number | null = null;
         if (lastSoldDate) {
-          const diff = new Date().getTime() - lastSoldDate.getTime();
+          const diff = asOfDate.getTime() - lastSoldDate.getTime();
           daysUnsold = Math.max(0, Math.floor(diff / (1000 * 60 * 60 * 24)));
         }
-        if (qtyOnHand > 0 && daysUnsold >= deadDays) {
+        if (qtyOnHand > 0 && daysUnsold !== null && daysUnsold >= deadDays) {
           status = 'Dead Stock';
           deadStockCount++;
         }
@@ -161,7 +144,7 @@ export async function GET(req: NextRequest) {
         unitCost,
         totalValue: Math.round(totalVal * 100) / 100,
         status,
-        lastMovement: lastSoldMap.get(item.ItemID)?.toISOString().split('T')[0] || new Date().toISOString().split('T')[0]
+        lastMovement: lastSoldMap.get(item.ItemID)?.toISOString().split('T')[0] || '—'
       });
     });
 

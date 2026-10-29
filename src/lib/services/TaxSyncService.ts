@@ -77,7 +77,7 @@ export const TaxSyncService = {
 
       const sourceType = (inv.Type || '').toUpperCase() === 'ACCREC' ? 'ACCREC' : 'ACCPAY';
       const direction = sourceType === 'ACCREC' ? 'OUTPUT' : 'INPUT';
-      const currency = inv.CurrencyCode || 'USD';
+      const currency = inv.CurrencyCode || '';
       const contactName = inv.Contact?.Name || '';
 
       processLines(
@@ -102,7 +102,7 @@ export const TaxSyncService = {
       const type = (cn.Type || '').toUpperCase();
       const sourceType = type === 'ACCRECCREDIT' ? 'ACCREC' : 'ACCPAY';
       const direction = sourceType === 'ACCREC' ? 'OUTPUT' : 'INPUT';
-      const currency = cn.CurrencyCode || 'USD';
+      const currency = cn.CurrencyCode || '';
       const contactName = cn.Contact?.Name || '';
 
       processLines(

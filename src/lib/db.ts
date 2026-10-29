@@ -340,6 +340,14 @@ const initPgTables = async () => {
       CREATE INDEX IF NOT EXISTS management_manual_journal_lines_account_idx
         ON management_manual_journal_lines (tenant_id, account_id, journal_id);
     `);
+    // Xero can return values with more precision than two decimal places.
+    // Keep that precision for management-only journal inputs as well; source
+    // reports and journals are stored losslessly in JSONB.
+    await client.query(`
+      ALTER TABLE management_account_adjustments ALTER COLUMN amount TYPE NUMERIC(30,10);
+      ALTER TABLE management_manual_journal_lines ALTER COLUMN debit TYPE NUMERIC(30,10);
+      ALTER TABLE management_manual_journal_lines ALTER COLUMN credit TYPE NUMERIC(30,10);
+    `);
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS contact_credit_limits (

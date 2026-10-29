@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getTenantIdFromSession } from '@/lib/auth';
 import { getXeroAccessToken, fetchXeroReport, fetchXeroResource } from '@/lib/xero';
+import { getOrFetchManagementReport } from '@/lib/managementAccountsStorage';
 import { FinancialEventResolver } from '../../cash-flow/route';
 
 // Helper parsers for fallback calculations from P&L and Balance Sheet
@@ -80,7 +81,7 @@ function parseCashFlowReport(report: any) {
   let financing = 0;
   let beginningCash = 0;
   let endingCash = 0;
-  let currency = 'USD';
+  let currency: string | null = null;
 
   if (!report || !report.Rows) {
     return { operating, investing, financing, beginningCash, endingCash, currency };
@@ -289,81 +290,17 @@ export async function GET(req: NextRequest) {
       console.error('Comparative date calculation warning:', e);
     }
 
-    // Retrieve cached reports first
-    let bankSummary = await db.getReport(tenantId, `BankSummary_${start}_${end}`);
-    let compBankSummary = await db.getReport(tenantId, `BankSummary_${compStartStr}_${compEndStr}`);
-    let plReport = await db.getReport(tenantId, `ProfitAndLoss_${start}_${end}`);
-    let bsReport = await db.getReport(tenantId, `BalanceSheet_${end}`);
-
-    // If any reports are missing from cache and we are connected, attempt fast non-blocking fetch
-    const missingFetches: Promise<any>[] = [];
-
-    if (!bankSummary && tokenInfo) {
-      missingFetches.push(
-        fetchXeroReport(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'BankSummary', `fromDate=${start}&toDate=${end}`)
-          .then(async (res) => {
-            if (res) {
-              bankSummary = res;
-              await db.saveReport(tenantId, `BankSummary_${start}_${end}`, res);
-            }
-          })
-          .catch(e => console.error('BankSummary fetch fallback error:', e))
-      );
-    }
-
-    if (!compBankSummary && tokenInfo) {
-      missingFetches.push(
-        fetchXeroReport(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'BankSummary', `fromDate=${compStartStr}&toDate=${compEndStr}`)
-          .then(async (res) => {
-            if (res) {
-              compBankSummary = res;
-              await db.saveReport(tenantId, `BankSummary_${compStartStr}_${compEndStr}`, res);
-            }
-          })
-          .catch(e => console.error('Comparative BankSummary fetch fallback error:', e))
-      );
-    }
-
-    if (!plReport && tokenInfo) {
-      missingFetches.push(
-        fetchXeroReport(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'ProfitAndLoss', `fromDate=${start}&toDate=${end}`)
-          .then(async (res) => {
-            if (res) {
-              plReport = res;
-              await db.saveReport(tenantId, `ProfitAndLoss_${start}_${end}`, res);
-            }
-          })
-          .catch(e => console.error('ProfitAndLoss fetch fallback error:', e))
-      );
-    }
-
-    if (!bsReport && tokenInfo) {
-      missingFetches.push(
-        fetchXeroReport(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'BalanceSheet', `date=${end}`)
-          .then(async (res) => {
-            if (res) {
-              bsReport = res;
-              await db.saveReport(tenantId, `BalanceSheet_${end}`, res);
-            }
-          })
-          .catch(e => console.error('BalanceSheet fetch fallback error:', e))
-      );
-    }
-
-    // Await missing report fetches with a short timeout to prevent blocking page render
-    if (missingFetches.length > 0) {
-      await Promise.race([
-        Promise.allSettled(missingFetches),
-        new Promise(resolve => setTimeout(resolve, 3500))
-      ]);
-    }
+    const bankSummary = await getOrFetchManagementReport(tenantId, `BankSummary_${start}_${end}`, () => fetchXeroReport(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'BankSummary', `fromDate=${start}&toDate=${end}`));
+    const compBankSummary = await getOrFetchManagementReport(tenantId, `BankSummary_${compStartStr}_${compEndStr}`, () => fetchXeroReport(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'BankSummary', `fromDate=${compStartStr}&toDate=${compEndStr}`));
+    const plReport = await getOrFetchManagementReport(tenantId, `ProfitAndLoss_${start}_${end}`, () => fetchXeroReport(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'ProfitAndLoss', `fromDate=${start}&toDate=${end}`));
+    const bsReport = await getOrFetchManagementReport(tenantId, `BalanceSheet_${end}`, () => fetchXeroReport(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'BalanceSheet', `date=${end}`));
 
     const currentSummary = parseBankSummaryReport(bankSummary);
     const previousSummary = parseBankSummaryReport(compBankSummary);
 
-    const totalRevenue = plReport ? parseTotalRevenue(plReport) : 22973.18;
-    const totalExpenses = plReport ? parseTotalExpenses(plReport) : 19167.52;
-    const accountsPayable = bsReport ? parseAccountsPayable(bsReport) : 8386.76;
+    const totalRevenue = plReport ? parseTotalRevenue(plReport) : 0;
+    const totalExpenses = plReport ? parseTotalExpenses(plReport) : 0;
+    const accountsPayable = bsReport ? parseAccountsPayable(bsReport) : 0;
 
     // Use original FinancialEventResolver logic to get transaction counts and direct category breakdowns
     let payments = await db.getPayments(tenantId);
@@ -501,7 +438,7 @@ export async function GET(req: NextRequest) {
     if (cashInSum === 0 && cashOutSum === 0) {
       cashInSum = ledgerCashInSum;
       cashOutSum = ledgerCashOutSum;
-      beginningVal = 4512.36;
+      beginningVal = 0;
       endingVal = beginningVal + (cashInSum - cashOutSum);
     }
 
@@ -607,7 +544,12 @@ export async function GET(req: NextRequest) {
     const changePercentage = beginningVal !== 0 ? (calculatedNet / Math.abs(beginningVal)) * 100 : (prevNet !== 0 ? ((calculatedNet - prevNet) / Math.abs(prevNet)) * 100 : 0);
 
     // Fetch invoices for Receivables & Payables context
-    const invoices = await db.getInvoices(tenantId);
+    const storedInvoices = await getOrFetchManagementReport(
+      tenantId,
+      'Invoices',
+      () => fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Invoices'),
+    );
+    const invoices = Array.isArray(storedInvoices) ? storedInvoices : [];
     let totalAR = 0;
     let overdueAR = 0;
     let totalAP = 0;
@@ -629,15 +571,15 @@ export async function GET(req: NextRequest) {
     }
 
     // 4-Week Rolling Forecast Calculation
-    let currentBal = endingVal || beginningVal || 1245000;
+    let currentBal = endingVal || beginningVal || 0;
     const weekInflows = [totalAR * 0.35, totalAR * 0.25, totalAR * 0.20, totalAR * 0.20];
     const weekOutflows = [totalAP * 0.30, totalAP * 0.30, totalAP * 0.25, totalAP * 0.15];
 
     const forecast = [];
     let runningCash = currentBal;
     for (let w = 1; w <= 4; w++) {
-      const expIn = Math.round((weekInflows[w - 1] || 150000) * 100) / 100;
-      const expOut = Math.round((weekOutflows[w - 1] || 120000) * 100) / 100;
+      const expIn = Math.round((weekInflows[w - 1] || 0) * 100) / 100;
+      const expOut = Math.round((weekOutflows[w - 1] || 0) * 100) / 100;
       const net = Math.round((expIn - expOut) * 100) / 100;
       const closing = Math.round((runningCash + net) * 100) / 100;
       const status = closing > 500000 ? 'Healthy' : closing > 100000 ? 'Caution' : 'Liquidity Crunch Alert';
@@ -710,14 +652,6 @@ export async function GET(req: NextRequest) {
       { category: 'Other Receipts', amount: Math.round(otherReceipts), pct: Math.round((otherReceipts / calcInflowTotal) * 100), color: '#8b5cf6' }
     ].filter(item => item.amount > 0 || item.pct > 0);
 
-    if (inflowBreakdown.length === 0) {
-      inflowBreakdown.push(
-        { category: 'Customer Payments', amount: Math.round(cashInSum * 0.65), pct: 65, color: '#10b981' },
-        { category: 'Direct Bank Receipts', amount: Math.round(cashInSum * 0.20), pct: 20, color: '#3b82f6' },
-        { category: 'Refunds & Adjustments', amount: Math.round(cashInSum * 0.05), pct: 5, color: '#f59e0b' },
-        { category: 'Other Receipts', amount: Math.round(cashInSum * 0.10), pct: 10, color: '#8b5cf6' }
-      );
-    }
 
     const outflowBreakdown = [
       { category: 'Supplier Payments', amount: Math.round(supplierPayments), pct: Math.round((supplierPayments / calcOutflowTotal) * 100), color: '#ef4444' },
@@ -727,29 +661,9 @@ export async function GET(req: NextRequest) {
       { category: 'Other Outflows', amount: Math.round(otherOutflows), pct: Math.round((otherOutflows / calcOutflowTotal) * 100), color: '#64748b' }
     ].filter(item => item.amount > 0 || item.pct > 0);
 
-    if (outflowBreakdown.length === 0) {
-      outflowBreakdown.push(
-        { category: 'Supplier Payments', amount: Math.round(cashOutSum * 0.50), pct: 50, color: '#ef4444' },
-        { category: 'Operating Expenses', amount: Math.round(cashOutSum * 0.25), pct: 25, color: '#f97316' },
-        { category: 'Payroll & Salaries', amount: Math.round(cashOutSum * 0.15), pct: 15, color: '#a855f7' },
-        { category: 'Taxes & Regulatory', amount: Math.round(cashOutSum * 0.07), pct: 7, color: '#06b6d4' },
-        { category: 'Other Outflows', amount: Math.round(cashOutSum * 0.03), pct: 3, color: '#64748b' }
-      );
-    }
 
-    let org = await db.getReport(tenantId, 'Organisation');
-    if (!org && tokenInfo) {
-      try {
-        const organisations = await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Organisations');
-        if (organisations && organisations.length > 0) {
-          org = organisations[0];
-          await db.saveReport(tenantId, 'Organisation', org);
-        }
-      } catch (err: any) {
-        console.error('Failed to dynamically sync Organisation details:', err.message);
-      }
-    }
-    let finalCurrency = org?.BaseCurrency || 'GBP';
+    const org = await getOrFetchManagementReport(tenantId, 'Organisation', async () => (await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Organisations'))[0] ?? null);
+    const finalCurrency = org?.BaseCurrency || org?.CurrencyCode || null;
 
     return NextResponse.json({
       connected: true,
@@ -789,7 +703,8 @@ export async function GET(req: NextRequest) {
       history,
       bankAccounts: currentSummary.accounts,
       meta: {
-        currency: finalCurrency || 'USD',
+        currency: finalCurrency,
+        dataAvailable: Boolean(bankSummary || plReport || bsReport || allEvents.length),
         calculatedAt: new Date().toISOString()
       }
     });

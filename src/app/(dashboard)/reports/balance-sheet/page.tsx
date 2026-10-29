@@ -38,13 +38,14 @@ interface BSItem {
 
 interface BSData {
   connected: boolean;
+  available?: boolean;
   summary: {
     assets: number;
     liabilities: number;
     equity: number;
-    isBalanced: boolean;
-    difference: number;
-  };
+    isBalanced: boolean | null;
+    difference: number | null;
+  } | null;
   assets: {
     current: BSItem[];
     nonCurrent: BSItem[];
@@ -54,9 +55,9 @@ interface BSData {
     nonCurrent: BSItem[];
   };
   equity: BSItem[];
-  equityTrend?: { label: string; value: number }[];
+  equityTrend?: { label: string; value: number | null }[];
   meta: {
-    currency: string;
+    currency: string | null;
     calculatedAt: string;
   };
 }
@@ -118,8 +119,9 @@ export default function BalanceSheetPage() {
     fetchBalanceSheet();
   }, [selectedDate]);
 
-  const currencyCode = data?.meta?.currency || 'USD';
-  const getCurrencySymbol = (code: string) => {
+  const currencyCode = data?.meta?.currency || null;
+  const getCurrencySymbol = (code: string | null) => {
+    if (!code) return '';
     try {
       const parts = new Intl.NumberFormat('en-US', { style: 'currency', currency: code }).formatToParts(0);
       return parts.find(p => p.type === 'currency')?.value || '';
@@ -129,8 +131,11 @@ export default function BalanceSheetPage() {
   };
   const currencySymbol = getCurrencySymbol(currencyCode);
 
-  const formatAmount = (val: number) => {
-    return `${currencySymbol}${val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currencyCode}`;
+  const formatAmount = (val: number | null | undefined) => {
+    if (val === null || val === undefined || !Number.isFinite(val)) return 'Not available';
+    return currencyCode
+      ? `${currencySymbol}${val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currencyCode}`
+      : val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   };
 
   // ECharts Configurations
@@ -143,7 +148,7 @@ export default function BalanceSheetPage() {
     data.assets.nonCurrent.forEach(item => {
       if (item.value > 0) list.push({ value: item.value, name: item.name });
     });
-    return list.length > 0 ? list : [{ value: 1, name: 'No Assets Data', itemStyle: { color: '#e2e8f0' } }];
+    return list;
   };
 
   const getLiabilitiesPieData = () => {
@@ -155,7 +160,7 @@ export default function BalanceSheetPage() {
     data.liabilities.nonCurrent.forEach(item => {
       if (item.value > 0) list.push({ value: item.value, name: item.name });
     });
-    return list.length > 0 ? list : [{ value: 1, name: 'No Liabilities Data', itemStyle: { color: '#e2e8f0' } }];
+    return list;
   };
 
   const assetsPieOption = {
@@ -163,7 +168,7 @@ export default function BalanceSheetPage() {
       trigger: 'item', 
       formatter: (params: any) => {
         if (params.name.includes('No Assets')) return 'No Assets';
-        return `${params.name}: ${currencySymbol}${params.value.toLocaleString()} (${params.percent}%)`;
+        return `${params.name}: ${formatAmount(params.value)} (${params.percent}%)`;
       }
     },
     legend: { show: false },
@@ -177,8 +182,8 @@ export default function BalanceSheetPage() {
           show: true,
           position: 'center',
           formatter: () => {
-            const sum = data?.summary?.assets || 0;
-            return `${currencySymbol}${sum.toLocaleString(undefined, { maximumFractionDigits: 0 })}\nTotal Assets`;
+            const sum = data?.summary?.assets;
+            return sum === null || sum === undefined ? 'Not available' : `${currencySymbol}${sum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\nTotal Assets`;
           },
           textStyle: { fontSize: 13, fontWeight: 'bold', color: '#1e293b', lineHeight: 18 }
         },
@@ -193,7 +198,7 @@ export default function BalanceSheetPage() {
       trigger: 'item', 
       formatter: (params: any) => {
         if (params.name.includes('No Liabilities')) return 'No Liabilities';
-        return `${params.name}: ${currencySymbol}${params.value.toLocaleString()} (${params.percent}%)`;
+        return `${params.name}: ${formatAmount(params.value)} (${params.percent}%)`;
       }
     },
     legend: { show: false },
@@ -207,8 +212,8 @@ export default function BalanceSheetPage() {
           show: true,
           position: 'center',
           formatter: () => {
-            const sum = data?.summary?.liabilities || 0;
-            return `${currencySymbol}${sum.toLocaleString(undefined, { maximumFractionDigits: 0 })}\nTotal Liabilities`;
+            const sum = data?.summary?.liabilities;
+            return sum === null || sum === undefined ? 'Not available' : `${currencySymbol}${sum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\nTotal Liabilities`;
           },
           textStyle: { fontSize: 13, fontWeight: 'bold', color: '#1e293b', lineHeight: 18 }
         },
@@ -219,12 +224,7 @@ export default function BalanceSheetPage() {
   };
 
   const getEquityTrendData = () => {
-    if (!data || !data.equityTrend || data.equityTrend.length === 0) {
-      return {
-        categories: ['Mar 2026', 'Apr 2026', 'May 2026', 'Jun 2026', 'Jul 2026', 'Aug 2026'],
-        values: [0, 0, 0, 0, 0, data?.summary?.equity || 0]
-      };
-    }
+    if (!data || !data.equityTrend || data.equityTrend.length === 0) return { categories: [], values: [] };
     return {
       categories: data.equityTrend.map(item => item.label),
       values: data.equityTrend.map(item => item.value)
@@ -378,7 +378,7 @@ export default function BalanceSheetPage() {
       )}
 
       {/* ─── Main Dynamic View ─── */}
-      {!loading && !error && data && data.connected !== false && (
+      {!loading && !error && data && data.connected !== false && data.summary && (
         <>
           {/* Summary Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 select-none">

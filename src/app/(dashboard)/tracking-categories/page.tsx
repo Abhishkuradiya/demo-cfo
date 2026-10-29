@@ -35,10 +35,10 @@ import { toast } from 'sonner';
 interface TrackingOption {
   id: string;
   name: string;
-  description: string;
+  description: string | null;
   status: string;
-  usedInCount: number;
-  lastTransaction: string;
+  usedInCount: number | null;
+  lastTransaction: string | null;
 }
 
 interface TrackingCategory {
@@ -126,7 +126,7 @@ export default function TrackingCategoriesPage() {
 
   const filteredOptions = allOptions.filter(opt => {
     const matchesSearch = opt.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          opt.description.toLowerCase().includes(searchTerm.toLowerCase());
+                          (opt.description || '').toLowerCase().includes(searchTerm.toLowerCase());
     const matchesFilter = selectedOptionFilter === 'ALL' || opt.name.toUpperCase() === selectedOptionFilter.toUpperCase();
     return matchesSearch && matchesFilter;
   });
