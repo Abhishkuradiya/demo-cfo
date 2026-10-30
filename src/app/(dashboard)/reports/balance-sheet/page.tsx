@@ -56,7 +56,7 @@ interface BSData {
   equity: BSItem[];
   equityTrend?: { label: string; value: number }[];
   meta: {
-    currency: string;
+    currency: string | null;
     calculatedAt: string;
   };
 }
@@ -118,8 +118,9 @@ export default function BalanceSheetPage() {
     fetchBalanceSheet();
   }, [selectedDate]);
 
-  const currencyCode = data?.meta?.currency || 'USD';
-  const getCurrencySymbol = (code: string) => {
+  const currencyCode = data?.meta?.currency;
+  const getCurrencySymbol = (code: string | null | undefined) => {
+    if (!code) return '';
     try {
       const parts = new Intl.NumberFormat('en-US', { style: 'currency', currency: code }).formatToParts(0);
       return parts.find(p => p.type === 'currency')?.value || '';
@@ -129,7 +130,8 @@ export default function BalanceSheetPage() {
   };
   const currencySymbol = getCurrencySymbol(currencyCode);
 
-  const formatAmount = (val: number) => {
+  const formatAmount = (val: number | null | undefined) => {
+    if (val === null || val === undefined || !currencyCode) return '—';
     return `${currencySymbol}${val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currencyCode}`;
   };
 
