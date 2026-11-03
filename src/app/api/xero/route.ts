@@ -265,21 +265,6 @@ export async function POST(req: NextRequest) {
     // Incremental resource syncs are queued to stay within Xero's per-tenant
     // concurrency limit while retaining unchanged records locally.
     try {
-      const [contactsRes, paymentsRes, accountsRes, itemsRes] = await Promise.allSettled([
-        fetchXeroResource(accessToken, xeroTenantId, 'Contacts'),
-        fetchXeroResource(accessToken, xeroTenantId, 'Payments'),
-        fetchXeroResource(accessToken, xeroTenantId, 'Accounts'),
-        fetchXeroResource(accessToken, xeroTenantId, 'Items'),
-      ]);
-      const [taxRatesRes, prepaymentsRes, overpaymentsRes, orgsRes] = await Promise.allSettled([
-        fetchXeroResource(accessToken, xeroTenantId, 'TaxRates'),
-        fetchXeroResource(accessToken, xeroTenantId, 'Prepayments'),
-        fetchXeroResource(accessToken, xeroTenantId, 'Overpayments'),
-        fetchXeroResource(accessToken, xeroTenantId, 'Organisations'),
-      ]);
-      const plRes = await Promise.allSettled([
-        fetchXeroReport(accessToken, xeroTenantId, 'ProfitAndLoss'),
-      ]).then(([result]) => result);
       const [
         contactsRes,
         paymentsRes,

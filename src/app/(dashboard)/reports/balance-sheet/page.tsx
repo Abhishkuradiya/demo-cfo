@@ -123,8 +123,6 @@ export default function BalanceSheetPage() {
   }, [selectedDate]);
 
   const currencyCode = data?.meta?.currency || null;
-  const getCurrencySymbol = (code: string | null) => {
-  const currencyCode = data?.meta?.currency;
   const getCurrencySymbol = (code: string | null | undefined) => {
     if (!code) return '';
     try {
@@ -141,8 +139,6 @@ export default function BalanceSheetPage() {
     return currencyCode
       ? `${currencySymbol}${val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currencyCode}`
       : val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    if (val === null || val === undefined || !currencyCode) return '—';
-    return `${currencySymbol}${val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currencyCode}`;
   };
 
   // ECharts Configurations
