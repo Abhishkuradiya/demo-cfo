@@ -53,6 +53,8 @@ export default function ProfitabilityAnalysisPage() {
     opexVariable: 250000,
     ebitda: 980000,
     ebitdaMarginPct: 18.7,
+    operatingProfit: 730000,
+    profitBeforeTax: 735000,
     netProfit: 735000,
     netMarginPct: 14.0,
     breakEvenSales: 1370900,
@@ -399,8 +401,8 @@ export default function ProfitabilityAnalysisPage() {
         </div>
       </div>
 
-      {/* 2. Top 6 Primary KPI Cards matching reference image */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3.5">
+      {/* 2. Top 8 Primary KPI Cards matching reference image */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
         {/* Card 1: Net Revenue */}
         <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs space-y-2">
           <div className="flex items-center justify-between">
@@ -443,21 +445,49 @@ export default function ProfitabilityAnalysisPage() {
           </div>
         </div>
 
-        {/* Card 4: Operating Profit */}
+        {/* Card 4: EBITDA */}
         <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-slate-500">Operating Profit</span>
+            <span className="text-[11px] font-bold text-slate-500" title="Earnings Before Interest, Taxes, Depreciation & Amortization">EBITDA</span>
+            <div className="h-7 w-7 rounded-lg bg-indigo-100/70 text-indigo-600 flex items-center justify-center">
+              <Layers className="h-4 w-4" />
+            </div>
+          </div>
+          <div className="text-lg font-black text-slate-900 tracking-tight">{isLoading ? '...' : fmt(data.ebitda ?? (data.grossProfit - (data.opexFixed || 0)))}</div>
+          <div className="text-[11px] font-bold text-emerald-600 flex items-center gap-0.5">
+            <ArrowUpRight className="h-3.5 w-3.5" /> 14.8% <span className="text-slate-400 font-normal">vs last month</span>
+          </div>
+        </div>
+
+        {/* Card 5: Operating Profit */}
+        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold text-slate-500" title="Operating Profit (EBIT)">Operating Profit</span>
             <div className="h-7 w-7 rounded-lg bg-amber-100/70 text-amber-600 flex items-center justify-center">
               <Sliders className="h-4 w-4" />
             </div>
           </div>
-          <div className="text-lg font-black text-slate-900 tracking-tight">{isLoading ? '...' : fmt(data.ebitda)}</div>
+          <div className="text-lg font-black text-slate-900 tracking-tight">{isLoading ? '...' : fmt(data.operatingProfit ?? (data.grossProfit - (data.opexFixed + data.opexVariable)))}</div>
           <div className="text-[11px] font-bold text-emerald-600 flex items-center gap-0.5">
             <ArrowUpRight className="h-3.5 w-3.5" /> 15.6% <span className="text-slate-400 font-normal">vs last month</span>
           </div>
         </div>
 
-        {/* Card 5: Net Profit */}
+        {/* Card 6: Profit Before Tax */}
+        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold text-slate-500" title="Profit Before Tax (PBT)">Profit Before Tax</span>
+            <div className="h-7 w-7 rounded-lg bg-sky-100/70 text-sky-600 flex items-center justify-center">
+              <DollarSign className="h-4 w-4" />
+            </div>
+          </div>
+          <div className="text-lg font-black text-slate-900 tracking-tight">{isLoading ? '...' : fmt(data.profitBeforeTax ?? (data.operatingProfit ?? data.netProfit))}</div>
+          <div className="text-[11px] font-bold text-emerald-600 flex items-center gap-0.5">
+            <ArrowUpRight className="h-3.5 w-3.5" /> 17.2% <span className="text-slate-400 font-normal">vs last month</span>
+          </div>
+        </div>
+
+        {/* Card 7: Net Profit */}
         <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold text-slate-500">Net Profit</span>
@@ -471,7 +501,7 @@ export default function ProfitabilityAnalysisPage() {
           </div>
         </div>
 
-        {/* Card 6: Net Margin */}
+        {/* Card 8: Net Margin */}
         <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold text-slate-500">Net Margin</span>
