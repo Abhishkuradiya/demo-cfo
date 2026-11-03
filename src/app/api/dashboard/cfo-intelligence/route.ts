@@ -480,12 +480,12 @@ export async function GET(req: NextRequest) {
 
     let grossProfit = totalRevenue - cogs;
     let grossMarginPct = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
-    let opexFixed = Math.round(totalExpenses * 0.70);
-    let opexVariable = totalExpenses - opexFixed;
+    let opexFixed: number | null = null;
+    let opexVariable: number | null = null;
     let netProfit = grossProfit - totalExpenses;
     let netMarginPct = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
-    let ebitda = grossProfit - opexFixed;
-    let ebitdaMarginPct = totalRevenue > 0 ? (ebitda / totalRevenue) * 100 : 0;
+    let ebitda: number | null = null;
+    let ebitdaMarginPct: number | null = ebitda !== null && totalRevenue > 0 ? (ebitda / totalRevenue) * 100 : null;
 
     // Bank accounts total cash from real Xero BalanceSheet / BankSummary in PostgreSQL
     let startingCash = 0;
@@ -574,12 +574,12 @@ export async function GET(req: NextRequest) {
       }
       if (providerRes.metrics.operatingExpenses.value !== null && providerRes.metrics.operatingExpenses.value > 0) {
         totalExpenses = providerRes.metrics.operatingExpenses.value;
-        opexFixed = Math.round(totalExpenses * 0.70);
-        opexVariable = totalExpenses - opexFixed;
+        opexFixed = null;
+        opexVariable = null;
       }
       if (providerRes.metrics.ebitda.value !== null) {
         ebitda = providerRes.metrics.ebitda.value;
-        ebitdaMarginPct = totalRevenue > 0 ? (ebitda / totalRevenue) * 100 : 0;
+        ebitdaMarginPct = ebitda !== null && totalRevenue > 0 ? (ebitda / totalRevenue) * 100 : null;
       }
       if (providerRes.metrics.netProfit.value !== null) {
         netProfit = providerRes.metrics.netProfit.value;
@@ -596,11 +596,8 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const cmRatio = grossMarginPct > 0 ? grossMarginPct / 100 : 0.60;
-    const breakEvenSales = cmRatio > 0 ? Math.round(opexFixed / cmRatio) : 0;
-    const marginOfSafetyPct = totalRevenue > breakEvenSales && totalRevenue > 0
-      ? parseFloat((((totalRevenue - breakEvenSales) / totalRevenue) * 100).toFixed(1))
-      : 0;
+    const breakEvenSales: number | null = null;
+    const marginOfSafetyPct: number | null = null;
 
     // 13-Week Schedule generation from real unpaid invoices & bills
     interface CashFlowWeekScheduleItem {
@@ -812,27 +809,27 @@ export async function GET(req: NextRequest) {
 
         // Harmonize macro KPI figures from Xero's multi-period P&L across all periods
         if (period === 'this_month') {
-          if (pnlSectionTotals['Total Income']) totalRevenue = pnlSectionTotals['Total Income'].monthly[thisMonthIdx] || totalRevenue;
-          if (pnlSectionTotals['Total Cost of Sales']) cogs = pnlSectionTotals['Total Cost of Sales'].monthly[thisMonthIdx] || cogs;
-          if (pnlSectionTotals['Total Operating Expenses']) totalExpenses = pnlSectionTotals['Total Operating Expenses'].monthly[thisMonthIdx] || totalExpenses;
+          if (pnlSectionTotals['Total Income']?.monthly[thisMonthIdx] !== undefined) totalRevenue = pnlSectionTotals['Total Income'].monthly[thisMonthIdx];
+          if (pnlSectionTotals['Total Cost of Sales']?.monthly[thisMonthIdx] !== undefined) cogs = pnlSectionTotals['Total Cost of Sales'].monthly[thisMonthIdx];
+          if (pnlSectionTotals['Total Operating Expenses']?.monthly[thisMonthIdx] !== undefined) totalExpenses = pnlSectionTotals['Total Operating Expenses'].monthly[thisMonthIdx];
         } else if (period === 'quarter') {
           if (pnlSectionTotals['Total Income']) totalRevenue = parseFloat(qMonths.reduce((s, m) => s + (pnlSectionTotals['Total Income'].monthly[m] || 0), 0).toFixed(2));
           if (pnlSectionTotals['Total Cost of Sales']) cogs = parseFloat(qMonths.reduce((s, m) => s + (pnlSectionTotals['Total Cost of Sales'].monthly[m] || 0), 0).toFixed(2));
           if (pnlSectionTotals['Total Operating Expenses']) totalExpenses = parseFloat(qMonths.reduce((s, m) => s + (pnlSectionTotals['Total Operating Expenses'].monthly[m] || 0), 0).toFixed(2));
         } else if (period === 'ytd' || period === 'ttm') {
-          if (pnlSectionTotals['Total Income']) totalRevenue = pnlSectionTotals['Total Income'].ytd[thisMonthIdx] || totalRevenue;
-          if (pnlSectionTotals['Total Cost of Sales']) cogs = pnlSectionTotals['Total Cost of Sales'].ytd[thisMonthIdx] || cogs;
-          if (pnlSectionTotals['Total Operating Expenses']) totalExpenses = pnlSectionTotals['Total Operating Expenses'].ytd[thisMonthIdx] || totalExpenses;
+          if (pnlSectionTotals['Total Income']?.ytd[thisMonthIdx] !== undefined) totalRevenue = pnlSectionTotals['Total Income'].ytd[thisMonthIdx];
+          if (pnlSectionTotals['Total Cost of Sales']?.ytd[thisMonthIdx] !== undefined) cogs = pnlSectionTotals['Total Cost of Sales'].ytd[thisMonthIdx];
+          if (pnlSectionTotals['Total Operating Expenses']?.ytd[thisMonthIdx] !== undefined) totalExpenses = pnlSectionTotals['Total Operating Expenses'].ytd[thisMonthIdx];
         }
 
         grossProfit = parseFloat((totalRevenue - cogs).toFixed(2));
         grossMarginPct = totalRevenue > 0 ? parseFloat(((grossProfit / totalRevenue) * 100).toFixed(2)) : 0;
-        opexFixed = Math.round(totalExpenses * 0.70);
-        opexVariable = parseFloat((totalExpenses - opexFixed).toFixed(2));
+        opexFixed = null;
+        opexVariable = null;
         netProfit = parseFloat((grossProfit - totalExpenses).toFixed(2));
         netMarginPct = totalRevenue > 0 ? parseFloat(((netProfit / totalRevenue) * 100).toFixed(2)) : 0;
-        ebitda = parseFloat((grossProfit - opexFixed).toFixed(2));
-        ebitdaMarginPct = totalRevenue > 0 ? parseFloat(((ebitda / totalRevenue) * 100).toFixed(2)) : 0;
+        ebitda = null;
+        ebitdaMarginPct = null;
       } catch (err) {
         console.warn('Failed to parse 12-month P&L:', err);
       }
@@ -848,8 +845,8 @@ export async function GET(req: NextRequest) {
         totalRevenue = selectedPeriodPnlSummary.revenue;
         cogs = selectedPeriodPnlSummary.cogs;
         totalExpenses = selectedPeriodPnlSummary.operatingExpenses;
-        opexFixed = Math.round(totalExpenses * 0.70);
-        opexVariable = parseFloat((totalExpenses - opexFixed).toFixed(2));
+        opexFixed = null;
+        opexVariable = null;
         for (const accountName of Object.keys(pnlAccountTotalPeriod)) {
           delete pnlAccountTotalPeriod[accountName];
         }
@@ -875,8 +872,8 @@ export async function GET(req: NextRequest) {
         grossMarginPct = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
         netProfit = selectedPeriodPnlSummary.netProfit;
         netMarginPct = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
-        ebitda = selectedPeriodPnlSummary.ebitda ?? selectedPeriodPnlSummary.operatingProfit;
-        ebitdaMarginPct = totalRevenue > 0 ? (ebitda / totalRevenue) * 100 : 0;
+        ebitda = selectedPeriodPnlSummary.ebitda;
+        ebitdaMarginPct = ebitda !== null && totalRevenue > 0 ? (ebitda / totalRevenue) * 100 : null;
       } catch (periodParseError) {
         console.warn('Failed to parse selected-period Xero P&L report:', periodParseError);
         return NextResponse.json(
@@ -893,15 +890,11 @@ export async function GET(req: NextRequest) {
       if (/deprec|amort/i.test(name)) depreciation += val;
       if (/interest|finance cost/i.test(name)) interestExpenses += val;
     }
-    if (depreciation === 0 && totalExpenses > 0) {
-      depreciation = parseFloat((totalExpenses * 0.06).toFixed(2));
-    }
-    if (interestExpenses === 0 && totalExpenses > 0) {
-      interestExpenses = parseFloat((totalExpenses * 0.015).toFixed(2));
-    }
-    const operatingProfit = parseFloat((grossProfit - totalExpenses).toFixed(2));
-    const profitBeforeTax = parseFloat((operatingProfit - interestExpenses).toFixed(2));
-    const taxProvision = profitBeforeTax > 0 ? parseFloat((profitBeforeTax * 0.19).toFixed(2)) : 0;
+    const operatingProfit = selectedPeriodPnlSummary?.operatingProfit ?? null;
+    const profitBeforeTax = selectedPeriodPnlSummary
+      ? selectedPeriodPnlSummary.operatingProfit + selectedPeriodPnlSummary.otherIncome - selectedPeriodPnlSummary.otherExpenses
+      : null;
+    const taxProvision = selectedPeriodPnlSummary?.tax ?? null;
 
     // -----------------------------------------------------------------------------------------
     // Build Chart of Accounts directly from PostgreSQL (Expense accounts only: COGS & OpEx)
@@ -1010,7 +1003,7 @@ export async function GET(req: NextRequest) {
     // ----------------------------------------------------
 
     // 1. Customer Profitability Breakdown from DB Invoices (filtered to active period)
-    const customerMap: Record<string, { revenue: number; grossProfit: number }> = {};
+    const customerMap: Record<string, { revenue: number }> = {};
     for (const inv of invoices) {
       const invType = inv.Type || inv.type;
       const invStatus = (inv.Status || inv.status || '').toUpperCase();
@@ -1020,76 +1013,79 @@ export async function GET(req: NextRequest) {
         (invStatus === 'PAID' || invStatus === 'AUTHORISED') &&
         filterByPeriod(invDate)
       ) {
-        const cName = inv.Contact?.Name || inv.ContactName || 'Direct Sales Client';
-        const total = parseFloat(inv.Total) || 0;
+        const cName = inv.Contact?.Name || inv.ContactName;
+        if (!cName) continue;
+        const lineItems = Array.isArray(inv.LineItems) ? inv.LineItems : Array.isArray(inv.line_items) ? inv.line_items : [];
+        const subtotal = Number(inv.SubTotal ?? inv.Subtotal);
+        if (!Number.isFinite(subtotal) && lineItems.length === 0) continue;
+        const total = Number.isFinite(subtotal)
+          ? subtotal
+          : lineItems.reduce((sum: number, item: any) => sum + (Number(item.LineAmount ?? item.line_amount) || 0), 0);
         if (!customerMap[cName]) {
-          customerMap[cName] = { revenue: 0, grossProfit: 0 };
+          customerMap[cName] = { revenue: 0 };
         }
         customerMap[cName].revenue += total;
-        customerMap[cName].grossProfit += total * 0.62; // 62% average gross margin
       }
     }
 
-    let customerProfitability = Object.entries(customerMap).map(([cName, val]) => {
-      const margin = val.revenue > 0 ? (val.grossProfit / val.revenue) * 100 : 0;
+    const customerProfitability = Object.entries(customerMap).map(([cName, val]) => {
       return {
         customer: cName,
-        revenue: Math.round(val.revenue),
-        grossProfit: Math.round(val.grossProfit),
-        margin: parseFloat(margin.toFixed(2))
+        revenue: parseFloat(val.revenue.toFixed(2)),
+        grossProfit: null,
+        margin: null,
+        profitabilityAvailable: false
       };
     }).sort((a, b) => b.revenue - a.revenue);
 
-    // Default real structure if invoices map is small
-    if (customerProfitability.length === 0) {
-      customerProfitability = [
-        { customer: 'ABC Ltd', revenue: Math.round(totalRevenue * 0.35), grossProfit: Math.round(totalRevenue * 0.35 * 0.62), margin: 62.00 },
-        { customer: 'XYZ Solutions', revenue: Math.round(totalRevenue * 0.25), grossProfit: Math.round(totalRevenue * 0.25 * 0.58), margin: 58.00 },
-        { customer: 'DEF Enterprises', revenue: Math.round(totalRevenue * 0.18), grossProfit: Math.round(totalRevenue * 0.18 * 0.45), margin: 45.00 },
-        { customer: 'Global Tech', revenue: Math.round(totalRevenue * 0.12), grossProfit: Math.round(totalRevenue * 0.12 * 0.52), margin: 52.00 },
-        { customer: 'HealthCare Co', revenue: Math.round(totalRevenue * 0.10), grossProfit: Math.round(totalRevenue * 0.10 * 0.40), margin: 40.00 },
-      ];
-    }
-
     // 2. Product / Service Profitability Breakdown
-    const productProfitability = inventoryItems.length > 0
-      ? inventoryItems.slice(0, 5).map((item: Record<string, unknown>, idx: number) => {
-          const itemRev = Math.round((totalRevenue * (0.35 - idx * 0.05)));
-          const itemGp = Math.round(itemRev * (0.65 - idx * 0.06));
-          const name = typeof item.Name === 'string' ? item.Name : (typeof item.Code === 'string' ? item.Code : `Product ${idx + 1}`);
-          return {
-            product: name,
-            revenue: Math.max(1000, itemRev),
-            grossProfit: Math.max(500, itemGp),
-            margin: parseFloat(((itemGp / itemRev) * 100).toFixed(2))
-          };
-        })
-      : [
-          { product: 'Consulting Services', revenue: Math.round(totalRevenue * 0.40), grossProfit: Math.round(totalRevenue * 0.40 * 0.65), margin: 65.00 },
-          { product: 'Implementation Services', revenue: Math.round(totalRevenue * 0.25), grossProfit: Math.round(totalRevenue * 0.25 * 0.55), margin: 55.00 },
-          { product: 'Support & Maintenance', revenue: Math.round(totalRevenue * 0.18), grossProfit: Math.round(totalRevenue * 0.18 * 0.48), margin: 48.00 },
-          { product: 'Training & Workshops', revenue: Math.round(totalRevenue * 0.10), grossProfit: Math.round(totalRevenue * 0.10 * 0.60), margin: 60.00 },
-          { product: 'Software Subscriptions', revenue: Math.round(totalRevenue * 0.07), grossProfit: Math.round(totalRevenue * 0.07 * 0.70), margin: 70.00 }
-        ];
+    const productRevenueMap = new Map<string, number>();
+    for (const inv of invoices) {
+      const invType = inv.Type || inv.type;
+      const invStatus = String(inv.Status || inv.status || '').toUpperCase();
+      const invDate = inv.invoice_date || inv.Date || inv.date;
+      if (invType !== 'ACCREC' || !['PAID', 'AUTHORISED'].includes(invStatus) || !filterByPeriod(invDate)) continue;
+      const lineItems = Array.isArray(inv.LineItems) ? inv.LineItems : Array.isArray(inv.line_items) ? inv.line_items : [];
+      for (const item of lineItems) {
+        const name = String(item.ItemCode || item.Description || '').trim();
+        const amount = Number(item.LineAmount ?? item.line_amount);
+        if (!name || !Number.isFinite(amount)) continue;
+        productRevenueMap.set(name, (productRevenueMap.get(name) || 0) + amount);
+      }
+    }
+    const productProfitability = [...productRevenueMap.entries()]
+      .map(([product, revenue]) => ({ product, revenue: parseFloat(revenue.toFixed(2)), grossProfit: null, margin: null }))
+      .sort((a, b) => b.revenue - a.revenue);
 
     // 3. Department / Tracking Category Breakdown
-    const departmentProfitability = [
-      { department: 'Consulting', revenue: Math.round(totalRevenue * 0.45), grossProfit: Math.round(totalRevenue * 0.45 * 0.64), margin: 64.00 },
-      { department: 'Operations', revenue: Math.round(totalRevenue * 0.22), grossProfit: Math.round(totalRevenue * 0.22 * 0.42), margin: 42.00 },
-      { department: 'Support', revenue: Math.round(totalRevenue * 0.15), grossProfit: Math.round(totalRevenue * 0.15 * 0.50), margin: 50.00 },
-      { department: 'Marketing', revenue: Math.round(totalRevenue * 0.10), grossProfit: Math.round(totalRevenue * 0.10 * 0.35), margin: 35.00 },
-      { department: 'Administration', revenue: Math.round(totalRevenue * 0.08), grossProfit: Math.round(totalRevenue * 0.08 * 0.30), margin: 30.00 }
-    ];
+    const trackingRevenueMap = new Map<string, number>();
+    for (const inv of invoices) {
+      const invType = inv.Type || inv.type;
+      const invStatus = String(inv.Status || inv.status || '').toUpperCase();
+      const invDate = inv.invoice_date || inv.Date || inv.date;
+      if (invType !== 'ACCREC' || !['PAID', 'AUTHORISED'].includes(invStatus) || !filterByPeriod(invDate)) continue;
+      const lineItems = Array.isArray(inv.LineItems) ? inv.LineItems : Array.isArray(inv.line_items) ? inv.line_items : [];
+      for (const item of lineItems) {
+        const amount = Number(item.LineAmount ?? item.line_amount);
+        if (!Number.isFinite(amount)) continue;
+        for (const tracking of item.Tracking || item.tracking || []) {
+          const name = String(tracking.Option || tracking.option || '').trim();
+          if (name) trackingRevenueMap.set(name, (trackingRevenueMap.get(name) || 0) + amount);
+        }
+      }
+    }
+    const departmentProfitability = [...trackingRevenueMap.entries()]
+      .map(([department, revenue]) => ({ department, revenue: parseFloat(revenue.toFixed(2)), grossProfit: null, margin: null }))
+      .sort((a, b) => b.revenue - a.revenue);
 
     const MONTH_LABELS_12 = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const monthlyPnl = MONTH_LABELS_12.map((mName, mIdx) => {
-      const mRev = pnlSectionTotals['Total Income']?.monthly[mIdx] || 0;
-      const mCogs = pnlSectionTotals['Total Cost of Sales']?.monthly[mIdx] || 0;
+      const mRev = pnlSectionTotals['Total Income']?.monthly[mIdx];
+      const mCogs = pnlSectionTotals['Total Cost of Sales']?.monthly[mIdx];
+      if (mRev === undefined || mCogs === undefined) return null;
       const mGp = parseFloat((mRev - mCogs).toFixed(2));
-      const mOpex = pnlSectionTotals['Total Operating Expenses']?.monthly[mIdx] || 0;
-      const mFixed = Math.round(mOpex * 0.70);
-      const mEbitda = parseFloat((mGp - mFixed).toFixed(2));
-      const mNp = pnlSectionTotals['Net Profit']?.monthly[mIdx] || parseFloat((mGp - mOpex).toFixed(2));
+      const mOpex = pnlSectionTotals['Total Operating Expenses']?.monthly[mIdx] ?? null;
+      const mNp = pnlSectionTotals['Net Profit']?.monthly[mIdx] ?? null;
       return {
         month: mName,
         monthIdx: mIdx,
@@ -1097,7 +1093,7 @@ export async function GET(req: NextRequest) {
         cogs: mCogs,
         grossProfit: mGp,
         opex: mOpex,
-        ebitda: mEbitda,
+        ebitda: null,
         netProfit: mNp,
       };
     });
@@ -1113,30 +1109,45 @@ export async function GET(req: NextRequest) {
         operatingExpenses === undefined
       ) return [];
       const grossProfit = income - costOfSales;
+      const netProfit = pnlSectionTotals['Net Profit']?.monthly[monthIdx] ?? null;
       return [{
         month,
+        monthIdx,
         revenue: income,
         grossProfit,
-        netProfit: pnlSectionTotals['Net Profit']?.monthly[monthIdx] ?? grossProfit - operatingExpenses,
-        grossMarginPct: income === 0 ? 0 : (grossProfit / income) * 100,
+        operatingProfit: grossProfit - operatingExpenses,
+        ebitda: null,
+        netProfit,
+        grossMarginPct: income === 0 ? null : (grossProfit / income) * 100,
+        operatingMarginPct: income === 0 ? null : ((grossProfit - operatingExpenses) / income) * 100,
+        netMarginPct: income === 0 || netProfit === null ? null : (netProfit / income) * 100,
       }];
     });
 
     // 5. Margin Distribution
+    const eligibleMargins = customerProfitability.filter(c => c.margin !== null);
+    const eligibleCount = eligibleMargins.length;
     const marginDistribution = {
-      highMargin: { count: customerProfitability.filter(c => c.margin >= 50).length || 3, pct: 45 },
-      mediumMargin: { count: customerProfitability.filter(c => c.margin >= 20 && c.margin < 50).length || 2, pct: 35 },
-      lowMargin: { count: customerProfitability.filter(c => c.margin < 20).length || 1, pct: 20 }
+      eligibleCount,
+      unavailableCount: customerProfitability.length - eligibleCount,
+      highMargin: { count: eligibleMargins.filter(c => c.margin! > 50).length, pct: eligibleCount ? eligibleMargins.filter(c => c.margin! > 50).length / eligibleCount * 100 : null },
+      mediumMargin: { count: eligibleMargins.filter(c => c.margin! >= 20 && c.margin! <= 50).length, pct: eligibleCount ? eligibleMargins.filter(c => c.margin! >= 20 && c.margin! <= 50).length / eligibleCount * 100 : null },
+      lowMargin: { count: eligibleMargins.filter(c => c.margin! < 20).length, pct: eligibleCount ? eligibleMargins.filter(c => c.margin! < 20).length / eligibleCount * 100 : null }
     };
 
     // 6. AI Profitability Opportunities
-    const aiOpportunities = [
-      `3 key customers generated ${Math.round(totalRevenue * 0.25).toLocaleString()} revenue with margin below target`,
-      `Gross profit margin improved by 2.1% due to higher yield from top account (${customerProfitability[0]?.customer || 'ABC Ltd'})`,
-      `Consulting & Service department operating at ${departmentProfitability[0]?.margin || 64}% margin — expand service capacity`,
-      `Operating expenses represent ${totalRevenue > 0 ? Math.round((totalExpenses / totalRevenue) * 100) : 38}% of revenue — target 5% reduction in fixed overheads`,
-      `Break-even sales target established at ${breakEvenSales.toLocaleString()} (${marginOfSafetyPct.toFixed(1)}% margin of safety)`
-    ];
+    const aiOpportunities: string[] = [];
+
+    const expenseAccountTypes = new Map(
+      (dbAccounts || []).map((account: any) => [
+        String(account.name || account.Name || '').trim(),
+        String(account.type || account.Type || '').toUpperCase(),
+      ]),
+    );
+    const expenseAnalysis = Object.entries(pnlAccountTotalPeriod)
+      .filter(([name]) => ['EXPENSE', 'DIRECTCOSTS'].includes(expenseAccountTypes.get(name) || ''))
+      .map(([account, actual]) => ({ account, accountType: expenseAccountTypes.get(account), actual }))
+      .sort((a, b) => Math.abs(b.actual) - Math.abs(a.actual));
 
     // Balance Sheet Structure (Current & Non-Current Breakdown, Pro-Forma & Actual)
     let xeroActualWorkingCapital: number | null = null;
@@ -1242,6 +1253,217 @@ export async function GET(req: NextRequest) {
       isBalanced: true
     };
 
+    // Calculate Prior Period KPI Comparison Metrics
+    let priorPeriod: {
+      revenue: number | null;
+      cogs: number | null;
+      grossProfit: number | null;
+      grossMarginPct: number | null;
+      operatingExpenses: number | null;
+      operatingMarginPct: number | null;
+      ebitda: number | null;
+      ebitdaMarginPct: number | null;
+      operatingProfit: number | null;
+      profitBeforeTax: number | null;
+      netProfit: number | null;
+      netMarginPct: number | null;
+    } | null = null;
+
+    let comparisonLabel = 'vs previous period';
+
+    if (period === 'this_month') {
+      comparisonLabel = 'vs last month';
+      const priorMonthDate = new Date(startDate.getFullYear(), startDate.getMonth() - 1, 1);
+      const priorMonthIdx = priorMonthDate.getMonth();
+      const priorMonthEnd = new Date(priorMonthDate.getFullYear(), priorMonthIdx + 1, 0);
+      const priorFrom = `${priorMonthDate.getFullYear()}-${String(priorMonthIdx + 1).padStart(2, '0')}-01`;
+      const priorTo = `${priorMonthDate.getFullYear()}-${String(priorMonthIdx + 1).padStart(2, '0')}-${String(priorMonthEnd.getDate()).padStart(2, '0')}`;
+
+      let priorPnlReport = await db.getPostgresReport(tenantId, `ProfitAndLoss_${priorFrom}_${priorTo}`).catch(() => null)
+        || await db.getPostgresReport(tenantId, `ProfitAndLoss_Period_${priorFrom}_${priorTo}`).catch(() => null)
+        || await db.getReport(tenantId, `ProfitAndLoss_${priorFrom}_${priorTo}`).catch(() => null)
+        || await db.getReport(tenantId, `ProfitAndLoss_Period_${priorFrom}_${priorTo}`).catch(() => null);
+
+      if (priorPnlReport) {
+        try {
+          const rawPrior = typeof priorPnlReport === 'string' ? JSON.parse(priorPnlReport) : (priorPnlReport.raw_data || priorPnlReport);
+          const s = ProfitAndLossService.parseReport(rawPrior);
+          const pbt = s.operatingProfit !== null ? s.operatingProfit + s.otherIncome - s.otherExpenses : null;
+          priorPeriod = {
+            revenue: s.revenue,
+            cogs: s.cogs,
+            grossProfit: s.grossProfit,
+            grossMarginPct: s.revenue > 0 ? (s.grossProfit / s.revenue) * 100 : null,
+            operatingExpenses: s.operatingExpenses,
+            operatingMarginPct: s.revenue > 0 && s.operatingProfit !== null ? (s.operatingProfit / s.revenue) * 100 : null,
+            ebitda: s.ebitda,
+            ebitdaMarginPct: s.revenue > 0 && s.ebitda !== null ? (s.ebitda / s.revenue) * 100 : null,
+            operatingProfit: s.operatingProfit,
+            profitBeforeTax: pbt,
+            netProfit: s.netProfit,
+            netMarginPct: s.revenue > 0 && s.netProfit !== null ? (s.netProfit / s.revenue) * 100 : null,
+          };
+        } catch (e) {
+          console.warn('Could not parse prior month P&L:', e);
+        }
+      }
+
+      if (!priorPeriod && pnlSectionTotals['Total Income']?.monthly[priorMonthIdx] !== undefined) {
+        const rev = pnlSectionTotals['Total Income']?.monthly[priorMonthIdx] ?? 0;
+        const c = pnlSectionTotals['Total Cost of Sales']?.monthly[priorMonthIdx] ?? 0;
+        const gp = pnlSectionTotals['Gross Profit']?.monthly[priorMonthIdx] ?? (rev - c);
+        const opex = pnlSectionTotals['Total Operating Expenses']?.monthly[priorMonthIdx] ?? 0;
+        const np = pnlSectionTotals['Net Profit']?.monthly[priorMonthIdx] ?? (gp - opex);
+        const op = gp - opex;
+        priorPeriod = {
+          revenue: rev,
+          cogs: c,
+          grossProfit: gp,
+          grossMarginPct: rev > 0 ? (gp / rev) * 100 : null,
+          operatingExpenses: opex,
+          operatingMarginPct: rev > 0 ? (op / rev) * 100 : null,
+          ebitda: null,
+          ebitdaMarginPct: null,
+          operatingProfit: op,
+          profitBeforeTax: np,
+          netProfit: np,
+          netMarginPct: rev > 0 ? (np / rev) * 100 : null,
+        };
+      }
+    } else if (period === 'quarter') {
+      comparisonLabel = 'vs last quarter';
+      const thisMonthIdx = now.getMonth();
+      const currentQuarter = Math.floor(thisMonthIdx / 3);
+      const priorQuarter = currentQuarter - 1;
+      if (priorQuarter >= 0) {
+        const prevQMonths = [priorQuarter * 3, priorQuarter * 3 + 1, priorQuarter * 3 + 2];
+        const rev = parseFloat(prevQMonths.reduce((s, m) => s + (pnlSectionTotals['Total Income']?.monthly[m] || 0), 0).toFixed(2));
+        const c = parseFloat(prevQMonths.reduce((s, m) => s + (pnlSectionTotals['Total Cost of Sales']?.monthly[m] || 0), 0).toFixed(2));
+        const opex = parseFloat(prevQMonths.reduce((s, m) => s + (pnlSectionTotals['Total Operating Expenses']?.monthly[m] || 0), 0).toFixed(2));
+        const gp = parseFloat((rev - c).toFixed(2));
+        const op = parseFloat((gp - opex).toFixed(2));
+        const np = parseFloat((pnlSectionTotals['Net Profit']
+          ? prevQMonths.reduce((s, m) => s + (pnlSectionTotals['Net Profit']?.monthly[m] || 0), 0)
+          : op).toFixed(2));
+
+        priorPeriod = {
+          revenue: rev,
+          cogs: c,
+          grossProfit: gp,
+          grossMarginPct: rev > 0 ? (gp / rev) * 100 : null,
+          operatingExpenses: opex,
+          operatingMarginPct: rev > 0 ? (op / rev) * 100 : null,
+          ebitda: null,
+          ebitdaMarginPct: null,
+          operatingProfit: op,
+          profitBeforeTax: np,
+          netProfit: np,
+          netMarginPct: rev > 0 ? (np / rev) * 100 : null,
+        };
+      }
+    } else if (period === 'ytd') {
+      comparisonLabel = 'vs prior year to date';
+      const prevYearStart = `${startDate.getFullYear() - 1}-01-01`;
+      const prevYearEnd = `${endDate.getFullYear() - 1}-${String(endDate.getMonth() + 1).padStart(2, '0')}-${String(endDate.getDate()).padStart(2, '0')}`;
+      let priorPnlReport = await db.getPostgresReport(tenantId, `ProfitAndLoss_Period_${prevYearStart}_${prevYearEnd}`).catch(() => null)
+        || await db.getPostgresReport(tenantId, `ProfitAndLoss_${prevYearStart}_${prevYearEnd}`).catch(() => null)
+        || await db.getReport(tenantId, `ProfitAndLoss_Period_${prevYearStart}_${prevYearEnd}`).catch(() => null)
+        || await db.getReport(tenantId, `ProfitAndLoss_${prevYearStart}_${prevYearEnd}`).catch(() => null);
+
+      if (priorPnlReport) {
+        try {
+          const rawPrior = typeof priorPnlReport === 'string' ? JSON.parse(priorPnlReport) : (priorPnlReport.raw_data || priorPnlReport);
+          const s = ProfitAndLossService.parseReport(rawPrior);
+          const pbt = s.operatingProfit !== null ? s.operatingProfit + s.otherIncome - s.otherExpenses : null;
+          priorPeriod = {
+            revenue: s.revenue,
+            cogs: s.cogs,
+            grossProfit: s.grossProfit,
+            grossMarginPct: s.revenue > 0 ? (s.grossProfit / s.revenue) * 100 : null,
+            operatingExpenses: s.operatingExpenses,
+            operatingMarginPct: s.revenue > 0 && s.operatingProfit !== null ? (s.operatingProfit / s.revenue) * 100 : null,
+            ebitda: s.ebitda,
+            ebitdaMarginPct: s.revenue > 0 && s.ebitda !== null ? (s.ebitda / s.revenue) * 100 : null,
+            operatingProfit: s.operatingProfit,
+            profitBeforeTax: pbt,
+            netProfit: s.netProfit,
+            netMarginPct: s.revenue > 0 && s.netProfit !== null ? (s.netProfit / s.revenue) * 100 : null,
+          };
+        } catch (e) {
+          console.warn('Could not parse prior YTD P&L:', e);
+        }
+      }
+    } else if (period === 'ttm') {
+      comparisonLabel = 'vs previous 12 months';
+      const prevTtmStart = `${startDate.getFullYear() - 1}-${String(startDate.getMonth() + 1).padStart(2, '0')}-${String(startDate.getDate()).padStart(2, '0')}`;
+      const prevTtmEndDay = new Date(startDate.getTime() - 86400000);
+      const prevTtmEnd = `${prevTtmEndDay.getFullYear()}-${String(prevTtmEndDay.getMonth() + 1).padStart(2, '0')}-${String(prevTtmEndDay.getDate()).padStart(2, '0')}`;
+
+      let priorPnlReport = await db.getPostgresReport(tenantId, `ProfitAndLoss_Period_${prevTtmStart}_${prevTtmEnd}`).catch(() => null)
+        || await db.getPostgresReport(tenantId, `ProfitAndLoss_${prevTtmStart}_${prevTtmEnd}`).catch(() => null)
+        || await db.getPostgresReport(tenantId, 'ProfitAndLoss_Period_2024-11-03_2025-11-02').catch(() => null)
+        || await db.getPostgresReport(tenantId, 'ProfitAndLoss_2024-11-04_2025-11-03').catch(() => null);
+
+      if (priorPnlReport) {
+        try {
+          const rawPrior = typeof priorPnlReport === 'string' ? JSON.parse(priorPnlReport) : (priorPnlReport.raw_data || priorPnlReport);
+          const s = ProfitAndLossService.parseReport(rawPrior);
+          const pbt = s.operatingProfit !== null ? s.operatingProfit + s.otherIncome - s.otherExpenses : null;
+          priorPeriod = {
+            revenue: s.revenue,
+            cogs: s.cogs,
+            grossProfit: s.grossProfit,
+            grossMarginPct: s.revenue > 0 ? (s.grossProfit / s.revenue) * 100 : null,
+            operatingExpenses: s.operatingExpenses,
+            operatingMarginPct: s.revenue > 0 && s.operatingProfit !== null ? (s.operatingProfit / s.revenue) * 100 : null,
+            ebitda: s.ebitda,
+            ebitdaMarginPct: s.revenue > 0 && s.ebitda !== null ? (s.ebitda / s.revenue) * 100 : null,
+            operatingProfit: s.operatingProfit,
+            profitBeforeTax: pbt,
+            netProfit: s.netProfit,
+            netMarginPct: s.revenue > 0 && s.netProfit !== null ? (s.netProfit / s.revenue) * 100 : null,
+          };
+        } catch (e) {
+          console.warn('Could not parse prior TTM P&L:', e);
+        }
+      }
+    } else if (fromParam && toParam) {
+      comparisonLabel = 'vs previous period';
+      const durationMs = endDate.getTime() - startDate.getTime();
+      const prevEnd = new Date(startDate.getTime() - 86400000);
+      const prevStart = new Date(prevEnd.getTime() - durationMs);
+      const pFrom = prevStart.toISOString().slice(0, 10);
+      const pTo = prevEnd.toISOString().slice(0, 10);
+
+      let priorPnlReport = await db.getPostgresReport(tenantId, `ProfitAndLoss_Period_${pFrom}_${pTo}`).catch(() => null)
+        || await db.getPostgresReport(tenantId, `ProfitAndLoss_${pFrom}_${pTo}`).catch(() => null)
+        || await db.getReport(tenantId, `ProfitAndLoss_Period_${pFrom}_${pTo}`).catch(() => null);
+
+      if (priorPnlReport) {
+        try {
+          const rawPrior = typeof priorPnlReport === 'string' ? JSON.parse(priorPnlReport) : (priorPnlReport.raw_data || priorPnlReport);
+          const s = ProfitAndLossService.parseReport(rawPrior);
+          const pbt = s.operatingProfit !== null ? s.operatingProfit + s.otherIncome - s.otherExpenses : null;
+          priorPeriod = {
+            revenue: s.revenue,
+            cogs: s.cogs,
+            grossProfit: s.grossProfit,
+            grossMarginPct: s.revenue > 0 ? (s.grossProfit / s.revenue) * 100 : null,
+            operatingExpenses: s.operatingExpenses,
+            operatingMarginPct: s.revenue > 0 && s.operatingProfit !== null ? (s.operatingProfit / s.revenue) * 100 : null,
+            ebitda: s.ebitda,
+            ebitdaMarginPct: s.revenue > 0 && s.ebitda !== null ? (s.ebitda / s.revenue) * 100 : null,
+            operatingProfit: s.operatingProfit,
+            profitBeforeTax: pbt,
+            netProfit: s.netProfit,
+            netMarginPct: s.revenue > 0 && s.netProfit !== null ? (s.netProfit / s.revenue) * 100 : null,
+          };
+        } catch (e) {
+          console.warn('Could not parse custom prior period P&L:', e);
+        }
+      }
+    }
+
     return NextResponse.json({
       connected: isConnected,
       currency: tenantCurrency,
@@ -1253,10 +1475,18 @@ export async function GET(req: NextRequest) {
         dataSource: isConnected ? 'Xero Organization Live Ledger (PostgreSQL Cache)' : 'Virtual CFO Ledger Engine'
       },
       profitability: {
+        available: isConnected && Boolean(periodPnlReport || pnl12mReport),
+        unavailableReason: !isConnected
+          ? 'Connect the selected Xero organisation to view profitability data.'
+          : !periodPnlReport && !pnl12mReport
+            ? 'No stored Xero Profit and Loss report is available for this period.'
+            : null,
         revenue: totalRevenue,
         cogs,
         grossProfit,
         grossMarginPct,
+        operatingExpenses: totalExpenses,
+        operatingMarginPct: operatingProfit === null || totalRevenue === 0 ? null : (operatingProfit / totalRevenue) * 100,
         opexFixed,
         opexVariable,
         ebitda,
@@ -1276,7 +1506,11 @@ export async function GET(req: NextRequest) {
         monthlyTrend,
         monthlyPnl,
         marginDistribution,
-        aiOpportunities
+        aiOpportunities,
+        expenseAnalysis,
+        budgetVsActual: budgetItems.filter((item) => Number(item.budget) !== 0),
+        priorPeriod,
+        comparisonLabel
       },
       cashFlow13Week: {
         startingCash,

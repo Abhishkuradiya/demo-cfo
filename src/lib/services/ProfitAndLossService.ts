@@ -150,7 +150,6 @@ export class ProfitAndLossService {
       'net profit / loss',
       'net income',
       'profit after taxation',
-      'profit on ordinary activities before taxation',
       'profit for the year'
     ]);
     result.netProfit = npVal !== null ? npVal : ((result.grossProfit + result.otherIncome) - (result.operatingExpenses + result.otherExpenses));
