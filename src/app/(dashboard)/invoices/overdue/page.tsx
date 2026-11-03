@@ -626,7 +626,16 @@ export default function TopOverdueInvoicesPage() {
 
           {/* Sync Now Button */}
           <button
-            onClick={() => fetchData()}
+            onClick={async () => {
+              try {
+                const syncRes = await fetch('/api/xero', { method: 'POST' });
+                if (!syncRes.ok) throw new Error('Xero sync failed');
+                await fetchData();
+                toast.success('Payables refreshed from the updated PostgreSQL snapshot.');
+              } catch (error: any) {
+                toast.error(error.message || 'Xero sync failed');
+              }
+            }}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-blue-200 rounded-lg shadow-2xs text-[11.5px] font-bold text-blue-600 hover:bg-blue-50/50 transition cursor-pointer"
           >
             <RefreshCw className="h-3.5 w-3.5 text-blue-600" />

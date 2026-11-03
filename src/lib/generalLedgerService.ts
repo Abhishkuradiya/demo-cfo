@@ -139,8 +139,13 @@ export const XeroGeneralLedgerService = {
         manualHasMore = false;
       }
     }
-    if (strictPostgres) await db.savePostgresReport(tenantId, 'ManualJournals', allManual);
-    else await db.saveReport(tenantId, 'ManualJournals', allManual);
+    // Never replace a complete local snapshot with a partial page sequence.
+    // If Xero stopped paging because of an error, retain the previous snapshot
+    // and let the caller report the failed sync without advancing its checkpoint.
+    if (!manualSyncError) {
+      if (strictPostgres) await db.savePostgresReport(tenantId, 'ManualJournals', allManual);
+      else await db.saveReport(tenantId, 'ManualJournals', allManual);
+    }
 
     // 2. Fetch system journals incrementally. The API's offset is a JournalNumber,
     // so continue from the newest cached number instead of repeatedly reading only

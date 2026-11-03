@@ -113,7 +113,7 @@ export default function ProductsPage() {
   const handleSyncLive = async () => {
     setSyncing(true);
     try {
-      const res = await fetch('/api/inventory/sync', { method: 'POST' });
+      const res = await fetch('/api/xero', { method: 'POST' });
       if (res.ok) {
         await fetchInventory();
       } else {

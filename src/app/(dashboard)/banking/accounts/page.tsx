@@ -540,7 +540,16 @@ export default function BankAccountsPage() {
 
             {/* Sync Now */}
             <button
-              onClick={() => fetchData()}
+              onClick={async () => {
+                try {
+                  const syncRes = await fetch('/api/xero', { method: 'POST' });
+                  if (!syncRes.ok) throw new Error('Xero sync failed');
+                  await fetchData();
+                  toast.success('Bank accounts refreshed from the updated PostgreSQL snapshot.');
+                } catch (error: any) {
+                  toast.error(error.message || 'Xero sync failed');
+                }
+              }}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-300 rounded-lg shadow-2xs text-xs font-bold text-slate-700 hover:bg-slate-50 transition cursor-pointer"
             >
               <RefreshCw className="h-3.5 w-3.5 text-blue-600" />
