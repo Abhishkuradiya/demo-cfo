@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
 import { getTenantIdFromSession } from '@/lib/auth';
 import { getXeroAccessToken, fetchXeroReport, fetchXeroResource } from '@/lib/xero';
 import { BalanceSheetParser } from '@/lib/services/BalanceSheetParser';
@@ -128,7 +127,6 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const dateStr = searchParams.get('date');
-  const postgresStorage = searchParams.get('storage') === 'postgres';
 
   try {
     const tokenInfo = await getXeroAccessToken(tenantId);
@@ -147,12 +145,7 @@ export async function GET(req: NextRequest) {
     }
 
     const getStoredReport = async (key: string, fetchFromXero: () => Promise<unknown | null>) => {
-      if (postgresStorage) return getOrFetchManagementReport(tenantId, key, fetchFromXero);
-      const cached = await db.getReport(tenantId, key);
-      if (cached !== null) return cached;
-      const fresh = await fetchFromXero();
-      if (fresh !== null) await db.saveReport(tenantId, key, fresh);
-      return fresh;
+      return getOrFetchManagementReport(tenantId, key, fetchFromXero);
     };
     const cacheKey = `BalanceSheet_${date}`;
     let report = null;
@@ -160,7 +153,7 @@ export async function GET(req: NextRequest) {
       report = await getStoredReport(cacheKey, () => fetchXeroReport(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'BalanceSheet', `date=${date}`));
     } catch (error) {
       console.error('Failed to load Balance Sheet from PostgreSQL/Xero:', error);
-      if (postgresStorage) throw error;
+      throw error;
     }
 
     let org = null;
@@ -168,7 +161,7 @@ export async function GET(req: NextRequest) {
       org = await getStoredReport('Organisation', async () => (await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Organisations'))[0] ?? null);
     } catch (error) {
       console.error('Failed to load Organisation details from PostgreSQL/Xero:', error);
-      if (postgresStorage) throw error;
+      throw error;
     }
     const orgCurrency = org?.BaseCurrency || null;
 
@@ -177,7 +170,7 @@ export async function GET(req: NextRequest) {
         connected: true,
         available: false,
         sourceSummary: { assets: null, liabilities: null, equity: null, difference: null, isBalanced: null, reconciliation: 'unavailable', workingCapital: null },
-        summary: { assets: 0, liabilities: 0, equity: 0, isBalanced: true, difference: 0 },
+        summary: null,
         assets: { current: [], nonCurrent: [], unclassified: [] },
         liabilities: { current: [], nonCurrent: [], unclassified: [] },
         equity: [],
@@ -235,7 +228,7 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    const equityTrend: { label: string; value: number }[] = [];
+    const equityTrend: { label: string; value: number | null }[] = [];
     for (const m of monthsRange) {
       const pad = (n: number) => String(n).padStart(2, '0');
       const lastDayOfMonth = new Date(m.year, m.month + 1, 0).getDate();
@@ -247,13 +240,13 @@ export async function GET(req: NextRequest) {
         mBsReport = await getStoredReport(mBsCacheKey, () => fetchXeroReport(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'BalanceSheet', `date=${mDateStr}`));
       } catch (error) {
         console.error(`Failed to fetch dynamic BalanceSheet for trend point ${mDateStr}:`, error);
-        if (postgresStorage) throw error;
+        throw error;
       }
       
-      const mEquity = mBsReport ? (BalanceSheetParser.findTotalEquity(mBsReport.Rows) || 0) : 0;
+      const mEquity = mBsReport ? BalanceSheetParser.findTotalEquity(mBsReport.Rows) : null;
       equityTrend.push({
         label: m.label,
-        value: parseFloat(mEquity.toFixed(2))
+        value: mEquity === null ? null : parseFloat(mEquity.toFixed(2))
       });
     }
 

@@ -33,7 +33,7 @@ const sourceStatusStyles: Record<string, string> = {
 
 function money(value: number | null | undefined, currency: string | null) {
   if (value == null || !Number.isFinite(value)) return unavailable;
-  try { return currency ? new Intl.NumberFormat(undefined, { style: 'currency', currency, maximumFractionDigits: 2 }).format(value) : new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value); }
+  try { return currency ? new Intl.NumberFormat(undefined, { style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value) : new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value); }
   catch { return `${currency || ''} ${value.toFixed(2)}`.trim(); }
 }
 function displayDate(value: string | null | undefined) { return value ? new Date(value).toLocaleDateString() : unavailable; }

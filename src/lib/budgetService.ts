@@ -1,20 +1,21 @@
 import { db } from './db';
-import { getXeroAccessToken, fetchXeroReport } from './xero';
+import { getXeroAccessToken, fetchXeroReport, fetchXeroResource } from './xero';
 import { ProfitAndLossService } from './services/ProfitAndLossService';
+import { getOrFetchManagementReport } from './managementAccountsStorage';
 
 export interface BudgetVsActualCategory {
   category: string;
-  budget: number;
-  actual: number;
-  variance: number;
-  variance_pct: number;
+  budget: number | null;
+  actual: number | null;
+  variance: number | null;
+  variance_pct: number | null;
 }
 
 export interface BudgetVsActualSummary {
-  budget_ytd: number;
-  actual_ytd: number;
-  variance: number;
-  variance_pct: number;
+  budget_ytd: number | null;
+  actual_ytd: number | null;
+  variance: number | null;
+  variance_pct: number | null;
   last_synced: string;
   categories: BudgetVsActualCategory[];
   monthly_trends: {
@@ -23,6 +24,7 @@ export interface BudgetVsActualSummary {
     actual: number;
     variance: number;
   }[];
+  data_available?: boolean;
 }
 
 export const XeroBudgetService = {
@@ -117,46 +119,31 @@ export const XeroBudgetService = {
       otherExpenses: 0,
       netProfit: 0
     };
+    let actualAvailable = false;
+    let budgetAvailable = false;
 
     // 2. Fetch actual revenue from P&L report for same period
     try {
       const pnlCacheKey = `ProfitAndLoss_${startDateStr}_${endDateStr}`;
-      let plReport = await db.getReport(tenantId, pnlCacheKey);
-
-      if (!plReport && tokenInfo) {
-        const queryParams = `fromDate=${startDateStr}&toDate=${endDateStr}`;
-        plReport = await fetchXeroReport(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'ProfitAndLoss', queryParams);
-        if (plReport) {
-          await db.saveReport(tenantId, pnlCacheKey, plReport);
-        }
-      }
+      const plReport = tokenInfo
+        ? await getOrFetchManagementReport(
+            tenantId,
+            pnlCacheKey,
+            () => fetchXeroReport(
+              tokenInfo.accessToken,
+              tokenInfo.xeroTenantId,
+              'ProfitAndLoss',
+              `fromDate=${startDateStr}&toDate=${endDateStr}`,
+            ),
+          )
+        : null;
 
       if (plReport) {
         plSummary = ProfitAndLossService.parseReport(plReport);
-      } else {
-        // Fallback demo values if offline/no db report
-        plSummary = {
-          revenue: 22973.18,
-          cogs: 8046.00,
-          grossProfit: 14927.18,
-          operatingExpenses: 7920.00,
-          otherIncome: 473.18,
-          otherExpenses: 1728.00,
-          netProfit: 5752.36
-        };
+        actualAvailable = true;
       }
     } catch (e) {
       console.error('Failed to retrieve P&L actual revenue for budget comparison:', e);
-      // Fallback fallback
-      plSummary = {
-        revenue: 22973.18,
-        cogs: 8046.00,
-        grossProfit: 14927.18,
-        operatingExpenses: 7920.00,
-        otherIncome: 473.18,
-        otherExpenses: 1728.00,
-        netProfit: 5752.36
-      };
     }
 
     // Initialize category budgets
@@ -171,27 +158,41 @@ export const XeroBudgetService = {
     // 3. Fetch budgets from Xero API if connected
     if (tokenInfo) {
       try {
-        const budgets = await XeroBudgetService.fetchBudgetsList(tokenInfo.accessToken, tokenInfo.xeroTenantId);
+        const budgets = await getOrFetchManagementReport(
+          tenantId,
+          'Budgets_metadata',
+          () => XeroBudgetService.fetchBudgetsList(tokenInfo.accessToken, tokenInfo.xeroTenantId),
+        ) as any[] | null;
         
         // Find overall budget
-        const overallBudget = budgets.find(b => b.Type === 'OVERALL') || budgets[0];
+        const availableBudgets = budgets ?? [];
+        const overallBudget = availableBudgets.find(b => b.Type === 'OVERALL') || availableBudgets[0];
 
         if (overallBudget && overallBudget.BudgetID) {
-          const budgetDetails = await XeroBudgetService.fetchSingleBudget(
-            tokenInfo.accessToken,
-            tokenInfo.xeroTenantId,
-            overallBudget.BudgetID,
-            startDateStr,
-            endDateStr
-          );
+          const budgetDetails = await getOrFetchManagementReport(
+            tenantId,
+            `Budget_${overallBudget.BudgetID}_${startDateStr}_${endDateStr}`,
+            () => XeroBudgetService.fetchSingleBudget(
+              tokenInfo.accessToken,
+              tokenInfo.xeroTenantId,
+              overallBudget.BudgetID,
+              startDateStr,
+              endDateStr,
+            ),
+          ) as any;
 
           if (budgetDetails && Array.isArray(budgetDetails.BudgetLines)) {
+            budgetAvailable = true;
             // Get tenant accounts to map to categories
-            const accounts = await db.getAccounts(tenantId);
+            const accounts = await getOrFetchManagementReport(
+              tenantId,
+              'Accounts_metadata',
+              () => fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Accounts'),
+            ) as any[] | null;
             const accountCategoryMap = new Map<string, string>();
             const accountCodeCategoryMap = new Map<string, string>();
 
-            for (const acc of accounts) {
+            for (const acc of accounts ?? []) {
               const type = (acc.Type || acc.type || '').toUpperCase();
               const accClass = (acc.Class || acc.class || '').toUpperCase();
               const code = acc.Code || acc.code || '';
@@ -261,19 +262,19 @@ export const XeroBudgetService = {
     let totalActual = 0;
 
     for (const key of catKeys) {
-      const budget = parseFloat((categoryBudgets[key] || 0).toFixed(2));
-      const actual = parseFloat((actualMap[key] || 0).toFixed(2));
+      const budget = budgetAvailable ? parseFloat((categoryBudgets[key] || 0).toFixed(2)) : null;
+      const actual = actualAvailable ? parseFloat((actualMap[key] || 0).toFixed(2)) : null;
       
       // Standard accounting variance: Income is actual - budget, Expenses are budget - actual
       const isIncome = key === 'Income' || key === 'Other Income';
-      const variance = isIncome 
-        ? parseFloat((actual - budget).toFixed(2)) 
+      const variance = budget === null || actual === null ? null : isIncome
+        ? parseFloat((actual - budget).toFixed(2))
         : parseFloat((budget - actual).toFixed(2));
       
       let variance_pct = 0;
-      if (budget !== 0) {
+      if (variance !== null && budget !== null && budget !== 0) {
         variance_pct = parseFloat(((variance / budget) * 100).toFixed(2));
-      } else if (actual !== 0) {
+      } else if (variance !== null && actual !== null && actual !== 0) {
         variance_pct = 0.00; // Zero budget means 0% target comparison
       }
 
@@ -282,60 +283,46 @@ export const XeroBudgetService = {
         budget,
         actual,
         variance,
-        variance_pct
+        variance_pct: variance === null ? null : variance_pct
       });
 
       // Sum totals
       if (isIncome) {
-        totalBudget += budget;
-        totalActual += actual;
+        totalBudget += budget ?? 0;
+        totalActual += actual ?? 0;
       } else {
-        totalBudget -= budget;
-        totalActual -= actual;
+        totalBudget -= budget ?? 0;
+        totalActual -= actual ?? 0;
       }
     }
 
     // Add Total category row
     // Net profit/loss: favorable variance when actual is higher than budget
-    const totalVariance = parseFloat((totalActual - totalBudget).toFixed(2));
+    const totalVariance = !budgetAvailable || !actualAvailable ? null : parseFloat((totalActual - totalBudget).toFixed(2));
     let totalVariancePct = 0;
-    if (totalBudget !== 0) {
+    if (totalVariance !== null && totalBudget !== 0) {
       totalVariancePct = parseFloat(((totalVariance / totalBudget) * 100).toFixed(2));
-    } else if (totalActual !== 0) {
+    } else if (totalVariance !== null && totalActual !== 0) {
       totalVariancePct = 0.00;
     }
 
     categories.push({
       category: 'Total',
-      budget: parseFloat(totalBudget.toFixed(2)),
-      actual: parseFloat(totalActual.toFixed(2)),
+      budget: budgetAvailable ? parseFloat(totalBudget.toFixed(2)) : null,
+      actual: actualAvailable ? parseFloat(totalActual.toFixed(2)) : null,
       variance: totalVariance,
-      variance_pct: totalVariancePct
+      variance_pct: totalVariance === null ? null : totalVariancePct
     });
 
     // 5. Generate Monthly trends dynamically (last 5 months)
     const monthly_trends: { month: string; budget: number; actual: number; variance: number }[] = [];
-    const currentDate = new Date();
-    const avgMonthlyActual = parseFloat((plSummary.revenue / 5).toFixed(2));
-
-    for (let i = 4; i >= 0; i--) {
-      const d = new Date(currentDate.getFullYear(), currentDate.getMonth() - i, 1);
-      const monthLabel = d.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
-      const actual = avgMonthlyActual;
-      const budget = parseFloat(((categoryBudgets['Income'] || 0) / 5).toFixed(2));
-      const variance = parseFloat((actual - budget).toFixed(2));
-      monthly_trends.push({
-        month: monthLabel,
-        budget,
-        actual,
-        variance
-      });
-    }
+    // Do not manufacture monthly values from an aggregate. The Xero P&L response
+    // used here is period-level data, so an absent monthly source must remain empty.
 
     const credentials = await db.getCredentials(tenantId, 'xero');
     const lastSynced = credentials?.last_synced_at
       ? new Date(credentials.last_synced_at).toISOString().replace('T', ' ').substring(0, 16)
-      : new Date().toISOString().replace('T', ' ').substring(0, 16);
+      : '';
 
     const overallBudgetYtd = parseFloat((categoryBudgets['Income'] + categoryBudgets['Other Income']).toFixed(2));
     const overallActualYtd = plSummary.revenue;
@@ -350,13 +337,14 @@ export const XeroBudgetService = {
     }
 
     const summary: BudgetVsActualSummary = {
-      budget_ytd: overallBudgetYtd, // Matches mockup
-      actual_ytd: overallActualYtd, // $22,973.18
-      variance: overallVariance, // -$22,973.18
-      variance_pct: overallVariancePct,
+      budget_ytd: budgetAvailable ? overallBudgetYtd : null,
+      actual_ytd: actualAvailable ? overallActualYtd : null,
+      variance: budgetAvailable && actualAvailable ? overallVariance : null,
+      variance_pct: budgetAvailable && actualAvailable ? overallVariancePct : null,
       last_synced: lastSynced,
       categories,
-      monthly_trends
+      monthly_trends,
+      data_available: actualAvailable || budgetAvailable,
     };
 
     // Cache summary for 10 minutes (600 seconds)

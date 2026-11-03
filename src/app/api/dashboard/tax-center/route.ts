@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getTenantIdFromSession } from '@/lib/auth';
 import { XeroTaxService } from '@/lib/taxService';
 import { getXeroAccessToken } from '@/lib/xero';
-import { db } from '@/lib/db';
+import { fetchXeroResource } from '@/lib/xero';
+import { getOrFetchManagementReport } from '@/lib/managementAccountsStorage';
 
 export async function GET(req: NextRequest) {
   const tenantId = await getTenantIdFromSession();
@@ -31,17 +32,18 @@ export async function GET(req: NextRequest) {
 
   try {
     const tokenInfo = await getXeroAccessToken(tenantId);
-    if (!tokenInfo) {
-      return NextResponse.json({ connected: false }, {
-        headers: { 'Cache-Control': 'no-store, max-age=0, must-revalidate' }
-      });
-    }
     const filters = (taxType || status) ? { taxType, status } : undefined;
     const summary = await XeroTaxService.getTaxSummary(tenantId, startDate, endDate, forceSync, filters);
-    const org = await db.getReport(tenantId, 'Organisation');
-    const currency = org?.BaseCurrency || 'USD';
+    const org = tokenInfo
+      ? await getOrFetchManagementReport(
+          tenantId,
+          'Organisation',
+          async () => (await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Organisations'))[0] ?? null,
+        ) as { BaseCurrency?: string } | null
+      : null;
+    const currency = org?.BaseCurrency ?? null;
     return NextResponse.json(
-      { ...summary, connected: true, meta: { currency } },
+      { ...summary, connected: true, xero_connected: Boolean(tokenInfo), meta: { currency } },
       { headers: { 'Cache-Control': 'no-store, max-age=0, must-revalidate' } }
     );
   } catch (err: any) {

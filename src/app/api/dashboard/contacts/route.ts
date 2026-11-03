@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getTenantIdFromSession } from '@/lib/auth';
 import { getXeroAccessToken, fetchXeroResource } from '@/lib/xero';
+import { getOrFetchManagementReport } from '@/lib/managementAccountsStorage';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,26 +25,15 @@ export async function GET(req: NextRequest) {
 
   try {
     const tokenInfo = await getXeroAccessToken(tenantId);
-    if (!tokenInfo) {
-      return NextResponse.json({ connected: false });
-    }
     const isConnected = !!tokenInfo;
-    
-    const org = await db.getReport(tenantId, 'Organisation');
-    const orgCurrency = org?.BaseCurrency || 'USD';
+    const org = tokenInfo
+      ? await getOrFetchManagementReport(tenantId, 'Organisation', async () => (await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Organisations'))[0] ?? null) as any
+      : await db.getPostgresReport(tenantId, 'Organisation');
+    const orgCurrency = org?.BaseCurrency ?? null;
 
-    let rawContacts = await db.getReport(tenantId, 'Contacts');
-
-    if (!rawContacts && isConnected && tokenInfo) {
-      try {
-        rawContacts = await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Contacts');
-        if (rawContacts && rawContacts.length > 0) {
-          await db.saveReport(tenantId, 'Contacts', rawContacts);
-        }
-      } catch (err: any) {
-        console.error('Failed to sync Contacts from Xero API:', err.message);
-      }
-    }
+    const rawContacts = tokenInfo
+      ? await getOrFetchManagementReport(tenantId, 'Contacts', () => fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Contacts'))
+      : await db.getPostgresReport(tenantId, 'Contacts');
 
     // Default empty response if Xero has no data
     if (!rawContacts || !Array.isArray(rawContacts) || rawContacts.length === 0) {
@@ -82,7 +72,7 @@ export async function GET(req: NextRequest) {
       arTotal += arOutstanding;
       apTotal += apOutstanding;
 
-      // Extract primary phone if exists
+      // Extract primary phone if Xero supplied one.
       let phone = '';
       if (Array.isArray(c.Phones)) {
         const primary = c.Phones.find((p: any) => p.PhoneType === 'DEFAULT') || c.Phones[0];
@@ -93,30 +83,28 @@ export async function GET(req: NextRequest) {
         }
       }
 
-      const email = c.EmailAddress || 'no-email@organization.com';
+      const email = c.EmailAddress || '';
 
       // Push as Customer if flagged as customer
       if (isCustomer) {
-        const customerPhone = phone || `+1 555-01${String(contacts.length + 1).padStart(2, '0')}`;
         contacts.push({
           id: `${c.ContactID}-customer`,
           name: c.Name,
           type: 'Customer',
           email,
-          phone: customerPhone,
+          phone,
           outstanding: arOutstanding
         });
       }
 
       // Push as Supplier if flagged as supplier
       if (isSupplier) {
-        const supplierPhone = phone || `+1 555-02${String(contacts.length + 1).padStart(2, '0')}`;
         contacts.push({
           id: `${c.ContactID}-supplier`,
           name: c.Name,
           type: 'Supplier',
           email,
-          phone: supplierPhone,
+          phone,
           outstanding: -apOutstanding
         });
       }

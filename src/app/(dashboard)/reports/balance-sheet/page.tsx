@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import ReactECharts from 'echarts-for-react';
+import { useSearchParams } from 'next/navigation';
 import { FormattedDatePicker } from '@/components/ui/formatted-date-picker';
 import { 
   FileText, 
@@ -38,13 +39,14 @@ interface BSItem {
 
 interface BSData {
   connected: boolean;
+  available?: boolean;
   summary: {
     assets: number;
     liabilities: number;
     equity: number;
-    isBalanced: boolean;
-    difference: number;
-  };
+    isBalanced: boolean | null;
+    difference: number | null;
+  } | null;
   assets: {
     current: BSItem[];
     nonCurrent: BSItem[];
@@ -54,7 +56,7 @@ interface BSData {
     nonCurrent: BSItem[];
   };
   equity: BSItem[];
-  equityTrend?: { label: string; value: number }[];
+  equityTrend?: { label: string; value: number | null }[];
   meta: {
     currency: string | null;
     calculatedAt: string;
@@ -81,14 +83,16 @@ function Tooltip({ text }: { text: string }) {
 }
 
 export default function BalanceSheetPage() {
-  const [selectedDate, setSelectedDate] = useState<string>(() => {
+  const searchParams = useSearchParams();
+  const defaultDate = searchParams.get('to_date') || (() => {
     const today = new Date();
     const currentYear = today.getFullYear();
     const currentMonth = today.getMonth(); // 0 = Jan, 11 = Dec
     // Last financial year ended on March 31st of previous year if current month is Jan-Mar, else current year
     const lastFYYear = currentMonth < 3 ? currentYear - 1 : currentYear;
     return `${lastFYYear}-03-31`;
-  });
+  })();
+  const [selectedDate, setSelectedDate] = useState(defaultDate);
   const [data, setData] = useState<BSData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -118,6 +122,8 @@ export default function BalanceSheetPage() {
     fetchBalanceSheet();
   }, [selectedDate]);
 
+  const currencyCode = data?.meta?.currency || null;
+  const getCurrencySymbol = (code: string | null) => {
   const currencyCode = data?.meta?.currency;
   const getCurrencySymbol = (code: string | null | undefined) => {
     if (!code) return '';
@@ -131,6 +137,10 @@ export default function BalanceSheetPage() {
   const currencySymbol = getCurrencySymbol(currencyCode);
 
   const formatAmount = (val: number | null | undefined) => {
+    if (val === null || val === undefined || !Number.isFinite(val)) return 'Not available';
+    return currencyCode
+      ? `${currencySymbol}${val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currencyCode}`
+      : val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     if (val === null || val === undefined || !currencyCode) return '—';
     return `${currencySymbol}${val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currencyCode}`;
   };
@@ -145,7 +155,7 @@ export default function BalanceSheetPage() {
     data.assets.nonCurrent.forEach(item => {
       if (item.value > 0) list.push({ value: item.value, name: item.name });
     });
-    return list.length > 0 ? list : [{ value: 1, name: 'No Assets Data', itemStyle: { color: '#e2e8f0' } }];
+    return list;
   };
 
   const getLiabilitiesPieData = () => {
@@ -157,7 +167,7 @@ export default function BalanceSheetPage() {
     data.liabilities.nonCurrent.forEach(item => {
       if (item.value > 0) list.push({ value: item.value, name: item.name });
     });
-    return list.length > 0 ? list : [{ value: 1, name: 'No Liabilities Data', itemStyle: { color: '#e2e8f0' } }];
+    return list;
   };
 
   const assetsPieOption = {
@@ -165,7 +175,7 @@ export default function BalanceSheetPage() {
       trigger: 'item', 
       formatter: (params: any) => {
         if (params.name.includes('No Assets')) return 'No Assets';
-        return `${params.name}: ${currencySymbol}${params.value.toLocaleString()} (${params.percent}%)`;
+        return `${params.name}: ${formatAmount(params.value)} (${params.percent}%)`;
       }
     },
     legend: { show: false },
@@ -179,8 +189,8 @@ export default function BalanceSheetPage() {
           show: true,
           position: 'center',
           formatter: () => {
-            const sum = data?.summary?.assets || 0;
-            return `${currencySymbol}${sum.toLocaleString(undefined, { maximumFractionDigits: 0 })}\nTotal Assets`;
+            const sum = data?.summary?.assets;
+            return sum === null || sum === undefined ? 'Not available' : `${currencySymbol}${sum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\nTotal Assets`;
           },
           textStyle: { fontSize: 13, fontWeight: 'bold', color: '#1e293b', lineHeight: 18 }
         },
@@ -195,7 +205,7 @@ export default function BalanceSheetPage() {
       trigger: 'item', 
       formatter: (params: any) => {
         if (params.name.includes('No Liabilities')) return 'No Liabilities';
-        return `${params.name}: ${currencySymbol}${params.value.toLocaleString()} (${params.percent}%)`;
+        return `${params.name}: ${formatAmount(params.value)} (${params.percent}%)`;
       }
     },
     legend: { show: false },
@@ -209,8 +219,8 @@ export default function BalanceSheetPage() {
           show: true,
           position: 'center',
           formatter: () => {
-            const sum = data?.summary?.liabilities || 0;
-            return `${currencySymbol}${sum.toLocaleString(undefined, { maximumFractionDigits: 0 })}\nTotal Liabilities`;
+            const sum = data?.summary?.liabilities;
+            return sum === null || sum === undefined ? 'Not available' : `${currencySymbol}${sum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\nTotal Liabilities`;
           },
           textStyle: { fontSize: 13, fontWeight: 'bold', color: '#1e293b', lineHeight: 18 }
         },
@@ -221,12 +231,7 @@ export default function BalanceSheetPage() {
   };
 
   const getEquityTrendData = () => {
-    if (!data || !data.equityTrend || data.equityTrend.length === 0) {
-      return {
-        categories: ['Mar 2026', 'Apr 2026', 'May 2026', 'Jun 2026', 'Jul 2026', 'Aug 2026'],
-        values: [0, 0, 0, 0, 0, data?.summary?.equity || 0]
-      };
-    }
+    if (!data || !data.equityTrend || data.equityTrend.length === 0) return { categories: [], values: [] };
     return {
       categories: data.equityTrend.map(item => item.label),
       values: data.equityTrend.map(item => item.value)
@@ -287,13 +292,11 @@ export default function BalanceSheetPage() {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {/* As At Date picker (Formatted DD/MM/YYYY) */}
           <FormattedDatePicker
             value={selectedDate}
             onChange={setSelectedDate}
             label="As at:"
           />
-
           <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-200 bg-white hover:bg-red-50/20 text-xs font-bold text-red-600 transition cursor-pointer">
             <FileText className="h-3.5 w-3.5" />
             <span>Export PDF</span>
@@ -307,18 +310,6 @@ export default function BalanceSheetPage() {
 
       {/* ─── Filter Bar ─── */}
       <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-sm mb-6 flex flex-wrap items-center gap-3 select-none text-[11px] font-semibold text-slate-500">
-        <div className="flex flex-col gap-1 min-w-[130px]">
-          <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold">Date</span>
-          <div className="flex items-center justify-between border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-700 bg-white">
-            <input 
-              type="date"
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-              className="text-xs font-bold text-slate-700 bg-transparent outline-none cursor-pointer"
-            />
-          </div>
-        </div>
-
         <div className="flex flex-col gap-1 min-w-[110px]">
           <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold">Currency</span>
           <div className="flex items-center justify-between border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-700 bg-slate-50">
@@ -380,7 +371,7 @@ export default function BalanceSheetPage() {
       )}
 
       {/* ─── Main Dynamic View ─── */}
-      {!loading && !error && data && data.connected !== false && (
+      {!loading && !error && data && data.connected !== false && data.summary && (
         <>
           {/* Summary Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 select-none">

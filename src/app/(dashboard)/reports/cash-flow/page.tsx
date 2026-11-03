@@ -105,6 +105,7 @@ interface CFData {
   }[];
   meta: {
     currency: string;
+    dataAvailable?: boolean;
     calculatedAt: string;
   };
 }
@@ -213,8 +214,9 @@ export default function CashFlowPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const currencyCode = data?.meta?.currency || 'USD';
-  const getCurrencySymbol = (code: string) => {
+  const currencyCode = data?.meta?.currency || null;
+  const getCurrencySymbol = (code: string | null) => {
+    if (!code) return '';
     try {
       const parts = new Intl.NumberFormat('en-US', { style: 'currency', currency: code }).formatToParts(0);
       return parts.find(p => p.type === 'currency')?.value || '';
@@ -224,7 +226,8 @@ export default function CashFlowPage() {
   };
   const currencySymbol = getCurrencySymbol(currencyCode);
 
-  const formatAmount = (val: number, compact = false) => {
+  const formatAmount = (val: number | null | undefined, compact = false) => {
+    if (val === null || val === undefined || !Number.isFinite(val)) return 'Not available';
     const prefix = val < 0 ? '-' : '';
     const absVal = Math.abs(val);
 
@@ -235,7 +238,7 @@ export default function CashFlowPage() {
       return `${prefix}${currencySymbol}${(absVal / 1000).toFixed(1)}K`;
     }
 
-    return `${prefix}${currencySymbol}${absVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currencyCode}`;
+    return `${prefix}${currencySymbol}${absVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${currencyCode ? ` ${currencyCode}` : ''}`;
   };
 
   // ECharts Configs for Cash Flow Trend Chart
@@ -262,7 +265,7 @@ export default function CashFlowPage() {
     grid: { left: '2%', right: '3%', bottom: '2%', top: '5%', containLabel: true },
     xAxis: {
       type: 'category',
-      data: data?.history ? data.history.map(h => h.month) : ['Apr 2026', 'May 2026', 'Jun 2026', 'Jul 2026', 'Aug 2026'],
+      data: data?.history?.map(h => h.month) || [],
       axisLine: { lineStyle: { color: '#e2e8f0' } },
       axisLabel: { color: '#64748b', fontSize: 10, fontWeight: 550 }
     },
@@ -439,7 +442,7 @@ export default function CashFlowPage() {
       )}
 
       {/* ─── Main CFO Dashboard Content ─── */}
-      {!loading && !error && data && data.connected !== false && (
+      {!loading && !error && data && data.connected !== false && data.meta?.dataAvailable && (
         <div className="space-y-6">
 
           {/* 1. TOP 6 CFO KPI CARDS GRID */}
@@ -457,7 +460,7 @@ export default function CashFlowPage() {
               </div>
               <div className="my-1">
                 <h3 className="text-[20px] font-extrabold text-slate-800 leading-tight tracking-tight select-all">
-                  {formatAmount(data.summary?.endingCash || 0, true)}
+                  {formatAmount(data.summary?.endingCash, true)}
                 </h3>
                 <p className="text-[10px] text-slate-500 font-semibold mt-0.5">Actual Liquid Bank Balance</p>
               </div>
@@ -479,7 +482,7 @@ export default function CashFlowPage() {
               </div>
               <div className="my-1">
                 <h3 className="text-[20px] font-extrabold text-emerald-600 leading-tight tracking-tight select-all">
-                  {formatAmount(data.summary?.cashIn || 0, true)}
+                  {formatAmount(data.summary?.cashIn, true)}
                 </h3>
                 <p className="text-[10px] text-slate-400 font-semibold mt-0.5">{data.summary?.cashInCount || 0} Inflow Txns</p>
               </div>
@@ -501,7 +504,7 @@ export default function CashFlowPage() {
               </div>
               <div className="my-1">
                 <h3 className="text-[20px] font-extrabold text-rose-600 leading-tight tracking-tight select-all">
-                  {formatAmount(data.summary?.cashOut || 0, true)}
+                  {formatAmount(data.summary?.cashOut, true)}
                 </h3>
                 <p className="text-[10px] text-slate-400 font-semibold mt-0.5">{data.summary?.cashOutCount || 0} Outflow Txns</p>
               </div>
@@ -526,7 +529,7 @@ export default function CashFlowPage() {
                   "text-[20px] font-extrabold leading-tight tracking-tight select-all",
                   (data.summary?.change || 0) >= 0 ? "text-emerald-600" : "text-rose-600"
                 )}>
-                  {formatAmount(data.summary?.change || 0, true)}
+                  {formatAmount(data.summary?.change, true)}
                 </h3>
                 <p className="text-[10px] text-slate-500 font-semibold mt-0.5">Period Movement (In − Out)</p>
               </div>
@@ -551,9 +554,9 @@ export default function CashFlowPage() {
               </div>
               <div className="my-1">
                 <h3 className="text-[20px] font-extrabold text-slate-800 leading-tight tracking-tight select-all">
-                  {formatAmount(data.receivables?.total || 0, true)}
+                  {formatAmount(data.receivables?.total, true)}
                 </h3>
-                <p className="text-[10px] text-amber-600 font-semibold mt-0.5">{formatAmount(data.receivables?.overdue || 0, true)} Overdue</p>
+                <p className="text-[10px] text-amber-600 font-semibold mt-0.5">{formatAmount(data.receivables?.overdue, true)} Overdue</p>
               </div>
               <div className="text-[9.5px] font-bold text-slate-400">
                 Expected Inflow Source
@@ -573,9 +576,9 @@ export default function CashFlowPage() {
               </div>
               <div className="my-1">
                 <h3 className="text-[20px] font-extrabold text-slate-800 leading-tight tracking-tight select-all">
-                  {formatAmount(data.payables?.total || 0, true)}
+                  {formatAmount(data.payables?.total, true)}
                 </h3>
-                <p className="text-[10px] text-purple-600 font-semibold mt-0.5">{formatAmount(data.payables?.overdue || 0, true)} Overdue</p>
+                <p className="text-[10px] text-purple-600 font-semibold mt-0.5">{formatAmount(data.payables?.overdue, true)} Overdue</p>
               </div>
             </div>
           </div>
@@ -614,12 +617,7 @@ export default function CashFlowPage() {
                 </div>
 
                 <div className="space-y-3">
-                  {(data.inflowBreakdown || [
-                    { category: 'Customer Payments', amount: (data.summary?.cashIn || 0) * 0.65, pct: 65, color: '#10b981' },
-                    { category: 'Direct Bank Receipts', amount: (data.summary?.cashIn || 0) * 0.20, pct: 20, color: '#3b82f6' },
-                    { category: 'Refunds & Adjustments', amount: (data.summary?.cashIn || 0) * 0.05, pct: 5, color: '#f59e0b' },
-                    { category: 'Other Receipts', amount: (data.summary?.cashIn || 0) * 0.10, pct: 10, color: '#8b5cf6' }
-                  ]).map((item, idx) => (
+                  {(data.inflowBreakdown || []).map((item, idx) => (
                     <div key={idx} className="space-y-1">
                       <div className="flex justify-between items-center text-[11px] font-semibold">
                         <span className="text-slate-700">{item.category}</span>
@@ -644,13 +642,7 @@ export default function CashFlowPage() {
                 </div>
 
                 <div className="space-y-3">
-                  {(data.outflowBreakdown || [
-                    { category: 'Supplier Payments', amount: (data.summary?.cashOut || 0) * 0.50, pct: 50, color: '#ef4444' },
-                    { category: 'Operating Expenses', amount: (data.summary?.cashOut || 0) * 0.25, pct: 25, color: '#f97316' },
-                    { category: 'Payroll & Salaries', amount: (data.summary?.cashOut || 0) * 0.15, pct: 15, color: '#a855f7' },
-                    { category: 'Taxes & Regulatory', amount: (data.summary?.cashOut || 0) * 0.07, pct: 7, color: '#06b6d4' },
-                    { category: 'Other Outflows', amount: (data.summary?.cashOut || 0) * 0.03, pct: 3, color: '#64748b' }
-                  ]).map((item, idx) => (
+                  {(data.outflowBreakdown || []).map((item, idx) => (
                     <div key={idx} className="space-y-1">
                       <div className="flex justify-between items-center text-[11px] font-semibold">
                         <span className="text-slate-700">{item.category}</span>

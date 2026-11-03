@@ -44,6 +44,11 @@ interface SummaryData {
   overduePercentage: number;
 }
 
+interface OverdueTrend {
+  labels: string[];
+  values: number[];
+}
+
 interface AgingBuckets {
   b0_30: { amount: number; count: number };
   b31_60: { amount: number; count: number };
@@ -72,8 +77,18 @@ interface OverdueInvoice {
 }
 
 // Helper SVG Sparkline Component matching Image 1 KPI card wave lines
-function SparklineWave({ color, height = 36 }: { color: string; height?: number }) {
+function SparklineWave({ color, data = [], height = 36 }: { color: string; data?: number[]; height?: number }) {
+  if (data.length < 2) return null;
   const cleanColor = color.replace('#', '');
+  const min = Math.min(...data);
+  const max = Math.max(...data);
+  const range = max - min || 1;
+  const points = data.map((value, index) => {
+    const x = (index / (data.length - 1)) * 200;
+    const y = 40 - ((value - min) / range) * 24;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  const path = `M ${points[0]} ${points.slice(1).map(point => `L ${point}`).join(' ')}`;
   return (
     <div className="w-full overflow-hidden pt-1" style={{ height }}>
       <svg viewBox="0 0 200 48" className="w-full h-full preserve-3d" preserveAspectRatio="none">
@@ -84,11 +99,11 @@ function SparklineWave({ color, height = 36 }: { color: string; height?: number 
           </linearGradient>
         </defs>
         <path
-          d="M 0 34 C 30 38, 50 26, 80 26 C 110 26, 135 14, 160 22 C 180 28, 190 14, 200 16 L 200 48 L 0 48 Z"
+          d={`${path} L 200 48 L 0 48 Z`}
           fill={`url(#grad-overdue-${cleanColor})`}
         />
         <path
-          d="M 0 34 C 30 38, 50 26, 80 26 C 110 26, 135 14, 160 22 C 180 28, 190 14, 200 16"
+          d={path}
           fill="none"
           stroke={color}
           strokeWidth="2.5"
@@ -214,6 +229,9 @@ export default function TopOverdueInvoicesPage() {
   const [topCustomers, setTopCustomers] = useState<TopCustomer[]>([]);
   const [customersList, setCustomersList] = useState<string[]>([]);
   const [invoices, setInvoices] = useState<OverdueInvoice[]>([]);
+  const [currencyCode, setCurrencyCode] = useState<string | null>(null);
+  const [dataAvailable, setDataAvailable] = useState(false);
+  const [overdueTrend, setOverdueTrend] = useState<OverdueTrend>({ labels: [], values: [] });
 
   // Filters state
   const [search, setSearch] = useState('');
@@ -272,6 +290,9 @@ export default function TopOverdueInvoicesPage() {
       if (res.ok) {
         const data = await res.json();
         setSummary(data.summary);
+        setCurrencyCode(data.meta?.currency || null);
+        setDataAvailable(data.meta?.dataAvailable === true);
+        setOverdueTrend(data.trend || { labels: [], values: [] });
         setAgingBuckets(data.agingBuckets);
         setTopCustomers(data.topCustomers || []);
         setCustomersList(data.customersList || []);
@@ -328,7 +349,8 @@ export default function TopOverdueInvoicesPage() {
         borderColor: '#334155',
         textStyle: { color: '#ffffff', fontSize: 12 },
         formatter: (params: any) => {
-          return `<div class="font-bold text-xs">${params.name}</div><div class="text-xs text-slate-300">Amount: £${params.value.toLocaleString('en-GB', { minimumFractionDigits: 2 })} (${params.percent}%)</div>`;
+          if (currencyCode) return `<div class="font-bold text-xs">${params.name}</div><div class="text-xs text-slate-300">Amount: ${formatCurrency(params.value)} (${params.percent}%)</div>`;
+          return `<div class="font-bold text-xs">${params.name}</div><div class="text-xs text-slate-300">Amount: ${formatCurrency(params.value)} (${params.percent}%)</div>`;
         }
       },
       series: [
@@ -359,8 +381,8 @@ export default function TopOverdueInvoicesPage() {
     if (!lineChartRef.current || loading) return;
     const chartInstance = echarts.init(lineChartRef.current);
 
-    const dates = ['05 Jul', '10 Jul', '15 Jul', '20 Jul', '25 Jul', '30 Jul', '03 Aug'];
-    const values = summary.totalOverdueAmount > 0 ? [0, 0, 0, 0, 0, 0, summary.totalOverdueAmount] : [0, 0, 0, 0, 0, 0, 0];
+    const dates = overdueTrend.labels;
+    const values = overdueTrend.values;
 
     const option = {
       grid: { left: '3%', right: '4%', top: '15%', bottom: '15%', containLabel: true },
@@ -373,7 +395,8 @@ export default function TopOverdueInvoicesPage() {
         textStyle: { color: '#ffffff', fontSize: 12 },
         formatter: (params: any) => {
           const item = params[0];
-          return `<div class="font-bold text-xs">${item.name} 2026</div><div class="text-xs text-[#ef4444]">Overdue: £${item.value.toLocaleString('en-GB', { minimumFractionDigits: 2 })}</div>`;
+          if (currencyCode) return `<div class="font-bold text-xs">${item.name}</div><div class="text-xs text-[#ef4444]">Overdue: ${formatCurrency(item.value)}</div>`;
+          return `<div class="font-bold text-xs">${item.name}</div><div class="text-xs text-[#ef4444]">Overdue: ${formatCurrency(item.value)}</div>`;
         }
       },
       xAxis: {
@@ -388,7 +411,7 @@ export default function TopOverdueInvoicesPage() {
         axisLine: { show: false },
         axisTick: { show: false },
         splitLine: { lineStyle: { color: '#f1f5f9', type: 'dashed' } },
-        axisLabel: { color: '#94a3b8', fontSize: 10, formatter: (val: number) => `£${val / 1000}K` }
+        axisLabel: { color: '#94a3b8', fontSize: 10, formatter: (val: number) => currencyCode ? formatCurrency(val) : val.toFixed(2) }
       },
       series: [
         {
@@ -417,7 +440,7 @@ export default function TopOverdueInvoicesPage() {
       window.removeEventListener('resize', handleResize);
       chartInstance.dispose();
     };
-  }, [summary.totalOverdueAmount, loading]);
+  }, [overdueTrend, loading, currencyCode]);
 
   const [tempFromDate, setTempFromDate] = useState(defaultFrom);
   const [tempToDate, setTempToDate] = useState(defaultTo);
@@ -434,21 +457,25 @@ export default function TopOverdueInvoicesPage() {
   }, []);
 
   const applyPreset = (preset: 'this_month' | 'last_month' | 'last_3_months' | 'this_year') => {
-    let from = '2026-08-01';
-    let to = '2026-08-31';
+    const now = new Date();
+    const formatDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    let from = formatDate(monthStart);
+    let to = formatDate(monthEnd);
 
     if (preset === 'this_month') {
-      from = '2026-08-01';
-      to = '2026-08-31';
+      from = formatDate(monthStart);
+      to = formatDate(monthEnd);
     } else if (preset === 'last_month') {
-      from = '2026-07-01';
-      to = '2026-07-31';
+      from = formatDate(new Date(now.getFullYear(), now.getMonth() - 1, 1));
+      to = formatDate(new Date(now.getFullYear(), now.getMonth(), 0));
     } else if (preset === 'last_3_months') {
-      from = '2026-06-01';
-      to = '2026-08-31';
+      from = formatDate(new Date(now.getFullYear(), now.getMonth() - 2, 1));
+      to = formatDate(monthEnd);
     } else if (preset === 'this_year') {
-      from = '2026-01-01';
-      to = '2026-12-31';
+      from = `${now.getFullYear()}-01-01`;
+      to = `${now.getFullYear()}-12-31`;
     }
 
     setFromDate(from);
@@ -475,8 +502,11 @@ export default function TopOverdueInvoicesPage() {
     router.push(`${window.location.pathname}?${params.toString()}`);
   };
 
-  const formatCurrency = (val: number) => {
-    return new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', minimumFractionDigits: 2 }).format(val);
+  const formatCurrency = (val: number | null | undefined) => {
+    if (val === null || val === undefined || !Number.isFinite(val)) return 'Not available';
+    return currencyCode
+      ? new Intl.NumberFormat('en-GB', { style: 'currency', currency: currencyCode, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val)
+      : new Intl.NumberFormat('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val);
   };
 
   const formatDateLabel = (dStr: string) => {
@@ -596,7 +626,16 @@ export default function TopOverdueInvoicesPage() {
 
           {/* Sync Now Button */}
           <button
-            onClick={() => fetchData()}
+            onClick={async () => {
+              try {
+                const syncRes = await fetch('/api/xero', { method: 'POST' });
+                if (!syncRes.ok) throw new Error('Xero sync failed');
+                await fetchData();
+                toast.success('Payables refreshed from the updated PostgreSQL snapshot.');
+              } catch (error: any) {
+                toast.error(error.message || 'Xero sync failed');
+              }
+            }}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-blue-200 rounded-lg shadow-2xs text-[11.5px] font-bold text-blue-600 hover:bg-blue-50/50 transition cursor-pointer"
           >
             <RefreshCw className="h-3.5 w-3.5 text-blue-600" />
@@ -651,14 +690,14 @@ export default function TopOverdueInvoicesPage() {
                   </div>
                 </div>
                 <span className="text-xl font-black text-slate-900 mt-1 block">
-                  {formatCurrency(summary.totalOverdueAmount)}
+                  {formatCurrency(dataAvailable ? summary.totalOverdueAmount : null)}
                 </span>
                 <span className="text-[10px] text-slate-400 font-semibold mt-0.5 block">
-                  Across <b className="text-slate-700">{summary.totalOverdueCount}</b> invoices
+                  Across <b className="text-slate-700">{dataAvailable ? summary.totalOverdueCount : 'Not available'}</b> invoices
                 </span>
               </div>
               <div className="mt-2 -mx-4 -mb-4 pt-1">
-                <SparklineWave color="#ef4444" height={32} />
+                <SparklineWave color="#ef4444" data={overdueTrend.values} height={32} />
               </div>
             </div>
 
@@ -675,7 +714,7 @@ export default function TopOverdueInvoicesPage() {
                   {summary.avgOverdueDays} days
                 </span>
                 <span className="text-[10px] text-slate-400 font-semibold mt-0.5 block">
-                  vs previous period {summary.avgOverdueDays > 0 ? `${summary.avgOverdueDays} days` : '0 days'}
+                  {dataAvailable ? 'Based on selected overdue invoices' : 'Not available'}
                 </span>
               </div>
               <div className="mt-2 -mx-4 -mb-4 pt-1">
@@ -693,10 +732,10 @@ export default function TopOverdueInvoicesPage() {
                   </div>
                 </div>
                 <span className="text-xl font-black text-slate-900 mt-1 block">
-                  {summary.oldestInvoice ? `${summary.oldestInvoice.overdueDays} days` : '0 days'}
+                  {dataAvailable ? (summary.oldestInvoice ? `${summary.oldestInvoice.overdueDays} days` : 'Not available') : 'Not available'}
                 </span>
                 <span className="text-[10px] text-blue-600 font-bold mt-0.5 block truncate">
-                  {summary.oldestInvoice ? summary.oldestInvoice.invoiceNumber : 'None'}
+                  {dataAvailable ? (summary.oldestInvoice?.invoiceNumber || 'Not available') : 'Not available'}
                 </span>
               </div>
               <div className="mt-2 -mx-4 -mb-4 pt-1">
@@ -714,10 +753,10 @@ export default function TopOverdueInvoicesPage() {
                   </div>
                 </div>
                 <span className="text-xl font-black text-slate-900 mt-1 block">
-                  {summary.uniqueCustomersCount}
+                  {dataAvailable ? summary.uniqueCustomersCount : 'Not available'}
                 </span>
                 <span className="text-[10px] text-slate-400 font-semibold mt-0.5 block">
-                  vs previous period {summary.uniqueCustomersCount} customers
+                  {dataAvailable ? 'Current overdue customer count' : 'Not available'}
                 </span>
               </div>
               <div className="mt-2 -mx-4 -mb-4 pt-1">
@@ -735,10 +774,10 @@ export default function TopOverdueInvoicesPage() {
                   </div>
                 </div>
                 <span className="text-xl font-black text-slate-900 mt-1 block">
-                  {summary.overduePercentage.toFixed(1)}%
+                  {dataAvailable ? `${summary.overduePercentage.toFixed(1)}%` : 'Not available'}
                 </span>
                 <span className="text-[10px] text-slate-400 font-semibold mt-0.5 block">
-                  vs previous period {summary.overduePercentage.toFixed(1)}%
+                  {dataAvailable ? 'Current overdue invoice ratio' : 'Not available'}
                 </span>
               </div>
               <div className="mt-2 -mx-4 -mb-4 pt-1">
@@ -763,7 +802,7 @@ export default function TopOverdueInvoicesPage() {
               <div className="relative flex items-center justify-center h-36 w-36 shrink-0">
                 <div ref={donutChartRef} className="w-full h-full" />
                 <div className="absolute text-center flex flex-col items-center pointer-events-none">
-                  <span className="text-[11px] font-black text-slate-900 leading-none">{formatCurrency(summary.totalOverdueAmount)}</span>
+                <span className="text-[11px] font-black text-slate-900 leading-none">{formatCurrency(dataAvailable ? summary.totalOverdueAmount : null)}</span>
                   <span className="text-[7.5px] font-extrabold text-slate-400 uppercase mt-0.5 leading-none">Total Overdue</span>
                 </div>
               </div>
@@ -774,7 +813,7 @@ export default function TopOverdueInvoicesPage() {
                     <span className="h-2 w-2 rounded-full bg-rose-500 shrink-0" /> 0-30 Days
                   </span>
                   <span className="font-bold text-slate-800">
-                    {formatCurrency(agingBuckets.b0_30.amount)} <span className="text-slate-400 font-medium">({p0.toFixed(0)}%)</span>
+                    {formatCurrency(dataAvailable ? agingBuckets.b0_30.amount : null)} <span className="text-slate-400 font-medium">({dataAvailable ? p0.toFixed(0) : 'Not available'}%)</span>
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
@@ -782,7 +821,7 @@ export default function TopOverdueInvoicesPage() {
                     <span className="h-2 w-2 rounded-full bg-orange-500 shrink-0" /> 31-60 Days
                   </span>
                   <span className="font-bold text-slate-800">
-                    {formatCurrency(agingBuckets.b31_60.amount)} <span className="text-slate-400 font-medium">({p31.toFixed(0)}%)</span>
+                    {formatCurrency(dataAvailable ? agingBuckets.b31_60.amount : null)} <span className="text-slate-400 font-medium">({dataAvailable ? p31.toFixed(0) : 'Not available'}%)</span>
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
@@ -790,7 +829,7 @@ export default function TopOverdueInvoicesPage() {
                     <span className="h-2 w-2 rounded-full bg-amber-500 shrink-0" /> 61-90 Days
                   </span>
                   <span className="font-bold text-slate-800">
-                    {formatCurrency(agingBuckets.b61_90.amount)} <span className="text-slate-400 font-medium">({p61.toFixed(0)}%)</span>
+                    {formatCurrency(dataAvailable ? agingBuckets.b61_90.amount : null)} <span className="text-slate-400 font-medium">({dataAvailable ? p61.toFixed(0) : 'Not available'}%)</span>
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
@@ -798,7 +837,7 @@ export default function TopOverdueInvoicesPage() {
                     <span className="h-2 w-2 rounded-full bg-purple-500 shrink-0" /> 91-180 Days
                   </span>
                   <span className="font-bold text-slate-800">
-                    {formatCurrency(agingBuckets.b91_180.amount)} <span className="text-slate-400 font-medium">({p91.toFixed(0)}%)</span>
+                    {formatCurrency(dataAvailable ? agingBuckets.b91_180.amount : null)} <span className="text-slate-400 font-medium">({dataAvailable ? p91.toFixed(0) : 'Not available'}%)</span>
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
@@ -806,7 +845,7 @@ export default function TopOverdueInvoicesPage() {
                     <span className="h-2 w-2 rounded-full bg-pink-500 shrink-0" /> 181+ Days
                   </span>
                   <span className="font-bold text-slate-800">
-                    {formatCurrency(agingBuckets.b181_plus.amount)} <span className="text-slate-400 font-medium">({p181.toFixed(0)}%)</span>
+                    {formatCurrency(dataAvailable ? agingBuckets.b181_plus.amount : null)} <span className="text-slate-400 font-medium">({dataAvailable ? p181.toFixed(0) : 'Not available'}%)</span>
                   </span>
                 </div>
               </div>

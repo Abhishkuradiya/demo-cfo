@@ -4,6 +4,7 @@ import { getTenantIdFromSession } from '@/lib/auth';
 import { getXeroAccessToken, fetchXeroResource, fetchXeroReport } from '@/lib/xero';
 import { ProfitAndLossService } from '@/lib/services/ProfitAndLossService';
 import { getDefaultDateRange } from '@/lib/date-defaults';
+import { getOrFetchManagementReport } from '@/lib/managementAccountsStorage';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -23,17 +24,10 @@ export async function GET(req: NextRequest) {
     const isConnected = !!tokenInfo;
 
     // Fetch Base Currency
-    let orgReport = await db.getReport(tenantId, 'Organisation');
-    if (!orgReport && isConnected) {
-      try {
-        const rawOrg = await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Organisation');
-        if (rawOrg && rawOrg.length > 0) {
-          orgReport = rawOrg[0];
-          await db.saveReport(tenantId, 'Organisation', orgReport);
-        }
-      } catch (err) { }
-    }
-    const currency = orgReport?.raw_data?.BaseCurrency || orgReport?.BaseCurrency || orgReport?.CurrencyCode || 'GBP';
+    const orgReport = isConnected
+      ? await getOrFetchManagementReport(tenantId, 'Organisation', async () => (await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Organisations'))[0] ?? null)
+      : await db.getPostgresReport(tenantId, 'Organisation');
+    const currency = orgReport?.raw_data?.BaseCurrency || orgReport?.BaseCurrency || orgReport?.CurrencyCode || null;
 
     // Dynamic Date Calculation: If query parameters are missing, inspect database invoices
     let startDate: Date;
@@ -83,27 +77,14 @@ export async function GET(req: NextRequest) {
 
     // DB-First Fetch: Avoid Xero Rate Limit issues by checking PostgreSQL first
     let rawInvoicesList: any[] = [];
-    const pgInvoices = await db.getInvoices(tenantId);
-    if (Array.isArray(pgInvoices) && pgInvoices.length > 0) {
-      rawInvoicesList = pgInvoices.filter((inv: any) => {
+    const storedInvoices = isConnected
+      ? await getOrFetchManagementReport(tenantId, 'Invoices', () => fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Invoices'))
+      : await db.getPostgresReport(tenantId, 'Invoices');
+    if (Array.isArray(storedInvoices)) {
+      rawInvoicesList = storedInvoices.filter((inv: any) => {
         const t = (inv.Type || inv.type || '').toUpperCase();
         return t === 'ACCREC' || t === 'ACCRECCRED';
       });
-    }
-
-    // Only fallback to live Xero API if PostgreSQL DB has 0 invoices
-    if (rawInvoicesList.length === 0 && isConnected) {
-      try {
-        const xeroInvoices = await fetchXeroResource(
-          tokenInfo.accessToken,
-          tokenInfo.xeroTenantId,
-          'Invoices',
-          'where=(Type=="ACCREC" OR Type=="ACCRECCRED")'
-        );
-        if (Array.isArray(xeroInvoices) && xeroInvoices.length > 0) {
-          rawInvoicesList = xeroInvoices;
-        }
-      } catch (err) { }
     }
 
     let invoicesCount = 0;
@@ -140,25 +121,12 @@ export async function GET(req: NextRequest) {
     });
 
     // 100% PURE DYNAMIC PROFIT & LOSS INTEGRATION USING ProfitAndLossService
-    let pnlReport = await db.getReport(tenantId, `ProfitAndLoss_${fromStr}_${toStr}`);
-    if (!pnlReport && isConnected) {
-      try {
-        pnlReport = await fetchXeroReport(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'ProfitAndLoss', `fromDate=${fromStr}&toDate=${toStr}`);
-        if (pnlReport) await db.saveReport(tenantId, `ProfitAndLoss_${fromStr}_${toStr}`, pnlReport);
-      } catch (e) { }
-    }
-
-    if (!pnlReport) {
-      pnlReport = await db.getReport(tenantId, 'ProfitAndLoss');
-    }
-
-    let prevPnlReport = await db.getReport(tenantId, `ProfitAndLoss_${prevFromStr}_${prevToStr}`);
-    if (!prevPnlReport && isConnected) {
-      try {
-        prevPnlReport = await fetchXeroReport(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'ProfitAndLoss', `fromDate=${prevFromStr}&toDate=${prevToStr}`);
-        if (prevPnlReport) await db.saveReport(tenantId, `ProfitAndLoss_${prevFromStr}_${prevToStr}`, prevPnlReport);
-      } catch (e) { }
-    }
+    const pnlReport = isConnected
+      ? await getOrFetchManagementReport(tenantId, `ProfitAndLoss_${fromStr}_${toStr}`, () => fetchXeroReport(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'ProfitAndLoss', `fromDate=${fromStr}&toDate=${toStr}`))
+      : await db.getPostgresReport(tenantId, `ProfitAndLoss_${fromStr}_${toStr}`);
+    const prevPnlReport = isConnected
+      ? await getOrFetchManagementReport(tenantId, `ProfitAndLoss_${prevFromStr}_${prevToStr}`, () => fetchXeroReport(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'ProfitAndLoss', `fromDate=${prevFromStr}&toDate=${prevToStr}`))
+      : await db.getPostgresReport(tenantId, `ProfitAndLoss_${prevFromStr}_${prevToStr}`);
 
     let totalRevenue = 0;
     let netSales = 0;
@@ -348,18 +316,9 @@ export async function GET(req: NextRequest) {
     const prevCollectionRatePct = prevTotalRevenue > 0 ? Math.min(100, Math.max(0, ((prevTotalRevenue - prevOutstandingAR) / prevTotalRevenue) * 100)) : 0.0;
 
     // Fetch & Calculate Credit Notes summary
-    let cachedCreditNotes = await db.getReport(tenantId, 'CreditNotes');
-    if (!cachedCreditNotes && isConnected) {
-      try {
-        const rawCN = await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'CreditNotes');
-        if (rawCN && Array.isArray(rawCN)) {
-          cachedCreditNotes = rawCN;
-          await db.saveReport(tenantId, 'CreditNotes', cachedCreditNotes);
-        }
-      } catch (err: any) {
-        console.error('Failed to sync CreditNotes for sales route:', err.message);
-      }
-    }
+    const cachedCreditNotes = isConnected
+      ? await getOrFetchManagementReport(tenantId, 'CreditNotes', () => fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'CreditNotes'))
+      : await db.getPostgresReport(tenantId, 'CreditNotes');
 
     let creditNotesCount = 0;
     let creditNotesTotal = 0;
@@ -1190,7 +1149,7 @@ export async function GET(req: NextRequest) {
           monthTotal += parseFloat(inv.Total || inv.total || 0);
         }
       });
-      trendCurrentData.push(Math.round(monthTotal));
+      trendCurrentData.push(monthTotal);
 
       const prevMonthStart = new Date(Date.UTC(currTrendMonth.getUTCFullYear(), currTrendMonth.getUTCMonth() - monthsCount, 1, 0, 0, 0));
       const prevMonthEnd = new Date(Date.UTC(currTrendMonth.getUTCFullYear(), currTrendMonth.getUTCMonth() - monthsCount + 1, 0, 23, 59, 59, 999));
@@ -1204,7 +1163,7 @@ export async function GET(req: NextRequest) {
           prevMonthTotal += parseFloat(inv.Total || inv.total || 0);
         }
       });
-      trendPrevData.push(Math.round(prevMonthTotal));
+      trendPrevData.push(prevMonthTotal);
 
       currTrendMonth = new Date(Date.UTC(currTrendMonth.getUTCFullYear(), currTrendMonth.getUTCMonth() + 1, 1));
     }
@@ -1218,7 +1177,9 @@ export async function GET(req: NextRequest) {
     // Compute Dynamic Regional Sales Distribution from Contacts addresses & Invoices
     let rawContacts: any[] = [];
     try {
-      const contactsReport = await db.getReport(tenantId, 'Contacts');
+      const contactsReport = isConnected
+        ? await getOrFetchManagementReport(tenantId, 'Contacts', () => fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Contacts'))
+        : await db.getPostgresReport(tenantId, 'Contacts');
       if (contactsReport) {
         rawContacts = contactsReport.raw_data || contactsReport.reports || contactsReport;
         if (!Array.isArray(rawContacts) && (rawContacts as any).Contacts) rawContacts = (rawContacts as any).Contacts;
@@ -1344,7 +1305,7 @@ export async function GET(req: NextRequest) {
         countryCode: r.countryCode,
         flag: r.flag,
         continent: r.continent,
-        revenue: Math.round(r.revenue),
+        revenue: r.revenue,
         invoiceCount: r.invoiceCount,
         pct: totalRegionalCalculatedRev > 0 ? Number(((r.revenue / totalRegionalCalculatedRev) * 100).toFixed(1)) : 100,
         cities: Object.values(r.citiesMap)
@@ -1352,7 +1313,7 @@ export async function GET(req: NextRequest) {
           .slice(0, 5)
           .map(c => ({
             name: c.name,
-            revenue: Math.round(c.revenue),
+            revenue: c.revenue,
             count: c.count,
             pct: r.revenue > 0 ? Number(((c.revenue / r.revenue) * 100).toFixed(1)) : 0
           }))

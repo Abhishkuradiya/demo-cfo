@@ -32,7 +32,7 @@ interface AccountItem {
   class: string;
   taxType: string;
   status: string;
-  currency: string;
+  currency: string | null;
   description: string;
   group: string;
 }
@@ -145,7 +145,7 @@ export default function ChartOfAccountsPage() {
     try {
       setIsSyncing(true);
       toast.info('Syncing Chart of Accounts with Xero...');
-      const res = await fetch('/api/xero/sync', { method: 'POST' });
+      const res = await fetch('/api/xero', { method: 'POST' });
       if (res.ok) {
         toast.success('Chart of Accounts synced successfully!');
         window.dispatchEvent(new CustomEvent('xero-sync-complete'));

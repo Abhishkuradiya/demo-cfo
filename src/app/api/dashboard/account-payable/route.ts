@@ -3,6 +3,7 @@ import { db, parseXeroDate } from '@/lib/db';
 import { getTenantIdFromSession } from '@/lib/auth';
 import { getXeroAccessToken, fetchXeroResource } from '@/lib/xero';
 import { resolveBrandingTheme } from '@/lib/constants/brandingThemes';
+import { getOrFetchManagementReport } from '@/lib/managementAccountsStorage';
 
 export async function GET(req: NextRequest) {
   const tenantId = await getTenantIdFromSession();
@@ -20,71 +21,37 @@ export async function GET(req: NextRequest) {
     const isConnected = !!tokenInfo;
 
     // 1. Fetch Base Currency
-    let orgReport = await db.getReport(tenantId, 'Organisation');
-    if (!orgReport && isConnected) {
-      try {
-        const rawOrg = await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Organisation');
-        if (rawOrg && rawOrg.length > 0) {
-          orgReport = rawOrg[0];
-          await db.saveReport(tenantId, 'Organisation', orgReport);
-        }
-      } catch (err: any) {
-        console.error('Failed to sync Organisation report:', err.message);
-      }
-    }
-    const currency = orgReport?.raw_data?.BaseCurrency || orgReport?.BaseCurrency || orgReport?.CurrencyCode || 'GBP';
+    const orgReport = isConnected
+      ? await getOrFetchManagementReport(
+          tenantId,
+          'Organisation',
+          async () => (await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Organisations'))[0] ?? null,
+        )
+      : await db.getPostgresReport(tenantId, 'Organisation');
+    const currency = orgReport?.raw_data?.BaseCurrency || orgReport?.BaseCurrency || orgReport?.CurrencyCode || null;
 
     // 2. Fetch Bills & Credit Notes from Xero API or Database
-    let rawInvoicesList: any[] = [];
-    if (isConnected) {
-      try {
-        const xeroBills = await fetchXeroResource(
-          tokenInfo.accessToken,
-          tokenInfo.xeroTenantId,
+    const storedInvoices = isConnected
+      ? await getOrFetchManagementReport(
+          tenantId,
           'Invoices',
-          'where=(Type=="ACCPAY" OR Type=="ACCPAYCRED")'
-        );
-        let xeroCreditNotes: any[] = [];
-        try {
-          xeroCreditNotes = await fetchXeroResource(
-            tokenInfo.accessToken,
-            tokenInfo.xeroTenantId,
-            'CreditNotes',
-            'where=(Type=="ACCPAYCRED")'
-          );
-        } catch (e) {
-          console.error('Failed to fetch CreditNotes resource:', e);
-        }
-
-        const combined = [
-          ...(Array.isArray(xeroBills) ? xeroBills : []),
-          ...(Array.isArray(xeroCreditNotes) ? xeroCreditNotes : [])
-        ];
-        if (combined.length > 0) {
-          rawInvoicesList = combined;
-        }
-      } catch (err: any) {
-        console.error('Failed to fetch Xero ACCPAY bills & credit notes:', err.message);
-      }
-    }
-
-    if (rawInvoicesList.length === 0) {
-      const pgInvoices = await db.getInvoices(tenantId);
-      if (Array.isArray(pgInvoices) && pgInvoices.length > 0) {
-        rawInvoicesList = pgInvoices.filter((inv: any) => {
+          () => fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Invoices'),
+        )
+      : await db.getPostgresReport(tenantId, 'Invoices');
+    const storedCreditNotes = isConnected
+      ? await getOrFetchManagementReport(
+          tenantId,
+          'CreditNotes',
+          () => fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'CreditNotes'),
+        )
+      : await db.getPostgresReport(tenantId, 'CreditNotes');
+    const rawInvoicesList: any[] = [
+      ...(Array.isArray(storedInvoices) ? storedInvoices : []),
+      ...(Array.isArray(storedCreditNotes) ? storedCreditNotes : []),
+    ].filter((inv: any) => {
           const t = (inv.Type || inv.type || '').toUpperCase();
           return t === 'ACCPAY' || t === 'ACCPAYCRED';
-        });
-      } else {
-        const reportInvoices = await db.getReport(tenantId, 'Invoices');
-        if (Array.isArray(reportInvoices) && reportInvoices.length > 0) {
-          rawInvoicesList = reportInvoices.filter((inv: any) => {
-            const t = (inv.Type || inv.type || '').toUpperCase();
-            return t === 'ACCPAY' || t === 'ACCPAYCRED';
-          });
-        }
-      }
-    }
+      });
 
     const asOnDate = new Date(asOnDateStr);
     asOnDate.setHours(23, 59, 59, 999);
@@ -230,10 +197,10 @@ export async function GET(req: NextRequest) {
       }
     });
 
-    const getPct = (val: number) => totalPayables > 0 ? ((val / totalPayables) * 100).toFixed(2) : '0.00';
+    const getPct = (val: number) => totalPayables > 0 ? ((val / totalPayables) * 100).toFixed(2) : null;
 
     const kpiSummary = {
-      totalPayables: { amount: totalPayables, pct: '100.00' },
+      totalPayables: { amount: totalPayables, pct: totalPayables > 0 ? '100.00' : null },
       currentNotDue: { amount: currentNotDue, pct: getPct(currentNotDue) },
       days1to30: { amount: days1to30, pct: getPct(days1to30) },
       days31to60: { amount: days31to60, pct: getPct(days31to60) },
@@ -369,7 +336,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       asOnDate: asOnDateStr,
-      meta: { currency, totalActiveBills: activePayables.length },
+      meta: { currency, totalActiveBills: activePayables.length, dataAvailable: storedInvoices !== null || storedCreditNotes !== null },
       summary: kpiSummary,
       ageingDistribution: [
         { key: 'current', label: 'Current (Not Due)', amount: currentNotDue, pct: getPct(currentNotDue), color: '#2563eb' },

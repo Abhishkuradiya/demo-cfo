@@ -176,47 +176,10 @@ export const XeroTaxService = {
     const netPayable = taxCollected - taxPaid;
     const taxPayable = netPayable >= 0 ? parseFloat(netPayable.toFixed(2)) : 0;
 
-    // 3. Determine organization country for dynamic compliance schedule
-    let countryCode = 'US';
-    try {
-      const org = await db.getReport(tenantId, 'Organisation');
-      if (org && org.CountryCode) {
-        countryCode = org.CountryCode.toUpperCase();
-      }
-    } catch (e) {
-      console.error('Failed to read organisation details for country check:', e);
-    }
-
-    // Only show upcoming returns if we actually have tax data
+    // Filing dates are not available in the tax transaction data. Do not invent
+    // country-specific deadlines; leave this section empty until a filing source
+    // is persisted from Xero or a connected compliance provider.
     const upcoming_returns: UpcomingReturn[] = [];
-    if (breakdown.length > 0) {
-      if (countryCode === 'IN') {
-        upcoming_returns.push(
-          { name: 'GSTR-3B (Monthly)', period: 'Jul 2026', due_in_days: 15, due_date: '22 Aug 2026' },
-          { name: 'GSTR-1 (Monthly)', period: 'Jul 2026', due_in_days: 15, due_date: '22 Aug 2026' },
-        );
-      } else if (countryCode === 'AU') {
-        upcoming_returns.push(
-          { name: 'BAS (Quarterly)', period: 'Q1 2026', due_in_days: 18, due_date: '28 Aug 2026' },
-        );
-      } else if (countryCode === 'NZ') {
-        upcoming_returns.push(
-          { name: 'GST Return (Bi-Monthly)', period: 'Jun-Jul 2026', due_in_days: 18, due_date: '28 Aug 2026' },
-        );
-      } else if (countryCode === 'GB' || countryCode === 'UK') {
-        upcoming_returns.push(
-          { name: 'VAT Return (Quarterly)', period: 'Q1 2026', due_in_days: 27, due_date: '07 Sep 2026' },
-        );
-      } else if (countryCode === 'CA') {
-        upcoming_returns.push(
-          { name: 'GST/HST Return', period: 'Q3 2026', due_in_days: 30, due_date: '30 Sep 2026' },
-        );
-      } else if (countryCode === 'US') {
-        upcoming_returns.push(
-          { name: 'Sales Tax Return', period: 'Jul 2026', due_in_days: 13, due_date: '20 Aug 2026' },
-        );
-      }
-    }
 
     // 4. Recent activities - build from actual tax transactions
     const recent_activities: RecentActivity[] = [];
@@ -277,7 +240,7 @@ export const XeroTaxService = {
     const credentials = await db.getCredentials(tenantId, 'xero');
     const lastSynced = credentials?.last_synced_at
       ? new Date(credentials.last_synced_at).toISOString().replace('T', ' ').substring(0, 16)
-      : new Date().toISOString().replace('T', ' ').substring(0, 16);
+      : '';
 
     const summary: TaxSummaryMetrics = {
       tax_collected: parseFloat(taxCollected.toFixed(2)),

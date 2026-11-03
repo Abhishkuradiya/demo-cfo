@@ -44,7 +44,8 @@ const DynamicSparkline = ({ data = [], color = '#2563eb' }: { data?: number[]; c
   const height = 36;
   const padding = 8; // Top & bottom safety padding so stroke curve never flat-clips!
 
-  const pointsList = data.length >= 2 ? data : [10, 18, 14, 25, 20, 30];
+  if (data.length < 2) return null;
+  const pointsList = data;
   const minVal = Math.min(...pointsList);
   const maxVal = Math.max(...pointsList);
   const range = maxVal - minVal || 1;
@@ -259,14 +260,18 @@ export default function ConsistentAccountReceivablePage() {
     fetchData();
   }, [asOnDate]);
 
-  const currencyCode = data?.meta?.currency || 'GBP';
-  const formatAmount = (val: number) => {
-    return new Intl.NumberFormat('en-GB', { style: 'currency', currency: currencyCode, minimumFractionDigits: 2 }).format(val || 0);
+  const currencyCode = data?.meta?.currency || null;
+  const hasReceivableData = data?.meta?.dataAvailable === true;
+  const formatAmount = (val: number | null | undefined) => {
+    if (val === null || val === undefined || !Number.isFinite(val)) return 'Not available';
+    return currencyCode
+      ? new Intl.NumberFormat('en-GB', { style: 'currency', currency: currencyCode, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val)
+      : new Intl.NumberFormat('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val);
   };
 
   // ECharts Configurations
   const ageingDonutOption = useMemo(() => {
-    if (!data?.ageingDistribution) return {};
+    if (!data?.ageingDistribution || !hasReceivableData) return {};
     const items = data.ageingDistribution;
     return {
       tooltip: {
@@ -275,7 +280,9 @@ export default function ConsistentAccountReceivablePage() {
         borderColor: '#334155',
         textStyle: { color: '#ffffff', fontSize: 12, fontWeight: 'bold' },
         formatter: (params: any) => {
-          const val = new Intl.NumberFormat('en-GB', { style: 'currency', currency: currencyCode }).format(params.value);
+          const val = currencyCode
+            ? new Intl.NumberFormat('en-GB', { style: 'currency', currency: currencyCode, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(params.value)
+            : new Intl.NumberFormat('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(params.value);
           return `<div class="p-1"><div class="font-bold text-xs text-slate-300">${params.name} (Click to Filter)</div><div class="text-sm font-black text-blue-400 mt-0.5">${val} (${params.percent}%)</div></div>`;
         }
       },
@@ -304,14 +311,15 @@ export default function ConsistentAccountReceivablePage() {
 
   // Full Height Receivables Trend ECharts Config
   const trendLineOption = useMemo(() => {
-    if (!data?.trend) return {};
+    if (!data?.trend || !hasReceivableData) return {};
     return {
       tooltip: {
         trigger: 'axis',
         confine: true,
         backgroundColor: '#0f172a',
         borderColor: '#334155',
-        textStyle: { color: '#ffffff', fontSize: 11 }
+        textStyle: { color: '#ffffff', fontSize: 11 },
+        valueFormatter: (value: number) => formatAmount(value)
       },
       legend: {
         bottom: '2%',
@@ -342,7 +350,7 @@ export default function ConsistentAccountReceivablePage() {
         { name: '90+ Days', type: 'line', smooth: true, symbolSize: 6, lineStyle: { width: 2.5, color: '#991b1b' }, itemStyle: { color: '#991b1b' }, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(153, 27, 27, 0.12)' }, { offset: 1, color: 'rgba(153, 27, 27, 0.0)' }]) }, data: data.trend.series.days90Plus }
       ]
     };
-  }, [data]);
+  }, [data, hasReceivableData, currencyCode]);
 
   // CSV Export Handler
   const handleExportCSV = () => {
@@ -423,42 +431,43 @@ export default function ConsistentAccountReceivablePage() {
   }, [data]);
 
   // Key KPI Figures & Dynamic Trend Series for 4 KPI Cards
-  const totalReceivablesVal = data?.summary?.totalReceivables?.amount || 0;
-  const currentNotDueVal = data?.summary?.currentNotDue?.amount || 0;
-  const overdueTotalVal = (data?.summary?.days1to30?.amount || 0) + 
-                          (data?.summary?.days31to60?.amount || 0) + 
-                          (data?.summary?.days61to90?.amount || 0) + 
-                          (data?.summary?.days90Plus?.amount || 0);
-  const highRiskVal = data?.summary?.days90Plus?.amount || 0;
-  const overdueCountVal = data?.summary?.overdueInvoices?.count || 0;
+  const totalReceivablesVal = hasReceivableData ? (data?.summary?.totalReceivables?.amount ?? null) : null;
+  const currentNotDueVal = hasReceivableData ? (data?.summary?.currentNotDue?.amount ?? null) : null;
+  const overdueTotalVal = hasReceivableData
+    ? (data?.summary?.days1to30?.amount ?? 0) + (data?.summary?.days31to60?.amount ?? 0) + (data?.summary?.days61to90?.amount ?? 0) + (data?.summary?.days90Plus?.amount ?? 0)
+    : null;
+  const highRiskVal = hasReceivableData ? (data?.summary?.days90Plus?.amount ?? null) : null;
+  const overdueCountVal = hasReceivableData ? (data?.summary?.overdueInvoices?.count ?? null) : null;
 
   const totalReceivablesTrend = useMemo(() => {
     const s = data?.trend?.series;
-    if (!s || !Array.isArray(s.current)) return [12000, 18000, 14000, 25000, 20000, 32000];
+    if (!hasReceivableData || !s || !Array.isArray(s.current)) return [];
     return s.current.map((v: number, i: number) => 
       v + (s.days1to30[i] || 0) + (s.days31to60[i] || 0) + (s.days61to90[i] || 0) + (s.days90Plus[i] || 0)
     );
-  }, [data]);
+  }, [data, hasReceivableData]);
 
   const currentNotDueTrend = useMemo(() => {
-    return data?.trend?.series?.current || [5000, 8000, 7000, 12000, 9000, 15000];
-  }, [data]);
+    return hasReceivableData && Array.isArray(data?.trend?.series?.current) ? data.trend.series.current : [];
+  }, [data, hasReceivableData]);
 
   const overdueTotalTrend = useMemo(() => {
     const s = data?.trend?.series;
-    if (!s || !Array.isArray(s.days1to30)) return [8000, 12000, 9000, 18000, 15000, 22000];
+    if (!hasReceivableData || !s || !Array.isArray(s.days1to30)) return [];
     return s.days1to30.map((v: number, i: number) => 
       v + (s.days31to60[i] || 0) + (s.days61to90[i] || 0) + (s.days90Plus[i] || 0)
     );
-  }, [data]);
+  }, [data, hasReceivableData]);
 
   const days90PlusTrend = useMemo(() => {
-    return data?.trend?.series?.days90Plus || [3000, 5000, 4000, 8000, 7000, 10000];
-  }, [data]);
+    return hasReceivableData && Array.isArray(data?.trend?.series?.days90Plus) ? data.trend.series.days90Plus : [];
+  }, [data, hasReceivableData]);
 
   // Cash Acceleration Simulator Math
-  const simulatedCashUnlocked = (overdueTotalVal * (targetCollectionPct / 100));
-  const simulatedRunwayBoostDays = Math.round((simulatedCashUnlocked / (totalReceivablesVal || 1)) * 45);
+  const simulatedCashUnlocked = overdueTotalVal === null ? null : overdueTotalVal * (targetCollectionPct / 100);
+  const simulatedRunwayBoostDays = simulatedCashUnlocked === null || !totalReceivablesVal
+    ? null
+    : Math.round((simulatedCashUnlocked / totalReceivablesVal) * 45);
 
   return (
     <div className="space-y-5 max-w-full pb-12 select-none font-sans text-slate-800">
@@ -513,7 +522,7 @@ export default function ConsistentAccountReceivablePage() {
             <ShieldAlert className="h-3.5 w-3.5 text-red-500" />
             <span>Overdue Invoices</span>
             <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-red-500 text-white shadow-2xs">
-              {overdueCountVal}
+              {overdueCountVal ?? 'Not available'}
             </span>
           </button>
 
@@ -646,7 +655,7 @@ export default function ConsistentAccountReceivablePage() {
                   {formatAmount(currentNotDueVal)}
                 </div>
                 <span className="text-[11px] text-blue-600 font-semibold mt-1 block">
-                  {data?.summary?.currentNotDue?.pct || '0'}% (Click to drill down) →
+                  {data?.summary?.currentNotDue?.pct ?? 'Not available'}{data?.summary?.currentNotDue?.pct === null || data?.summary?.currentNotDue?.pct === undefined ? '' : '%'} (Click to drill down) →
                 </span>
               </div>
               <div className="mt-2 -mx-4 -mb-4">
@@ -678,7 +687,7 @@ export default function ConsistentAccountReceivablePage() {
                   {formatAmount(overdueTotalVal)}
                 </div>
                 <span className="text-[11px] text-amber-600 font-semibold mt-1 block">
-                  {overdueCountVal} Invoices (Click to inspect) →
+                  {overdueCountVal ?? 'Not available'} Invoices (Click to inspect) →
                 </span>
               </div>
               <div className="mt-2 -mx-4 -mb-4">
@@ -710,7 +719,7 @@ export default function ConsistentAccountReceivablePage() {
                   {formatAmount(highRiskVal)}
                 </div>
                 <span className="text-[11px] text-red-600 font-semibold mt-1 block">
-                  {data?.summary?.days90Plus?.pct || '0'}% (High Risk Drill-down) →
+                  {data?.summary?.days90Plus?.pct ?? 'Not available'}{data?.summary?.days90Plus?.pct === null || data?.summary?.days90Plus?.pct === undefined ? '' : '%'} (High Risk Drill-down) →
                 </span>
               </div>
               <div className="mt-2 -mx-4 -mb-4">

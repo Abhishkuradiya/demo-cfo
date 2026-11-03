@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getTenantIdFromSession } from '@/lib/auth';
 import { Pool } from 'pg';
+import { getXeroAccessToken, fetchXeroResource } from '@/lib/xero';
+import { getOrFetchManagementReport } from '@/lib/managementAccountsStorage';
 
 const pgPool = new Pool({
   host: process.env.DB_HOST || 'localhost',
@@ -22,8 +24,11 @@ export async function GET(req: NextRequest) {
   const search = (searchParams.get('search') || '').toLowerCase().trim();
   const status = searchParams.get('status') || '';
   const category = searchParams.get('category') || '';
+  const fromDate = searchParams.get('from_date') || null;
+  const toDate = searchParams.get('to_date') || null;
 
   try {
+    const tokenInfo = await getXeroAccessToken(tenantId);
     // Query top vendors by total spend from ACCPAY invoices in PostgreSQL
     const queryStr = `
       SELECT 
@@ -33,43 +38,46 @@ export async function GET(req: NextRequest) {
         SUM(amount_due) as total_outstanding
       FROM invoices
       WHERE tenant_id = $1 AND type = 'ACCPAY'
+        AND ($2::date IS NULL OR invoice_date >= $2::date)
+        AND ($3::date IS NULL OR invoice_date < ($3::date + INTERVAL '1 day'))
       GROUP BY contact_name
       ORDER BY total_spent DESC
     `;
 
-    const result = await pgPool.query(queryStr, [tenantId]);
-    const rows = result.rows;
+    const result = await pgPool.query(queryStr, [tenantId, fromDate, toDate]);
+    let rows = result.rows;
+    if (rows.length === 0) {
+      const invoices = tokenInfo
+        ? await getOrFetchManagementReport(tenantId, 'Invoices', () => fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Invoices')) as any[] | null
+        : null;
+      const grouped = new Map<string, { invoice_count: number; total_spent: number; total_outstanding: number }>();
+      for (const invoice of invoices ?? []) {
+        if (String(invoice.Type ?? '').toUpperCase() !== 'ACCPAY') continue;
+        const invoiceDate = new Date(invoice.Date || invoice.invoice_date || '');
+        const endExclusive = toDate ? new Date(`${toDate}T00:00:00`) : null;
+        if (endExclusive) endExclusive.setDate(endExclusive.getDate() + 1);
+        if ((fromDate && (Number.isNaN(invoiceDate.getTime()) || invoiceDate < new Date(`${fromDate}T00:00:00`))) ||
+            (endExclusive && (Number.isNaN(invoiceDate.getTime()) || invoiceDate >= endExclusive))) continue;
+        const name = invoice.Contact?.Name || invoice.contact_name || '';
+        if (!name) continue;
+        const current = grouped.get(name) ?? { invoice_count: 0, total_spent: 0, total_outstanding: 0 };
+        current.invoice_count += 1;
+        current.total_spent += Number(invoice.Total ?? invoice.total ?? 0) || 0;
+        current.total_outstanding += Number(invoice.AmountDue ?? invoice.amount_due ?? 0) || 0;
+        grouped.set(name, current);
+      }
+      rows = Array.from(grouped, ([contact_name, values]) => ({ contact_name, ...values }));
+    }
 
     const grandTotalSpent = rows.reduce((sum, r) => sum + parseFloat(r.total_spent || '0'), 0);
     const grandTotalOutstanding = rows.reduce((sum, r) => sum + parseFloat(r.total_outstanding || '0'), 0);
-
-    const categoryMap: Record<string, string> = {
-      'Berkeley Care LTD': 'Healthcare',
-      'Royal Mail': 'Shipping',
-      'Amazon': 'Supplies',
-      'ABBOTT LABORATORIES LIMITED': 'Laboratory',
-      'Amazon Shipping': 'Logistics',
-      'Alliance Healthcare (Distribution) Ltd': 'Healthcare',
-      'Phoenix Healthcare Distribution Limited': 'Healthcare',
-      'Sigma Pharmaceuticals Plc': 'Pharma',
-      'Bestway Pharmacy NDC Ltd': 'Pharma',
-      'AAH Pharmaceuticals Limited': 'Pharma'
-    };
-
-    const paidOnTimeMap: Record<string, number> = {
-      'Berkeley Care LTD': 94.6,
-      'Royal Mail': 90.1,
-      'Amazon': 88.7,
-      'ABBOTT LABORATORIES LIMITED': 93.2,
-      'Amazon Shipping': 89.3
-    };
 
     const formattedVendors = rows.map((r) => {
       const spent = parseFloat(r.total_spent || '0');
       const outstanding = parseFloat(r.total_outstanding || '0');
       const pctOfTotal = grandTotalSpent > 0 ? (spent / grandTotalSpent) * 100 : 0;
-      const catName = categoryMap[r.contact_name] || 'General';
-      const paidOnTime = paidOnTimeMap[r.contact_name] || 91.2;
+      const catName = '—';
+      const paidOnTime = null;
 
       const words = r.contact_name.trim().split(' ');
       let avatar = 'VE';
@@ -121,7 +129,11 @@ export async function GET(req: NextRequest) {
       .sort((a, b) => b.amount - a.amount);
 
     const totalVendorsCount = rows.length;
-    const avgSpend = totalVendorsCount > 0 ? Math.round(grandTotalSpent / totalVendorsCount) : 0;
+    const avgSpend = totalVendorsCount > 0 ? parseFloat((grandTotalSpent / totalVendorsCount).toFixed(2)) : null;
+
+    const organisation = tokenInfo
+      ? await getOrFetchManagementReport(tenantId, 'Organisation', async () => (await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Organisations'))[0] ?? null) as any
+      : null;
 
     return NextResponse.json({
       summary: {
@@ -129,11 +141,12 @@ export async function GET(req: NextRequest) {
         totalSpent: grandTotalSpent,
         avgSpendPerVendor: avgSpend,
         totalOutstandingPayables: grandTotalOutstanding,
-        paidOnTimePercentage: totalVendorsCount > 0 ? 91.2 : 0
+        paidOnTimePercentage: null
       },
       topVendors: formattedVendors.slice(0, 5),
       topCategories: topCategories.slice(0, 5),
       vendors: paginated,
+      meta: { currency: organisation?.BaseCurrency ?? null },
       pagination: {
         page,
         limit,

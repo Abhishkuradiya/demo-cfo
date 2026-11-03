@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
 import { getTenantIdFromSession } from '@/lib/auth';
 import { getXeroAccessToken, fetchXeroReport, fetchXeroResource } from '@/lib/xero';
 import { getOrFetchManagementReport } from '@/lib/managementAccountsStorage';
@@ -144,7 +143,6 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const fromDate = searchParams.get('fromDate');
   const toDate = searchParams.get('toDate');
-  const postgresStorage = searchParams.get('storage') === 'postgres';
 
   try {
     const tokenInfo = await getXeroAccessToken(tenantId);
@@ -173,12 +171,7 @@ export async function GET(req: NextRequest) {
     }
 
     const getStoredReport = async (key: string, fetchFromXero: () => Promise<unknown | null>) => {
-      if (postgresStorage) return getOrFetchManagementReport(tenantId, key, fetchFromXero);
-      const cached = await db.getReport(tenantId, key);
-      if (cached !== null) return cached;
-      const fresh = await fetchFromXero();
-      if (fresh !== null) await db.saveReport(tenantId, key, fresh);
-      return fresh;
+      return getOrFetchManagementReport(tenantId, key, fetchFromXero);
     };
     const cacheKey = `ProfitAndLoss_${start}_${end}`;
     let report = null;
@@ -186,7 +179,7 @@ export async function GET(req: NextRequest) {
       report = await getStoredReport(cacheKey, () => fetchXeroReport(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'ProfitAndLoss', `fromDate=${start}&toDate=${end}`));
     } catch (error) {
       console.error('Failed to load Profit & Loss from PostgreSQL/Xero:', error);
-      if (postgresStorage) throw error;
+      throw error;
     }
 
     let org = null;
@@ -194,7 +187,7 @@ export async function GET(req: NextRequest) {
       org = await getStoredReport('Organisation', async () => (await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Organisations'))[0] ?? null);
     } catch (error) {
       console.error('Failed to load Organisation details from PostgreSQL/Xero:', error);
-      if (postgresStorage) throw error;
+      throw error;
     }
     const orgCurrency = org?.BaseCurrency || null;
 
@@ -203,7 +196,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({
         connected: true,
         available: false,
-        summary: { revenue: 0, expenses: 0, grossProfit: 0, netProfit: 0, profitMargin: 0, grossProfitMargin: 0 },
+        summary: null,
         income: { operating: [], other: [] },
         expenses: { operating: [], other: [] },
         trends: [],
@@ -268,7 +261,7 @@ export async function GET(req: NextRequest) {
         mReport = await getStoredReport(mCacheKey, () => fetchXeroReport(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'ProfitAndLoss', `fromDate=${mStart}&toDate=${mEnd}`));
       } catch (error) {
         console.error(`Failed to fetch P&L for trend month ${mStart}:`, error);
-        if (postgresStorage) throw error;
+        throw error;
       }
       
       const monthParsed = mReport ? parseProfitAndLoss(mReport) : null;
@@ -277,18 +270,23 @@ export async function GET(req: NextRequest) {
       const sourceOperatingExpenses = mReport ? findPnlSummaryValue(mReport, ['total operating expenses', 'total administrative costs', 'total overheads', 'operating expenses']) : null;
       const sourceTotalExpenses = mReport ? findPnlSummaryValue(mReport, ['total expenses']) : null;
       const sourceCogs = mReport ? findPnlSummaryValue(mReport, ['total cost of sales', 'total cost of goods sold', 'cost of goods sold', 'total direct costs', 'direct costs']) : null;
+      const sourceGrossProfit = mReport ? findPnlSummaryValue(mReport, ['gross profit', 'gross profit / loss']) : null;
       const sourceNetProfit = mReport ? findPnlSummaryValue(mReport, ['net profit', 'net profit / loss', 'net income', 'profit for the year']) : null;
       const sourceExpenseTotal = sourceTotalExpenses ?? (sourceOperatingExpenses !== null && sourceCogs !== null ? sourceOperatingExpenses + sourceCogs : sourceOperatingExpenses);
       const monthHasDetail = Boolean(hasAccountDetail || (sourceRevenue !== null && sourceExpenseTotal !== null && sourceNetProfit !== null));
       const monthRevenue = hasAccountDetail && monthParsed ? monthParsed.income.operating.reduce((sum, item) => sum + item.value, 0) + monthParsed.income.other.reduce((sum, item) => sum + item.value, 0) : sourceRevenue;
       const monthExpenses = hasAccountDetail && monthParsed ? monthParsed.cogs.reduce((sum, item) => sum + item.value, 0) + monthParsed.expenses.operating.reduce((sum, item) => sum + item.value, 0) + monthParsed.expenses.other.reduce((sum, item) => sum + item.value, 0) : sourceExpenseTotal;
       const monthNet = hasAccountDetail && monthParsed ? monthParsed.income.operating.reduce((sum, item) => sum + item.value, 0) - monthParsed.cogs.reduce((sum, item) => sum + item.value, 0) + monthParsed.income.other.reduce((sum, item) => sum + item.value, 0) - monthParsed.expenses.operating.reduce((sum, item) => sum + item.value, 0) - monthParsed.expenses.other.reduce((sum, item) => sum + item.value, 0) : sourceNetProfit;
+      const monthGrossProfit = hasAccountDetail && monthParsed
+        ? monthParsed.income.operating.reduce((sum, item) => sum + item.value, 0) - monthParsed.cogs.reduce((sum, item) => sum + item.value, 0)
+        : sourceGrossProfit;
       
       trends.push({
         month: m.label,
         available: monthHasDetail,
         revenue: monthHasDetail ? monthRevenue : null,
         expenses: monthHasDetail ? monthExpenses : null,
+        grossProfit: monthHasDetail ? monthGrossProfit : null,
         netProfit: monthNet,
         reason: monthHasDetail ? null : (mReport ? 'Xero returned no usable P&L account detail for this month.' : 'No monthly Xero report was returned.')
       });
