@@ -2567,11 +2567,14 @@ export const db = {
         await pgPool.query('DELETE FROM payments WHERE tenant_id = $1', [tenantId]);
         await pgPool.query('DELETE FROM accounts WHERE tenant_id = $1', [tenantId]);
         await pgPool.query('DELETE FROM reports WHERE tenant_id = $1', [tenantId]);
+        await pgPool.query('DELETE FROM inventory_items WHERE tenant_id = $1', [tenantId]);
         await pgPool.query('DELETE FROM fixed_assets WHERE tenant_id = $1', [tenantId]);
         await pgPool.query('DELETE FROM fixed_assets_cache WHERE tenant_id = $1', [tenantId]);
         await pgPool.query('DELETE FROM budgets_cache WHERE tenant_id = $1', [tenantId]);
         await pgPool.query('DELETE FROM tax_cache WHERE tenant_id = $1', [tenantId]);
         await pgPool.query('DELETE FROM gl_cache WHERE tenant_id = $1', [tenantId]);
+        await pgPool.query('DELETE FROM inventory_cache WHERE tenant_id = $1', [tenantId]);
+        await pgPool.query('DELETE FROM inventory_sales_history WHERE tenant_id = $1', [tenantId]);
         return;
       } catch (e) {
         console.error("Database query failed:", e); throw e;
@@ -2583,6 +2586,7 @@ export const db = {
     json.payments = json.payments.filter(x => x.tenant_id !== tenantId);
     json.accounts = json.accounts.filter(x => x.tenant_id !== tenantId);
     json.reports = json.reports.filter(x => x.tenant_id !== tenantId);
+    json.inventory_items = (json.inventory_items || []).filter(x => x.tenant_id !== tenantId);
     json.bank_transactions = (json.bank_transactions || []).filter(x => x.tenant_id !== tenantId);
     json.prepayments = (json.prepayments || []).filter(x => x.tenant_id !== tenantId);
     json.overpayments = (json.overpayments || []).filter(x => x.tenant_id !== tenantId);
@@ -2591,6 +2595,8 @@ export const db = {
     json.budgets_cache = (json.budgets_cache || []).filter(x => x.tenant_id !== tenantId);
     json.tax_cache = (json.tax_cache || []).filter(x => x.tenant_id !== tenantId);
     json.gl_cache = (json.gl_cache || []).filter(x => x.tenant_id !== tenantId);
+    json.inventory_cache = (json.inventory_cache || []).filter(x => x.tenant_id !== tenantId);
+    json.inventory_sales_history = (json.inventory_sales_history || []).filter(x => x.tenant_id !== tenantId);
     writeJsonDb(json);
   },
  
@@ -2784,7 +2790,7 @@ export const db = {
     if (isPgConnected) {
       try {
         const { rows } = await pgPool.query(
-          'SELECT raw_data FROM reports WHERE tenant_id = $1 AND (report_type = $2 OR report_type LIKE $3) ORDER BY updated_at DESC LIMIT 1',
+          'SELECT raw_data FROM reports WHERE tenant_id = $1 AND (report_type = $2 OR report_type LIKE $3) ORDER BY CASE WHEN report_type = $2 THEN 0 ELSE 1 END, updated_at DESC LIMIT 1',
           [tenantId, reportType, `${reportType}%`]
         );
         if (rows[0] && rows[0].raw_data) {
@@ -2796,7 +2802,11 @@ export const db = {
       }
     }
     const json = readJsonDb();
-    const item = json.reports.find(r => r.tenant_id === tenantId && (r.report_type === reportType || r.report_type.startsWith(reportType)));
+    const tenantReports = json.reports.filter(r => r.tenant_id === tenantId);
+    const item = tenantReports.find(r => r.report_type === reportType)
+      || tenantReports.filter(r => r.report_type.startsWith(reportType)).sort((a, b) =>
+        String(b.updated_at || '').localeCompare(String(a.updated_at || ''))
+      )[0];
     return item ? item.raw_data : null;
   },
 

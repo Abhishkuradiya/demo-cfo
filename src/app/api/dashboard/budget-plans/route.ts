@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { isDeepStrictEqual } from 'node:util';
 import { db } from '@/lib/db';
 import { getTenantIdFromSession } from '@/lib/auth';
 
@@ -14,8 +15,41 @@ function getPlanKey(searchParams?: URLSearchParams, body?: Record<string, unknow
   return 'default_plan';
 }
 
+function removeLegacyDefaultBudgets(planData: any) {
+  if (!planData || planData.planSchemaVersion === 2) return planData;
+
+  const normalized = structuredClone(planData);
+  const monthlyByMonth = normalized.monthlyByMonth;
+  if (monthlyByMonth && typeof monthlyByMonth === 'object') {
+    for (const month of Object.values(monthlyByMonth) as Record<string, any>[]) {
+      for (const [category, values] of Object.entries(month)) {
+        if (values && typeof values === 'object' && values.budget === 0) {
+          delete values.budget;
+          if (Object.keys(values).length === 0) delete month[category];
+        }
+      }
+    }
+  } else if (normalized.monthly && typeof normalized.monthly === 'object') {
+    for (const [category, values] of Object.entries(normalized.monthly) as [string, any][]) {
+      if (values && typeof values === 'object' && values.budget === 0) {
+        delete values.budget;
+        if (Object.keys(values).length === 0) delete normalized.monthly[category];
+      }
+    }
+  }
+
+  normalized.planSchemaVersion = 2;
+  return normalized;
+}
+
 export async function GET(req: NextRequest) {
   try {
+    if (!(await db.checkPgConnection())) {
+      return NextResponse.json(
+        { success: false, error: 'PostgreSQL is unavailable; saved budgets cannot be loaded.' },
+        { status: 503 },
+      );
+    }
     const sessionTenantId = await getTenantIdFromSession();
     const tenantId = sessionTenantId || 1;
 
@@ -40,7 +74,18 @@ export async function GET(req: NextRequest) {
     }
 
     const planKey = getPlanKey(searchParams);
-    const planData = await db.getCustomBudgetPlan(tenantId, planKey);
+    const storedPlan = await db.getCustomBudgetPlan(tenantId, planKey);
+    const planData = removeLegacyDefaultBudgets(storedPlan);
+    if (planData && planData !== storedPlan) {
+      const saved = await db.saveCustomBudgetPlan(tenantId, planData, planKey);
+      const verifiedPlan = saved ? await db.getCustomBudgetPlan(tenantId, planKey) : null;
+      if (!verifiedPlan || !isDeepStrictEqual(verifiedPlan, planData)) {
+        return NextResponse.json(
+          { success: false, error: 'Could not migrate legacy zero-default budgets in PostgreSQL.' },
+          { status: 500 },
+        );
+      }
+    }
 
     return NextResponse.json({
       success: true,
@@ -60,6 +105,12 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    if (!(await db.checkPgConnection())) {
+      return NextResponse.json(
+        { success: false, error: 'PostgreSQL is unavailable; the budget was not saved.' },
+        { status: 503 },
+      );
+    }
     const sessionTenantId = await getTenantIdFromSession();
     const tenantId = sessionTenantId || 1;
 
@@ -75,16 +126,28 @@ export async function POST(req: NextRequest) {
     }
 
     const saved = await db.saveCustomBudgetPlan(tenantId, planData, planKey);
+    if (!saved) {
+      return NextResponse.json(
+        { success: false, error: 'Failed to persist the budget plan.' },
+        { status: 500 },
+      );
+    }
+
+    const persistedPlan = await db.getCustomBudgetPlan(tenantId, planKey);
+    if (!persistedPlan || !isDeepStrictEqual(persistedPlan, planData)) {
+      return NextResponse.json(
+        { success: false, error: 'The saved budget plan did not match the submitted values when read back from PostgreSQL.' },
+        { status: 500 },
+      );
+    }
 
     return NextResponse.json({
-      success: Boolean(saved),
-      message: saved
-        ? 'Custom budget plan saved successfully to database'
-        : 'Failed to save to database',
+      success: true,
+      message: 'Custom budget plan saved and verified in database storage',
       tenantId,
       planKey,
       updatedAt: new Date().toISOString(),
-      plan: planData,
+      plan: persistedPlan,
     });
   } catch (error: unknown) {
     const err = error as Error;
@@ -98,6 +161,12 @@ export async function POST(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
+    if (!(await db.checkPgConnection())) {
+      return NextResponse.json(
+        { success: false, error: 'PostgreSQL is unavailable; the saved budget was not deleted.' },
+        { status: 503 },
+      );
+    }
     const sessionTenantId = await getTenantIdFromSession();
     const tenantId = sessionTenantId || 1;
 

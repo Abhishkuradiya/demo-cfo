@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { AlertCircle, CalendarDays, CheckCircle2, ChevronDown, ChevronRight, Database, FileText, Flag, RefreshCw, Scale, TrendingUp, XCircle } from 'lucide-react';
+import { AlertCircle, CalendarDays, CheckCircle2, ChevronDown, ChevronRight, Database, FileSpreadsheet, FileText, Flag, RefreshCw, Scale, TrendingUp, XCircle } from 'lucide-react';
 import { PageContainer } from '@/components/common/page-container';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -593,13 +593,13 @@ export default function ManagementAccountsPage() {
       const doc = new JsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
       const pageWidth = doc.internal.pageSize.getWidth();
       const pageHeight = doc.internal.pageSize.getHeight();
-      const left = 18;
-      const right = pageWidth - 18;
+      const left = 15.35; // 10px less (18mm - 2.65mm)
+      const right = pageWidth - 15.35;
       const tableWidth = right - left;
       const contentBottom = pageHeight - 24;
-      const navy = [15, 35, 68] as [number, number, number];
-      const teal = [8, 145, 178] as [number, number, number];
-      const muted = [91, 105, 122] as [number, number, number];
+      const navy = [15, 23, 42] as [number, number, number];
+      const teal = [2, 132, 199] as [number, number, number];
+      const muted = [100, 116, 139] as [number, number, number];
       const expenseMix = [
         { label: 'Cost of sales', value: Math.abs(sum(pnl.cogs)), color: [37, 99, 235] as [number, number, number] },
         { label: 'Operating expenses', value: Math.abs(sum(pnl.expenses?.operating)), color: [8, 145, 178] as [number, number, number] },
@@ -1021,36 +1021,57 @@ export default function ManagementAccountsPage() {
         return top + 63;
       };
 
-      // Cover page: fill the entire page with the supplied photograph, with no overlays or added text.
-      const coverImage = new Image();
-      coverImage.src = '/management-accounts-cover.png';
-      await coverImage.decode();
-      const coverRatio = pageWidth / pageHeight;
-      let sourceX = 0;
-      let sourceY = 0;
-      let sourceWidth = coverImage.naturalWidth;
-      let sourceHeight = coverImage.naturalHeight;
-      if (sourceWidth / sourceHeight > coverRatio) {
-        sourceWidth = sourceHeight * coverRatio;
-        sourceX = (coverImage.naturalWidth - sourceWidth) / 2;
-      } else {
-        sourceHeight = sourceWidth / coverRatio;
-        sourceY = (coverImage.naturalHeight - sourceHeight) * 0.55;
+      // Cover page: corporate executive design consistent with Budgeting and Forecast standard
+      try {
+        const coverImage = new Image();
+        coverImage.src = '/management-accounts-cover.png';
+        await coverImage.decode();
+        const coverRatio = pageWidth / pageHeight;
+        let sourceX = 0;
+        let sourceY = 0;
+        let sourceWidth = coverImage.naturalWidth;
+        let sourceHeight = coverImage.naturalHeight;
+        if (sourceWidth / sourceHeight > coverRatio) {
+          sourceWidth = sourceHeight * coverRatio;
+          sourceX = (coverImage.naturalWidth - sourceWidth) / 2;
+        } else {
+          sourceHeight = sourceWidth / coverRatio;
+          sourceY = (coverImage.naturalHeight - sourceHeight) * 0.55;
+        }
+        const coverCanvas = document.createElement('canvas');
+        coverCanvas.width = 900;
+        coverCanvas.height = Math.round(coverCanvas.width / coverRatio);
+        const coverContext = coverCanvas.getContext('2d');
+        if (coverContext) {
+          coverContext.drawImage(coverImage, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, coverCanvas.width, coverCanvas.height);
+          const coverGradient = coverContext.createLinearGradient(0, 0, 0, coverCanvas.height);
+          coverGradient.addColorStop(0, 'rgba(15, 23, 42, 0.05)');
+          coverGradient.addColorStop(0.55, 'rgba(15, 23, 42, 0.20)');
+          coverGradient.addColorStop(1, 'rgba(15, 23, 42, 0.85)');
+          coverContext.fillStyle = coverGradient;
+          coverContext.fillRect(0, 0, coverCanvas.width, coverCanvas.height);
+          doc.addImage(coverCanvas.toDataURL('image/jpeg', 0.88), 'JPEG', 0, 0, pageWidth, pageHeight);
+          doc.setDrawColor(226, 232, 240);
+          doc.setLineWidth(0.65);
+          doc.rect(2.5, 2.5, pageWidth - 5, pageHeight - 5, 'S');
+        }
+      } catch {
+        doc.setFillColor(...navy);
+        doc.rect(0, 0, pageWidth, pageHeight, 'F');
+        doc.setFillColor(...teal);
+        doc.rect(0, pageHeight - 12, pageWidth, 12, 'F');
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(24);
+        doc.setTextColor(255, 255, 255);
+        doc.text('MANAGEMENT ACCOUNTS', left, 120);
+        doc.setFontSize(12);
+        doc.setTextColor(203, 213, 225);
+        doc.text(orgName || 'Financial Report', left, 134);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(10);
+        doc.text(`${formatDate(fromDate)} to ${formatDate(toDate)}  |  ${currency || 'USD'}`, left, 144);
+        doc.text('Virtual CFO Financial Intelligence', left, 154);
       }
-      const coverCanvas = document.createElement('canvas');
-      coverCanvas.width = 900;
-      coverCanvas.height = Math.round(coverCanvas.width / coverRatio);
-      const coverContext = coverCanvas.getContext('2d');
-      if (!coverContext) throw new Error('Unable to prepare the PDF cover image.');
-      coverContext.drawImage(coverImage, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, coverCanvas.width, coverCanvas.height);
-      const coverGradient = coverContext.createLinearGradient(0, 0, 0, coverCanvas.height);
-      coverGradient.addColorStop(0, 'rgba(15, 35, 68, 0.02)');
-      coverGradient.addColorStop(0.55, 'rgba(15, 35, 68, 0.04)');
-      coverGradient.addColorStop(1, 'rgba(15, 35, 68, 0.24)');
-      coverContext.fillStyle = coverGradient;
-      coverContext.fillRect(0, 0, coverCanvas.width, coverCanvas.height);
-      doc.addImage(coverCanvas.toDataURL('image/jpeg', 0.84), 'JPEG', 0, 0, pageWidth, pageHeight);
-      doc.setDrawColor(230, 235, 240); doc.setLineWidth(0.65); doc.rect(2.5, 2.5, pageWidth - 5, pageHeight - 5, 'S');
 
       // Reserve page 2 for an index populated only after every section has paginated.
       doc.addPage();
@@ -1442,12 +1463,13 @@ export default function ManagementAccountsPage() {
       const ExcelJS = (await import('exceljs')).default;
       const workbook = new ExcelJS.Workbook();
       workbook.creator = 'Virtual CFO'; workbook.created = new Date(); workbook.modified = new Date();
-      const navyFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FF0F2344' } };
-      const headerStyle = { font: { bold: true, color: { argb: 'FFFFFFFF' } }, fill: navyFill, alignment: { vertical: 'middle' as const } };
-      const moneyFormat = `#,##0.00;[Red](#,##0.00);-`;
+      const navyFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FF0F172A' } };
+      const headerStyle = { font: { name: 'Segoe UI', size: 10, bold: true, color: { argb: 'FFFFFFFF' } }, fill: navyFill, alignment: { vertical: 'middle' as const } };
+      const symbol = (currency === 'GBP' ? '£' : currency === 'EUR' ? '€' : '$').replaceAll('"', '""');
+      const moneyFormat = `"${symbol}"#,##0.00;[Red]("${symbol}"#,##0.00);-`;
       const addTitle = (sheet: import('exceljs').Worksheet, title: string, lastCol: number) => {
-        sheet.mergeCells(1, 1, 1, lastCol); const cell = sheet.getCell(1, 1); cell.value = title; cell.font = { name: 'Aptos Display', size: 16, bold: true, color: { argb: 'FFFFFFFF' } }; cell.fill = navyFill; cell.alignment = { vertical: 'middle' }; sheet.getRow(1).height = 30;
-        sheet.mergeCells(2, 1, 2, lastCol); sheet.getCell(2, 1).value = `${orgName || 'Your organisation'}  |  ${formatDate(fromDate)} to ${formatDate(toDate)}  |  ${currency || 'Currency not specified'}`; sheet.getCell(2, 1).font = { italic: true, color: { argb: 'FF64748B' } };
+        sheet.mergeCells(1, 1, 1, lastCol); const cell = sheet.getCell(1, 1); cell.value = title; cell.font = { name: 'Segoe UI', size: 14, bold: true, color: { argb: 'FFFFFFFF' } }; cell.fill = navyFill; cell.alignment = { vertical: 'middle' }; sheet.getRow(1).height = 30;
+        sheet.mergeCells(2, 1, 2, lastCol); sheet.getCell(2, 1).value = `${orgName || 'Your organisation'}  |  ${formatDate(fromDate)} to ${formatDate(toDate)}  |  ${currency || 'Currency not specified'}  |  Virtual CFO Financial Management`; sheet.getCell(2, 1).font = { name: 'Segoe UI', size: 9, italic: true, color: { argb: 'FF64748B' } };
         sheet.views = [{ state: 'frozen', ySplit: 4 }]; sheet.pageSetup = { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 };
       };
       const index = workbook.addWorksheet('Contents');

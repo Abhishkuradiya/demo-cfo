@@ -140,11 +140,17 @@ export const SCENARIOS: Record<ScenarioType, ScenarioConfig> = {
   },
 };
 
-type Period = 'ttm' | 'ytd' | 'quarter' | 'this_month';
+type Period = 'ttm' | 'ytd' | 'quarter' | 'this_month' | 'custom';
+
+const toDateInputValue = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
 interface IntelligenceResponse extends BudgetingReportData {
   connected: boolean;
   error?: string;
+  xeroActuals?: {
+    hasCashBalance: boolean;
+  };
 }
 
 type BudgetItem = BudgetReportItem;
@@ -154,16 +160,68 @@ const periods: { code: Period; label: string }[] = [
   { code: 'ytd', label: 'Year to date' },
   { code: 'quarter', label: 'This quarter' },
   { code: 'this_month', label: 'This month' },
+  { code: 'custom', label: 'Custom' },
 ];
 
 const EMPTY_BUDGET_ITEMS: BudgetItem[] = [];
+const finiteAmount = (value: unknown): number =>
+  typeof value === 'number' && Number.isFinite(value) ? value : 0;
+const roundCurrency = (value: number): number => Number(value.toFixed(2));
 
-const currencyFormatter = (currency: string) =>
-  new Intl.NumberFormat('en-GB', {
+const currencyFormatter = (currency: string) => {
+  const locale = currency === 'USD' ? 'en-US' : currency === 'GBP' ? 'en-GB' : currency === 'EUR' ? 'de-DE' : 'en-US';
+  return new Intl.NumberFormat(locale, {
     style: 'currency',
     currency,
-    maximumFractionDigits: 0,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   });
+};
+
+const getCashStatus = (closingCash: number, openingCash: number) =>
+  closingCash < 0 ? 'Critical' : closingCash < openingCash ? 'Monitor' : 'Healthy';
+
+
+function DecimalInput({
+  value,
+  onChange,
+  ariaLabel,
+  className,
+  disabled = false,
+}: {
+  value: number | null;
+  onChange: (val: string) => void;
+  ariaLabel: string;
+  className?: string;
+  disabled?: boolean;
+}) {
+  const [localVal, setLocalVal] = useState<string | null>(null);
+
+  const displayVal = localVal !== null ? localVal : value === null ? '' : Number(value).toFixed(2);
+
+  return (
+    <input
+      aria-label={ariaLabel}
+      type="number"
+      step="0.01"
+      min="0"
+      disabled={disabled}
+      className={className}
+      value={displayVal}
+      onFocus={(e) => {
+        setLocalVal(displayVal);
+        e.target.select();
+      }}
+      onChange={(e) => {
+        setLocalVal(e.target.value);
+        onChange(e.target.value);
+      }}
+      onBlur={() => {
+        setLocalVal(null);
+      }}
+    />
+  );
+}
 
 function MetricCard({
   title,
@@ -213,6 +271,16 @@ function MetricCard({
 export default function BudgetingPage() {
   const setSidebarCollapsed = useSidebarStore((state) => state.setCollapsed);
   const [period, setPeriod] = useState<Period>('ttm');
+  const [customStartDate, setCustomStartDate] = useState(() => {
+    const now = new Date();
+    return toDateInputValue(new Date(now.getFullYear(), now.getMonth(), 1));
+  });
+  const [customEndDate, setCustomEndDate] = useState(() => toDateInputValue(new Date()));
+  const [appliedCustomStartDate, setAppliedCustomStartDate] = useState(() => {
+    const now = new Date();
+    return toDateInputValue(new Date(now.getFullYear(), now.getMonth(), 1));
+  });
+  const [appliedCustomEndDate, setAppliedCustomEndDate] = useState(() => toDateInputValue(new Date()));
   const [scenario] = useState<ScenarioType>('average');
   const activeScenarioConfig = SCENARIOS[scenario];
   const [statementView, setStatementView] = useState<'pnl' | 'cashflow'>('pnl');
@@ -221,6 +289,7 @@ export default function BudgetingPage() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshCount, setRefreshCount] = useState(0);
+  const forceXeroRefreshNextLoad = useRef(false);
   const [exporting, setExporting] = useState<'xlsx' | 'pdf' | null>(null);
   const [plannerOpen, setPlannerOpen] = useState(false);
   const [planningHorizon, setPlanningHorizon] = useState<'monthly' | 'quarterly' | 'annual'>(
@@ -231,6 +300,9 @@ export default function BudgetingPage() {
   const [monthlyByMonth, setMonthlyByMonth] = useState<
     Record<number, Record<string, { budget: number; target: number }>>
   >({});
+  const [draftMonthlyByMonth, setDraftMonthlyByMonth] = useState<
+    Record<number, Record<string, { budget: number; target: number }>>
+  >({});
   const [budgetPlans, setBudgetPlans] = useState<
     Record<string, Record<string, { budget: number; target: number }>>
   >({});
@@ -238,13 +310,16 @@ export default function BudgetingPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [dbSavedAt, setDbSavedAt] = useState<string | null>(null);
   const currentSystemYear = new Date().getFullYear();
-  const [budgetYear, setBudgetYear] = useState<number>(2026);
-  const [availableYears, setAvailableYears] = useState<number[]>([2025, 2026, 2027]);
+  const [budgetYear, setBudgetYear] = useState<number>(() => new Date().getFullYear());
+  const [availableYears, setAvailableYears] = useState<number[]>(() => {
+    const year = new Date().getFullYear();
+    return [year - 1, year, year + 1];
+  });
   const revenueChartRef = useRef<HTMLDivElement>(null);
   const budgetChartRef = useRef<HTMLDivElement>(null);
   const cashFlowChartRef = useRef<HTMLDivElement>(null);
 
-  const applyPlanData = useCallback((parsedRaw: unknown) => {
+  const applyPlanData = useCallback((parsedRaw: unknown, asDraft = false) => {
     if (!parsedRaw || typeof parsedRaw !== 'object') return;
     const parsed = parsedRaw as {
       monthlyByMonth?: Record<number, Record<string, { budget: number; target: number }>>;
@@ -253,24 +328,34 @@ export default function BudgetingPage() {
       annual?: Record<string, { budget: number; target: number }>;
     };
     if (parsed.monthlyByMonth && typeof parsed.monthlyByMonth === 'object') {
-      setMonthlyByMonth(parsed.monthlyByMonth);
+      if (asDraft) setDraftMonthlyByMonth(parsed.monthlyByMonth);
+      else {
+        setMonthlyByMonth(parsed.monthlyByMonth);
+        setDraftMonthlyByMonth(parsed.monthlyByMonth);
+      }
     } else if (parsed.monthly && typeof parsed.monthly === 'object') {
       const backfill: Record<number, Record<string, { budget: number; target: number }>> = {};
       for (let m = 0; m < 12; m++) {
         backfill[m] = { ...parsed.monthly };
       }
-      setMonthlyByMonth(backfill);
+      if (asDraft) setDraftMonthlyByMonth(backfill);
+      else {
+        setMonthlyByMonth(backfill);
+        setDraftMonthlyByMonth(backfill);
+      }
     }
-    if (parsed.monthly || parsed.quarterly || parsed.annual) {
-      setBudgetPlans({
-        monthly: parsed.monthly ?? {},
-        quarterly: parsed.quarterly ?? {},
-        annual: parsed.annual ?? {},
-      });
-    } else {
-      setBudgetPlans(parsed as Record<string, Record<string, { budget: number; target: number }>>);
+    if (!asDraft) {
+      if (parsed.monthly || parsed.quarterly || parsed.annual) {
+        setBudgetPlans({
+          monthly: parsed.monthly ?? {},
+          quarterly: parsed.quarterly ?? {},
+          annual: parsed.annual ?? {},
+        });
+      } else {
+        setBudgetPlans(parsed as Record<string, Record<string, { budget: number; target: number }>>);
+      }
     }
-    setHasCustomizedPlan(true);
+    if (!asDraft) setHasCustomizedPlan(true);
   }, []);
 
   const addNewPlanningYear = () => {
@@ -280,23 +365,22 @@ export default function BudgetingPage() {
     toast.success(`Initialized planning workspace for FY ${nextYear}.`);
   };
 
-  const copyPreviousYearBudget = () => {
+  const copyPreviousYearBudget = async () => {
     const prevYear = budgetYear - 1;
-    const prevSaved =
-      window.localStorage.getItem(`virtual-cfo-budget-plans-${prevYear}`) ||
-      (prevYear === 2026 ? window.localStorage.getItem('virtual-cfo-budget-plans') : null);
-
-    if (prevSaved) {
-      try {
-        const parsed = JSON.parse(prevSaved);
-        applyPlanData(parsed);
-        toast.success(`Copied baseline plan from FY ${prevYear} into FY ${budgetYear}!`);
-        return;
-      } catch {
-        // ignore
+    try {
+      const res = await fetch(`/api/dashboard/budget-plans?year=${prevYear}`, { cache: 'no-store' });
+      if (res.ok) {
+        const json = await res.json();
+        if (json?.success && json?.plan) {
+          applyPlanData(json.plan, true);
+          toast.success(`Copied baseline plan from FY ${prevYear} into FY ${budgetYear}!`);
+          return;
+        }
       }
+    } catch {
+      // ignore
     }
-    toast.info(`No custom saved plan found for FY ${prevYear}; using standard baseline.`);
+    toast.info(`No custom saved plan found for FY ${prevYear}; default values are 0.`);
   };
 
   // Fetch plan when budgetYear changes
@@ -321,25 +405,12 @@ export default function BudgetingPage() {
         console.warn(`Could not fetch custom plan for FY ${budgetYear} from database`, err);
       }
 
-      // Fallback to local storage if database hasn't stored one or network is offline
-      try {
-        const saved =
-          window.localStorage.getItem(`virtual-cfo-budget-plans-${budgetYear}`) ||
-          (budgetYear === 2026 ? window.localStorage.getItem('virtual-cfo-budget-plans') : null);
-        if (saved && isMounted) {
-          const parsed = JSON.parse(saved);
-          applyPlanData(parsed);
-          return;
-        }
-      } catch {
-        // ignore
-      }
-
       if (isMounted) {
         // Reset to default benchmarks for this specific year if no custom plan exists
         setDbSavedAt(null);
         setHasCustomizedPlan(false);
         setMonthlyByMonth({});
+        setDraftMonthlyByMonth({});
         setBudgetPlans({});
       }
     };
@@ -380,10 +451,29 @@ export default function BudgetingPage() {
   }, [setSidebarCollapsed]);
 
   useEffect(() => {
+    const reloadAfterXeroSync = () => {
+      setData(null);
+      setError(null);
+      setIsLoading(true);
+      setRefreshCount((count) => count + 1);
+    };
+    window.addEventListener('xero-sync-complete', reloadAfterXeroSync);
+    return () => window.removeEventListener('xero-sync-complete', reloadAfterXeroSync);
+  }, []);
+
+  useEffect(() => {
     const controller = new AbortController();
     const loadBudgetData = async () => {
+        const forceRefresh = forceXeroRefreshNextLoad.current;
+      forceXeroRefreshNextLoad.current = false;
+      setIsLoading(true);
       try {
         const params = new URLSearchParams({ period });
+        params.set('refresh', 'true');
+        if (period === 'custom') {
+          params.set('from', appliedCustomStartDate);
+          params.set('to', appliedCustomEndDate);
+        }
         params.set('_t', Date.now().toString());
         const response = await fetch(`/api/dashboard/cfo-intelligence?${params.toString()}`, {
           signal: controller.signal,
@@ -393,31 +483,56 @@ export default function BudgetingPage() {
         if (!response.ok) {
           throw new Error(result.error || 'Unable to load Xero financial data.');
         }
+        if (!result.connected) {
+          throw new Error('Connect a Xero organization to load actual budgeting data.');
+        }
         if (
           result.connected &&
           (!result.profitability || !result.cashFlow13Week || !result.budgeting)
         ) {
           throw new Error('The financial data response is incomplete. Please try again.');
         }
+        const cashWeeks = result.cashFlow13Week?.weeks;
+        if (
+          !result.xeroActuals?.hasCashBalance ||
+          !Number.isFinite(result.cashFlow13Week?.startingCash) ||
+          !Array.isArray(cashWeeks) ||
+          cashWeeks.length !== 13 ||
+          !cashWeeks.every((week) =>
+            Number.isFinite(week.weekNum) &&
+            Number.isFinite(week.cashIn) &&
+            Number.isFinite(week.cashOut) &&
+            Number.isFinite(week.endingCash),
+          )
+        ) {
+          throw new Error('Xero did not provide a verified opening cash balance and complete 13-week cash schedule.');
+        }
         setData(result);
+        if (forceRefresh) toast.success('Selected-period Xero reports refreshed.');
       } catch (fetchError) {
         if (fetchError instanceof DOMException && fetchError.name === 'AbortError') return;
         const message =
           fetchError instanceof Error ? fetchError.message : 'Unable to load financial data.';
-        console.error('Failed to load Xero budget dashboard:', fetchError);
+        // This is a handled API failure shown in the page, not an uncaught
+        // application error. Avoid passing the Error object to console.error,
+        // which opens Next.js's development error overlay.
+        console.warn('Failed to load Xero budget dashboard:', message);
         setError(message);
       } finally {
-        if (!controller.signal.aborted) setIsLoading(false);
+        if (!controller.signal.aborted) {
+          setIsLoading(false);
+          if (forceRefresh) setIsSyncing(false);
+        }
       }
     };
     void loadBudgetData();
     return () => controller.abort();
-  }, [period, refreshCount]);
+  }, [period, appliedCustomStartDate, appliedCustomEndDate, refreshCount]);
 
   const profitability = data?.profitability;
   const budgetItems = data?.budgeting?.budgetItems ?? EMPTY_BUDGET_ITEMS;
 
-  const currency = data?.currency || 'GBP';
+  const currency = data?.currency || 'USD';
   const formatMoney = useMemo(() => currencyFormatter(currency), [currency]);
   const actualRevenue = profitability?.revenue ?? 0;
   const periodMonths =
@@ -435,52 +550,42 @@ export default function BudgetingPage() {
   const currentQuarterKey: QuarterKey =
     currentMonthIdx < 3 ? 'Q1' : currentMonthIdx < 6 ? 'Q2' : currentMonthIdx < 9 ? 'Q3' : 'Q4';
 
-  const getDefaultMonthlyValues = useCallback(
-    (item: { budget: number; type: 'revenue' | 'expense' }) => {
-      const annualBase = (item.budget / periodMonths) * 12;
-      const defAnnualBudget = Math.round(annualBase);
-      const defAnnualTarget = Math.round(defAnnualBudget * (item.type === 'revenue' ? 1.05 : 0.95));
-      const defMonthlyBudget = Math.round(defAnnualBudget / 12);
-      const defMonthlyTarget = Math.round(defAnnualTarget / 12);
-      return { budget: defMonthlyBudget, target: defMonthlyTarget };
-    },
-    [periodMonths],
-  );
+  const getDefaultMonthlyValues = useCallback(() => ({ budget: 0, target: 0 }), []);
 
   // Dashboard budget items: strictly bound to active period horizon with full 12-month intelligence
   const effectiveBudgetItems = useMemo(
     () =>
       budgetItems.map((item) => {
-        let baseBudget = item.budget;
-        let baseTarget = Math.round(item.budget * (item.type === 'revenue' ? 1.05 : 0.95));
+        let baseBudget = finiteAmount(item.budget);
+        let baseTarget = 0;
 
         if (hasCustomizedPlan) {
-          const def = getDefaultMonthlyValues(item);
+          const def = getDefaultMonthlyValues();
           if (period === 'this_month') {
             const mData =
               monthlyByMonth[currentMonthIdx]?.[item.category] ??
               budgetPlans.monthly?.[item.category] ??
               def;
-            baseBudget = mData.budget;
-            baseTarget = mData.target;
+            baseBudget = finiteAmount(mData.budget);
+            baseTarget = finiteAmount(mData.target);
           } else if (period === 'quarter') {
             const qDef = QUARTERS.find((q) => q.key === currentQuarterKey)!;
             let qB = 0;
             let qT = 0;
             qDef.months.forEach((m) => {
               const mData = monthlyByMonth[m]?.[item.category] ?? def;
-              qB += mData.budget;
-              qT += mData.target;
+              qB += finiteAmount(mData.budget);
+              qT += finiteAmount(mData.target);
             });
-            baseBudget = qB || (budgetPlans.quarterly?.[item.category]?.budget ?? def.budget * 3);
-            baseTarget = qT || (budgetPlans.quarterly?.[item.category]?.target ?? def.target * 3);
+            baseBudget = qB !== 0 ? qB : finiteAmount(budgetPlans.quarterly?.[item.category]?.budget);
+            baseTarget = qT !== 0 ? qT : finiteAmount(budgetPlans.quarterly?.[item.category]?.target);
           } else if (period === 'ytd') {
             let ytdB = 0;
             let ytdT = 0;
             for (let m = 0; m <= currentMonthIdx; m++) {
               const mData = monthlyByMonth[m]?.[item.category] ?? def;
-              ytdB += mData.budget;
-              ytdT += mData.target;
+              ytdB += finiteAmount(mData.budget);
+              ytdT += finiteAmount(mData.target);
             }
             baseBudget = ytdB;
             baseTarget = ytdT;
@@ -490,11 +595,11 @@ export default function BudgetingPage() {
             let annT = 0;
             for (let m = 0; m < 12; m++) {
               const mData = monthlyByMonth[m]?.[item.category] ?? def;
-              annB += mData.budget;
-              annT += mData.target;
+              annB += finiteAmount(mData.budget);
+              annT += finiteAmount(mData.target);
             }
-            baseBudget = annB || (budgetPlans.annual?.[item.category]?.budget ?? def.budget * 12);
-            baseTarget = annT || (budgetPlans.annual?.[item.category]?.target ?? def.target * 12);
+            baseBudget = annB !== 0 ? annB : finiteAmount(budgetPlans.annual?.[item.category]?.budget);
+            baseTarget = annT !== 0 ? annT : finiteAmount(budgetPlans.annual?.[item.category]?.target);
           }
         }
 
@@ -506,11 +611,13 @@ export default function BudgetingPage() {
           ...item,
           rawBudget: baseBudget,
           rawTarget: baseTarget,
-          budget: Math.round(baseBudget * multiplier),
-          target: Math.round(baseTarget * multiplier),
+          budget: parseFloat((finiteAmount(baseBudget) * multiplier).toFixed(2)),
+          actual: finiteAmount(item.actual),
+          target: parseFloat((finiteAmount(baseTarget) * multiplier).toFixed(2)),
         };
       })
-      .filter((item) => Math.abs(item.actual) > 0 || Math.abs(item.budget) > 0),
+      // Keep all budget lines visible
+      .filter((item) => Boolean(item.category)),
     [
       budgetItems,
       budgetPlans,
@@ -527,104 +634,154 @@ export default function BudgetingPage() {
   // Dedicated planner items: bound to selected month / quarter / annual view
   const plannerBudgetItems = useMemo(() => {
     return budgetItems.map((item) => {
-      const def = getDefaultMonthlyValues(item);
+      const def = getDefaultMonthlyValues();
+      const budgetForMonth = (month: number) => {
+        const value = monthlyByMonth[month]?.[item.category]?.budget;
+        return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+      };
       let rawBudget = def.budget;
-      let rawTarget = def.target;
-      let scaledActual = 0;
+      let scaledActual: number | null = null;
+      const actualForMonths = (months: number[]) => {
+        const today = new Date();
+        if (budgetYear !== today.getFullYear()) {
+          return null;
+        }
+        const completedMonths = months.filter((month) => month < today.getMonth());
+        if (completedMonths.length === 0) {
+          return null;
+        }
+        const monthlyActual = item.monthlyActual ?? {};
+        return parseFloat(completedMonths.reduce((total, month) => {
+          const value = monthlyActual[month];
+          return total + (typeof value === 'number' && Number.isFinite(value) ? value : 0);
+        }, 0).toFixed(2));
+      };
 
       if (planningHorizon === 'monthly') {
-        const mData = monthlyByMonth[selectedMonth]?.[item.category] ?? def;
-        rawBudget = mData.budget;
-        rawTarget = mData.target;
-        scaledActual = Math.round(item.actual / periodMonths);
+        rawBudget = budgetForMonth(selectedMonth);
+        scaledActual = actualForMonths([selectedMonth]);
       } else if (planningHorizon === 'quarterly') {
         if (selectedQuarter === 'all') {
           let annB = 0;
-          let annT = 0;
           for (let m = 0; m < 12; m++) {
-            const mData = monthlyByMonth[m]?.[item.category] ?? def;
-            annB += mData.budget;
-            annT += mData.target;
+            annB += budgetForMonth(m);
           }
-          rawBudget = Math.round(annB / 4);
-          rawTarget = Math.round(annT / 4);
-          scaledActual = Math.round((item.actual / periodMonths) * 3);
+          rawBudget = parseFloat((annB / 4).toFixed(2));
+          const annualActual = actualForMonths(Array.from({ length: 12 }, (_, month) => month));
+          scaledActual = annualActual === null ? null : parseFloat((annualActual / 4).toFixed(2));
         } else {
           const qDef = QUARTERS.find((q) => q.key === selectedQuarter)!;
           let qB = 0;
-          let qT = 0;
           qDef.months.forEach((m) => {
-            const mData = monthlyByMonth[m]?.[item.category] ?? def;
-            qB += mData.budget;
-            qT += mData.target;
+            qB += budgetForMonth(m);
           });
           rawBudget = qB;
-          rawTarget = qT;
-          scaledActual = Math.round((item.actual / periodMonths) * 3);
+          scaledActual = actualForMonths(qDef.months);
         }
       } else {
         // Annual
         let annB = 0;
-        let annT = 0;
         for (let m = 0; m < 12; m++) {
-          const mData = monthlyByMonth[m]?.[item.category] ?? def;
-          annB += mData.budget;
-          annT += mData.target;
+          annB += budgetForMonth(m);
         }
         rawBudget = annB;
-        rawTarget = annT;
-        scaledActual = Math.round((item.actual / periodMonths) * 12);
+        scaledActual = actualForMonths(Array.from({ length: 12 }, (_, month) => month));
       }
 
       return {
         category: item.category,
         type: item.type,
         rawBudget,
-        rawTarget,
         scaledActual,
+        variance:
+          scaledActual === null
+            ? null
+            : parseFloat((scaledActual - rawBudget).toFixed(2)),
+        variancePct:
+          scaledActual === null || rawBudget === 0
+            ? null
+            : ((scaledActual - rawBudget) / Math.abs(rawBudget)) * 100,
       };
-    })
-    .filter(
-      (item) =>
-        Math.abs(item.scaledActual) > 0 ||
-        Math.abs(item.rawBudget) > 0 ||
-        Math.abs(item.rawTarget) > 0,
-    );
+    });
   }, [
     budgetItems,
     monthlyByMonth,
     planningHorizon,
     selectedMonth,
     selectedQuarter,
-    periodMonths,
+    budgetYear,
     getDefaultMonthlyValues,
   ]);
+
+  const plannerDraftBudgets = useMemo(() => {
+    return Object.fromEntries(plannerBudgetItems.map((item) => {
+      const budgetForMonth = (month: number) => {
+        const budget = draftMonthlyByMonth[month]?.[item.category]?.budget ??
+          monthlyByMonth[month]?.[item.category]?.budget;
+        return finiteAmount(budget);
+      };
+
+      if (planningHorizon === 'monthly') {
+        return [item.category, budgetForMonth(selectedMonth)];
+      }
+
+      if (planningHorizon === 'quarterly') {
+        if (selectedQuarter === 'all') {
+          const monthlyBudgets = Array.from({ length: 12 }, (_, month) => budgetForMonth(month));
+          return [item.category, monthlyBudgets.reduce<number>((total, budget) => total + budget, 0) / 4];
+        }
+        const quarter = QUARTERS.find((candidate) => candidate.key === selectedQuarter);
+        const quarterBudgets = (quarter?.months ?? []).map(budgetForMonth);
+        return [item.category, quarterBudgets.reduce<number>((total, budget) => total + budget, 0)];
+      }
+
+      const annualBudgets = Array.from({ length: 12 }, (_, month) => budgetForMonth(month));
+      return [item.category, annualBudgets.reduce<number>((total, budget) => total + budget, 0)];
+    }));
+  }, [draftMonthlyByMonth, monthlyByMonth, plannerBudgetItems, planningHorizon, selectedMonth, selectedQuarter]);
 
   const plannerTotals = useMemo(() => {
     return plannerBudgetItems.reduce(
       (acc, item) => ({
         budget: acc.budget + item.rawBudget,
-        target: acc.target + item.rawTarget,
-        actual: acc.actual + item.scaledActual,
+        actual: acc.actual + (item.scaledActual ?? 0),
+        variance: acc.variance + (item.variance ?? 0),
       }),
-      { budget: 0, target: 0, actual: 0 },
+      { budget: 0, actual: 0, variance: 0 },
     );
   }, [plannerBudgetItems]);
 
   // Dynamic 13-Week Cash Flow model: recalculates weekly inflows, outflows, and ending cash based on manual Plan & Targets
   const effective13Weeks = useMemo<CashFlowWeekItem[]>(() => {
-    const rawWeeks = data?.cashFlow13Week?.weeks || [];
-    const startingCash = data?.cashFlow13Week?.startingCash || 0;
+    const rawWeeks = data?.cashFlow13Week?.weeks;
+    const startingCash = data?.cashFlow13Week?.startingCash;
+    if (
+      !Array.isArray(rawWeeks) ||
+      typeof startingCash !== 'number' ||
+      !Number.isFinite(startingCash) ||
+      rawWeeks.length !== 13 ||
+      !rawWeeks.every(
+        (week) =>
+          Number.isFinite(week.cashIn) &&
+          Number.isFinite(week.cashOut) &&
+          Number.isFinite(week.endingCash),
+      )
+    ) {
+      return [];
+    }
+    const actualWeeks = rawWeeks as Array<
+      (typeof rawWeeks)[number] & { cashIn: number; cashOut: number; endingCash: number }
+    >;
 
     if (!hasCustomizedPlan) {
-      return rawWeeks.map((w, idx) => ({
+      return actualWeeks.map((w, idx) => ({
         weekNum: w.weekNum ?? idx + 1,
         weekLabel: w.weekLabel || w.week || `Week ${w.weekNum ?? idx + 1}`,
-        cashIn: w.cashIn ?? w.inflow ?? 0,
-        cashOut: w.cashOut ?? w.outflow ?? 0,
-        netCash: w.netCash !== undefined ? w.netCash : (w.cashIn ?? 0) - (w.cashOut ?? 0),
-        endingCash: w.endingCash ?? w.closingCash ?? 0,
-        status: w.status,
+        cashIn: w.cashIn,
+        cashOut: w.cashOut,
+        netCash: w.cashIn - w.cashOut,
+        endingCash: w.endingCash,
+        status: getCashStatus(w.endingCash, startingCash),
       }));
     }
 
@@ -643,7 +800,7 @@ export default function BudgetingPage() {
       let rev = 0;
       let exp = 0;
       budgetItems.forEach((item) => {
-        const def = getDefaultMonthlyValues(item);
+        const def = getDefaultMonthlyValues();
         const mData = monthlyByMonth[m]?.[item.category] ?? def;
         if (item.type === 'revenue') {
           // Revenue Target (or fallback to budget)
@@ -655,8 +812,8 @@ export default function BudgetingPage() {
       });
       return {
         m,
-        rev: Math.round(rev * activeScenarioConfig.revMultiplier),
-        exp: Math.round(exp * activeScenarioConfig.costMultiplier),
+        rev: roundCurrency(rev * activeScenarioConfig.revMultiplier),
+        exp: roundCurrency(exp * activeScenarioConfig.costMultiplier),
       };
     });
 
@@ -670,32 +827,31 @@ export default function BudgetingPage() {
 
       // Check if Xero has existing raw week weights for this month's window
       const rawInTotal = wIndices.reduce(
-        (sum, i) => sum + (rawWeeks[i]?.cashIn ?? rawWeeks[i]?.inflow ?? 0),
+        (sum, i) => sum + actualWeeks[i].cashIn,
         0,
       );
       const rawOutTotal = wIndices.reduce(
-        (sum, i) => sum + (rawWeeks[i]?.cashOut ?? rawWeeks[i]?.outflow ?? 0),
+        (sum, i) => sum + actualWeeks[i].cashOut,
         0,
       );
 
       wIndices.forEach((i) => {
-        const rawW = rawWeeks[i];
-        const rawIn = rawW?.cashIn ?? rawW?.inflow ?? 0;
-        const rawOut = rawW?.cashOut ?? rawW?.outflow ?? 0;
+        const rawW = actualWeeks[i];
+        const rawIn = rawW.cashIn;
+        const rawOut = rawW.cashOut;
 
         const inWeight = rawInTotal > 0 ? rawIn / rawInTotal : 1 / numWeeksInMonth;
         const outWeight = rawOutTotal > 0 ? rawOut / rawOutTotal : 1 / numWeeksInMonth;
 
-        const cashIn = Math.round(plannedRev * inWeight);
-        const cashOut = Math.round(plannedExp * outWeight);
+        const cashIn = roundCurrency(plannedRev * inWeight);
+        const cashOut = roundCurrency(plannedExp * outWeight);
         const netCash = cashIn - cashOut;
         runningCash += netCash;
 
         const weekNum = i + 1;
         const weekLabel = rawW?.weekLabel || rawW?.week || `W${weekNum}`;
 
-        const status =
-          runningCash > 100000 ? 'Healthy' : runningCash > 30000 ? 'Monitor' : 'Critical';
+        const status = getCashStatus(runningCash, startingCash);
 
         resultWeeks.push({
           weekNum,
@@ -755,7 +911,7 @@ export default function BudgetingPage() {
     const expMultiplier = actExp > 0 ? planExp / actExp : 1.0;
 
     // 2. Liquid Cash from 13-Week Cash Flow Schedule (which is already live-synchronized with the manual plan!)
-    const startingCash = data?.cashFlow13Week?.startingCash || 25400;
+    const startingCash = data?.cashFlow13Week?.startingCash ?? 0;
     const planEndingCash =
       effective13Weeks.length > 0
         ? (effective13Weeks[effective13Weeks.length - 1].endingCash ?? startingCash)
@@ -764,15 +920,15 @@ export default function BudgetingPage() {
     // 3. Pro-forma Current Assets
     const baseAR =
       baseBs.assets.current.find((a) => /receivable|debtor/i.test(a.name))?.value ||
-      Math.round((actRev || actualRevenue || 29450) * 0.28);
+      Math.round((actRev || actualRevenue || 0) * 0.28);
     const planAR = Math.round(baseAR * revMultiplier);
 
     const baseInv =
-      baseBs.assets.current.find((a) => /inventory|stock/i.test(a.name))?.value || 3500;
+      baseBs.assets.current.find((a) => /inventory|stock/i.test(a.name))?.value ?? 0;
     const planInv = Math.round(baseInv * expMultiplier);
 
     const basePrepay =
-      baseBs.assets.current.find((a) => /prepayment|deposit/i.test(a.name))?.value || 1000;
+      baseBs.assets.current.find((a) => /prepayment|deposit/i.test(a.name))?.value ?? 0;
     const planPrepay = Math.round(basePrepay * ((revMultiplier + expMultiplier) / 2));
 
     const currentAssetsList: BalanceSheetItem[] = [
@@ -787,15 +943,15 @@ export default function BudgetingPage() {
 
     // 4. Pro-forma Current Liabilities
     const baseAP =
-      baseBs.liabilities.current.find((l) => /payable|creditor/i.test(l.name))?.value || 6200;
+      baseBs.liabilities.current.find((l) => /payable|creditor/i.test(l.name))?.value ?? 0;
     const planAP = Math.round(baseAP * expMultiplier);
 
     const baseAccruals =
-      baseBs.liabilities.current.find((l) => /accrued|payroll/i.test(l.name))?.value || 1350;
+      baseBs.liabilities.current.find((l) => /accrued|payroll/i.test(l.name))?.value ?? 0;
     const planAccruals = Math.round(baseAccruals * expMultiplier);
 
     const baseTax =
-      baseBs.liabilities.current.find((l) => /tax|vat/i.test(l.name))?.value || 900;
+      baseBs.liabilities.current.find((l) => /tax|vat/i.test(l.name))?.value ?? 0;
     const netProfitDelta = (planRev - planExp) - (actRev - actExp);
     const planTax = Math.max(500, Math.round(baseTax + Math.max(0, netProfitDelta * 0.19)));
 
@@ -864,13 +1020,10 @@ export default function BudgetingPage() {
   ]);
 
   const updatePlan = (category: string, field: 'budget' | 'target', value: string) => {
-    const numericValue = Math.max(0, Number(value) || 0);
-    setHasCustomizedPlan(true);
+    const numericValue = value === "" ? 0 : Math.max(0, parseFloat(value) || 0);
+    const def = getDefaultMonthlyValues();
 
-    const itemRef = budgetItems.find((i) => i.category === category);
-    const def = itemRef ? getDefaultMonthlyValues(itemRef) : { budget: 0, target: 0 };
-
-    setMonthlyByMonth((prev) => {
+    setDraftMonthlyByMonth((prev) => {
       const next: Record<number, Record<string, { budget: number; target: number }>> = {};
       for (let m = 0; m < 12; m++) {
         next[m] = { ...(prev[m] ?? {}) };
@@ -887,7 +1040,7 @@ export default function BudgetingPage() {
         };
       } else if (planningHorizon === 'quarterly') {
         if (selectedQuarter === 'all') {
-          const perMonth = Math.round(numericValue / 3);
+          const perMonth = parseFloat((numericValue / 3).toFixed(2));
           for (let m = 0; m < 12; m++) {
             const cur = next[m]?.[category] ?? { ...def };
             next[m] = {
@@ -900,7 +1053,7 @@ export default function BudgetingPage() {
           }
         } else {
           const qDef = QUARTERS.find((q) => q.key === selectedQuarter)!;
-          const perMonth = Math.round(numericValue / 3);
+          const perMonth = parseFloat((numericValue / 3).toFixed(2));
           qDef.months.forEach((m) => {
             const cur = next[m]?.[category] ?? { ...def };
             next[m] = {
@@ -914,7 +1067,7 @@ export default function BudgetingPage() {
         }
       } else {
         // Annual
-        const perMonth = Math.round(numericValue / 12);
+        const perMonth = parseFloat((numericValue / 12).toFixed(2));
         for (let m = 0; m < 12; m++) {
           const cur = next[m]?.[category] ?? { ...def };
           next[m] = {
@@ -932,20 +1085,22 @@ export default function BudgetingPage() {
   };
 
   const copyMonthToAll = () => {
-    setMonthlyByMonth((prev) => {
-      const sourceMonthData = prev[selectedMonth] ?? {};
+    setDraftMonthlyByMonth((prev) => {
+      const sourceMonthData = {
+        ...(monthlyByMonth[selectedMonth] ?? {}),
+        ...(prev[selectedMonth] ?? {}),
+      };
       const next: Record<number, Record<string, { budget: number; target: number }>> = {};
       for (let m = 0; m < 12; m++) {
         const mData: Record<string, { budget: number; target: number }> = {};
         budgetItems.forEach((item) => {
-          const base = sourceMonthData[item.category] ?? getDefaultMonthlyValues(item);
-          mData[item.category] = { ...base };
+          const base = sourceMonthData[item.category];
+          if (base) mData[item.category] = { ...base };
         });
         next[m] = mData;
       }
       return next;
     });
-    setHasCustomizedPlan(true);
     toast.success(`Copied ${MONTH_NAMES[selectedMonth]} figures to all 12 months!`);
   };
 
@@ -954,17 +1109,8 @@ export default function BudgetingPage() {
       setIsSaving(true);
       const fullMonthly: Record<number, Record<string, { budget: number; target: number }>> = {};
       for (let m = 0; m < 12; m++) {
-        fullMonthly[m] = { ...(monthlyByMonth[m] ?? {}) };
+        fullMonthly[m] = { ...(draftMonthlyByMonth[m] ?? monthlyByMonth[m] ?? {}) };
       }
-
-      budgetItems.forEach((item) => {
-        const def = getDefaultMonthlyValues(item);
-        for (let m = 0; m < 12; m++) {
-          if (!fullMonthly[m][item.category]) {
-            fullMonthly[m][item.category] = { ...def };
-          }
-        }
-      });
 
       const quartersPlan: Record<QuarterKey, Record<string, { budget: number; target: number }>> = {
         Q1: {},
@@ -984,8 +1130,8 @@ export default function BudgetingPage() {
           let qB = 0;
           let qT = 0;
           q.months.forEach((m) => {
-            qB += fullMonthly[m][item.category].budget;
-            qT += fullMonthly[m][item.category].target;
+            qB += fullMonthly[m]?.[item.category]?.budget ?? 0;
+            qT += fullMonthly[m]?.[item.category]?.target ?? 0;
           });
           quartersPlan[q.key][item.category] = { budget: qB, target: qT };
           annB += qB;
@@ -1004,6 +1150,7 @@ export default function BudgetingPage() {
       });
 
       const completeStorage = {
+        planSchemaVersion: 2,
         monthlyByMonth: fullMonthly,
         quarters: quartersPlan,
         annual: annualPlan,
@@ -1011,52 +1158,21 @@ export default function BudgetingPage() {
         quarterly: quarterlyPlan,
       };
 
-      setMonthlyByMonth(fullMonthly);
-      setBudgetPlans({
-        monthly: monthlyPlan,
-        quarterly: quarterlyPlan,
-        annual: annualPlan,
+      const response = await fetch('/api/dashboard/budget-plans', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ year: budgetYear, plan: completeStorage }),
       });
-      setHasCustomizedPlan(true);
-
-      // 1. Save directly to Database with fiscal year
-      let savedToDb = false;
-      try {
-        const response = await fetch('/api/dashboard/budget-plans', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ year: budgetYear, plan: completeStorage }),
-        });
-        if (response.ok) {
-          const resData = await response.json();
-          if (resData?.success) {
-            savedToDb = true;
-            setDbSavedAt(resData.updatedAt || new Date().toISOString());
-          }
-        }
-      } catch (dbErr) {
-        console.error('Failed to save budget plan to database:', dbErr);
+      const resData = await response.json();
+      if (!response.ok || !resData?.success || !resData?.plan) {
+        throw new Error(resData?.error || 'The database did not confirm the budget save.');
       }
 
-      // 2. Keep localStorage as offline backup for this specific year
-      try {
-        window.localStorage.setItem(
-          `virtual-cfo-budget-plans-${budgetYear}`,
-          JSON.stringify(completeStorage),
-        );
-      } catch {
-        // ignore
-      }
-
-      if (savedToDb) {
-        toast.success(
-          `FY ${budgetYear} budget plan saved to database! All 12 months, Q1–Q4 quarterly totals, and Annual sum synchronized.`,
-        );
-      } else {
-        toast.success(`FY ${budgetYear} budget saved locally. (Database sync pending)`);
-      }
-    } catch {
-      toast.error('Unable to save the budget plan.');
+      applyPlanData(resData.plan);
+      setDbSavedAt(resData.updatedAt || new Date().toISOString());
+      toast.success(`FY ${budgetYear} budget saved to the database. Variance is now based on the saved plan.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to save the budget plan.');
     } finally {
       setIsSaving(false);
     }
@@ -1080,6 +1196,7 @@ export default function BudgetingPage() {
     setDbSavedAt(null);
     setHasCustomizedPlan(false);
     setMonthlyByMonth({});
+    setDraftMonthlyByMonth({});
     const resetPlans: Record<string, Record<string, { budget: number; target: number }>> = {};
     (['monthly', 'quarterly', 'annual'] as const).forEach((horizon) => {
       const horizonMonths = horizon === 'monthly' ? 1 : horizon === 'quarterly' ? 3 : 12;
@@ -1087,10 +1204,7 @@ export default function BudgetingPage() {
       budgetItems.forEach((item) => {
         const annualBase = (item.budget / periodMonths) * 12;
         const b = Math.round((annualBase / 12) * horizonMonths);
-        horizonPlan[item.category] = {
-          budget: b,
-          target: Math.round(b * (item.type === 'revenue' ? 1.05 : 0.95)),
-        };
+        horizonPlan[item.category] = { budget: 0, target: 0 };
       });
       resetPlans[horizon] = horizonPlan;
     });
@@ -1114,7 +1228,7 @@ export default function BudgetingPage() {
   );
 
   useEffect(() => {
-    if (statementView !== 'pnl' || !profitability) return;
+    if (statementView !== 'pnl' || !data) return;
 
     let revenueChart: echarts.ECharts | null = null;
     let budgetChart: echarts.ECharts | null = null;
@@ -1127,24 +1241,20 @@ export default function BudgetingPage() {
           echarts.getInstanceByDom(revenueChartRef.current) ||
           echarts.init(revenueChartRef.current);
 
-        const rawTrend = profitability.monthlyTrend ?? [];
-        const monthlyTrend =
-          rawTrend.length > 0
-            ? rawTrend
-            : [
-                { month: 'Jan', revenue: Math.round(actualRevenue * 0.07) },
-                { month: 'Feb', revenue: Math.round(actualRevenue * 0.08) },
-                { month: 'Mar', revenue: Math.round(actualRevenue * 0.085) },
-                { month: 'Apr', revenue: Math.round(actualRevenue * 0.08) },
-                { month: 'May', revenue: Math.round(actualRevenue * 0.085) },
-                { month: 'Jun', revenue: Math.round(actualRevenue * 0.09) },
-                { month: 'Jul', revenue: Math.round(actualRevenue * 0.085) },
-                { month: 'Aug', revenue: Math.round(actualRevenue * 0.09) },
-                { month: 'Sep', revenue: Math.round(actualRevenue * 0.08) },
-                { month: 'Oct', revenue: Math.round(actualRevenue * 0.085) },
-                { month: 'Nov', revenue: Math.round(actualRevenue * 0.08) },
-                { month: 'Dec', revenue: Math.round(actualRevenue * 0.09) },
-              ];
+        const graphMonthIndices = planningHorizon === 'monthly'
+          ? [selectedMonth]
+          : planningHorizon === 'quarterly' && selectedQuarter !== 'all'
+            ? QUARTERS.find((quarter) => quarter.key === selectedQuarter)?.months ?? []
+            : Array.from({ length: 12 }, (_, month) => month);
+        const monthlyTrend = graphMonthIndices.map((monthIndex) => ({
+          month: MONTH_SHORT[monthIndex],
+          expenses: budgetYear === new Date().getFullYear()
+            ? budgetItems.reduce((total, item) => {
+                const actual = item.monthlyActual?.[monthIndex];
+                return total + (typeof actual === 'number' && Number.isFinite(actual) ? actual : 0);
+              }, 0)
+            : 0,
+        }));
 
         revenueChart.setOption(
           {
@@ -1170,10 +1280,10 @@ export default function BudgetingPage() {
             },
             series: [
               {
-                name: 'Revenue',
+                name: 'Expenses',
                 type: 'line',
                 smooth: true,
-                data: monthlyTrend.map((item) => item.revenue),
+                data: monthlyTrend.map((item) => finiteAmount(item.expenses)),
                 symbolSize: 6,
                 lineStyle: { width: 3, color: '#0284c7' },
                 itemStyle: { color: '#0284c7' },
@@ -1187,7 +1297,7 @@ export default function BudgetingPage() {
       }
 
       // 2. Budget vs actual chart
-      if (budgetChartRef.current && effectiveBudgetItems.length > 0) {
+      if (budgetChartRef.current && plannerBudgetItems.length > 0) {
         budgetChart =
           echarts.getInstanceByDom(budgetChartRef.current) || echarts.init(budgetChartRef.current);
 
@@ -1216,7 +1326,7 @@ export default function BudgetingPage() {
             },
             yAxis: {
               type: 'category',
-              data: effectiveBudgetItems.map((item) => item.category),
+              data: plannerBudgetItems.map((item) => item.category),
               axisLabel: { color: '#475569', fontSize: 10, width: 135, overflow: 'truncate' },
               axisLine: { show: false },
             },
@@ -1224,14 +1334,14 @@ export default function BudgetingPage() {
               {
                 name: 'Budget',
                 type: 'bar',
-                data: effectiveBudgetItems.map((item) => item.budget),
+                data: plannerBudgetItems.map((item) => finiteAmount(item.rawBudget)),
                 itemStyle: { color: '#cbd5e1', borderRadius: [0, 4, 4, 0] },
                 barMaxWidth: 12,
               },
               {
                 name: 'Actual',
                 type: 'bar',
-                data: effectiveBudgetItems.map((item) => item.actual),
+                data: plannerBudgetItems.map((item) => finiteAmount(item.scaledActual)),
                 itemStyle: { color: '#0284c7', borderRadius: [0, 4, 4, 0] },
                 barMaxWidth: 12,
               },
@@ -1257,7 +1367,17 @@ export default function BudgetingPage() {
       clearTimeout(timer);
       resizeObserver?.disconnect();
     };
-  }, [statementView, effectiveBudgetItems, formatMoney, profitability, actualRevenue]);
+  }, [
+    statementView,
+    budgetItems,
+    plannerBudgetItems,
+    planningHorizon,
+    selectedMonth,
+    selectedQuarter,
+    budgetYear,
+    formatMoney,
+    data,
+  ]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -1385,37 +1505,34 @@ export default function BudgetingPage() {
     setError(null);
     setData(null);
     setPeriod(newPeriod);
-    const horizon: 'monthly' | 'quarterly' | 'annual' =
-      newPeriod === 'this_month' ? 'monthly' : newPeriod === 'quarter' ? 'quarterly' : 'annual';
-    setPlanningHorizon(horizon);
+  };
+
+  const todayInputValue = toDateInputValue(new Date());
+  const customDateRangeError =
+    customStartDate > customEndDate
+      ? 'Start date must be on or before the end date.'
+      : customEndDate > todayInputValue
+        ? 'End date cannot be in the future.'
+        : '';
+
+  const applyCustomDateRange = () => {
+    if (!customStartDate || !customEndDate || customDateRangeError) return;
+    setIsLoading(true);
+    setError(null);
+    setData(null);
+    setAppliedCustomStartDate(customStartDate);
+    setAppliedCustomEndDate(customEndDate);
+    setPeriod('custom');
+    setRefreshCount((count) => count + 1);
   };
 
   const refreshData = async () => {
     setIsLoading(true);
     setIsSyncing(true);
     setError(null);
-    try {
-      if (data?.connected) {
-        // Trigger live background sync with Xero first to ensure fresh data in database cache
-        const syncRes = await fetch('/api/xero', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({}),
-        }).catch((err) => {
-          console.warn('Xero sync ping returned:', err);
-          return null;
-        });
-        if (syncRes && syncRes.ok) {
-          toast.success('Live financial data synced from Xero.');
-        }
-      }
-    } catch (syncErr) {
-      console.warn('Sync failed, falling back to local refresh:', syncErr);
-    } finally {
-      setIsSyncing(false);
-      setData(null);
-      setRefreshCount((count) => count + 1);
-    }
+    forceXeroRefreshNextLoad.current = true;
+    setData(null);
+    setRefreshCount((count) => count + 1);
   };
 
   const exportReport = async (format: 'xlsx' | 'pdf') => {
@@ -1436,6 +1553,9 @@ export default function BudgetingPage() {
       const report = await import('@/lib/exports/budgeting-report');
       const reportPayload = {
         ...data,
+        reportType: 'budgeting' as const,
+        reportTitle: 'Budget & Variance Financial Report',
+        reportSubtitle: 'A clear view of performance, cash and the outlook for the financial year.',
         scenario,
         scenarioLabel: activeScenarioConfig.tagline,
         scenarioMultipliers: {
@@ -1602,6 +1722,47 @@ export default function BudgetingPage() {
                 </div>
               </div>
 
+              {period === 'custom' && (
+                <div className="flex flex-wrap items-end gap-2" aria-label="Custom date range">
+                  <label className="grid gap-1 text-[10px] font-medium text-slate-600">
+                    Start date
+                    <input
+                      type="date"
+                      aria-label="Custom range start date"
+                      value={customStartDate}
+                      max={customEndDate || todayInputValue}
+                      onChange={(event) => setCustomStartDate(event.target.value)}
+                      className="h-8 rounded-md border border-slate-200 bg-white px-2 text-[11px] text-slate-800 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500"
+                    />
+                  </label>
+                  <label className="grid gap-1 text-[10px] font-medium text-slate-600">
+                    End date
+                    <input
+                      type="date"
+                      aria-label="Custom range end date"
+                      value={customEndDate}
+                      min={customStartDate || undefined}
+                      max={todayInputValue}
+                      onChange={(event) => setCustomEndDate(event.target.value)}
+                      className="h-8 rounded-md border border-slate-200 bg-white px-2 text-[11px] text-slate-800 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={applyCustomDateRange}
+                    disabled={!customStartDate || !customEndDate || Boolean(customDateRangeError) || isLoading}
+                    className="h-8 rounded-md bg-slate-900 px-3 text-[11px] font-semibold text-white transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Apply
+                  </button>
+                  {customDateRangeError && (
+                    <span role="alert" className="basis-full text-[10px] text-rose-600">
+                      {customDateRangeError}
+                    </span>
+                  )}
+                </div>
+              )}
+
               {/* Dedicated Forecast Link Button */}
               <div className="flex items-center gap-2">
                 <Link
@@ -1683,6 +1844,88 @@ export default function BudgetingPage() {
 
           {statementView === 'pnl' && (
             <>
+              {(() => {
+                const actualRev = profitability.revenue;
+                const rawOpex = profitability.opexFixed + profitability.opexVariable;
+                const actualGrossProfit = profitability.grossProfit;
+                const actualGrossMargin = profitability.grossMarginPct;
+                const actualEbitda = profitability.ebitda;
+                const actualEbitdaMargin = profitability.ebitdaMarginPct;
+                const startingCash = data.cashFlow13Week?.startingCash ?? 0;
+
+                const totalActual = effectiveBudgetItems.reduce((acc, i) => acc + i.actual, 0);
+                const totalBudget = effectiveBudgetItems.reduce((acc, i) => acc + i.budget, 0);
+                const totalNetVariance = totalActual - totalBudget;
+                const revItem = effectiveBudgetItems.find((i) => i.type === 'revenue');
+                const revVariance = revItem ? revItem.actual - revItem.budget : 0;
+                const revVariancePct =
+                  revItem && revItem.budget > 0 ? (revVariance / revItem.budget) * 100 : 0;
+
+                return (
+                  <section
+                    aria-label="Financial overview"
+                    className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6"
+                  >
+                    <MetricCard
+                      title="Revenue"
+                      value={formatMoney.format(actualRev)}
+                      badge={
+                        revVariance !== 0
+                          ? `${revVariance >= 0 ? '+' : ''}${revVariancePct.toFixed(2)}% vs Budget`
+                          : undefined
+                      }
+                      badgeType={revVariance >= 0 ? 'favorable' : 'unfavorable'}
+                      detail={`Actual · ${data.periodInfo?.label ?? 'selected period'}`}
+                      accent="border-l-emerald-600"
+                    />
+                    <MetricCard
+                      title="Gross margin"
+                      value={`${actualGrossMargin.toFixed(2)}%`}
+                      badge={`${formatMoney.format(actualGrossProfit)} GP`}
+                      badgeType="favorable"
+                      detail={`${formatMoney.format(actualGrossProfit)} gross profit`}
+                      accent="border-l-emerald-600"
+                    />
+                    <MetricCard
+                      title="Operating expenses"
+                      value={formatMoney.format(rawOpex)}
+                      detail={`Operating costs · ${data.periodInfo?.label ?? 'selected period'}`}
+                      accent="border-l-amber-600"
+                    />
+                    <MetricCard
+                      title="EBITDA"
+                      value={formatMoney.format(actualEbitda)}
+                      badge={`${actualEbitdaMargin.toFixed(2)}% margin`}
+                      badgeType={actualEbitda >= 0 ? 'favorable' : 'unfavorable'}
+                      detail={`${actualEbitdaMargin.toFixed(2)}% EBITDA margin`}
+                      accent={actualEbitda >= 0 ? 'border-l-emerald-600' : 'border-l-rose-600'}
+                    />
+                    <MetricCard
+                      title="Cash position"
+                      value={formatMoney.format(startingCash)}
+                      badge={
+                        startingCash > 15000
+                          ? 'Healthy'
+                          : startingCash > 8000
+                            ? 'Watch'
+                            : undefined
+                      }
+                      badgeType="favorable"
+                      detail={`Cash balance as of ${data.periodInfo?.endDate ?? 'period end'}`}
+                      accent="border-l-amber-600"
+                    />
+                    <MetricCard
+                      title="Net budget variance"
+                      value={formatMoney.format(totalNetVariance)}
+                      badge={totalNetVariance <= 0 ? 'Favorable' : 'Review'}
+                      badgeType={totalNetVariance <= 0 ? 'favorable' : 'unfavorable'}
+                      detail={`Budget deviation across ${effectiveBudgetItems.length} lines`}
+                      accent={totalNetVariance <= 0 ? 'border-l-emerald-600' : 'border-l-rose-600'}
+                    />
+                  </section>
+                );
+              })()}
+
               {/* Plan & Targets */}
               <section className="rounded-md border border-slate-200 bg-white">
                 <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-3">
@@ -1708,8 +1951,7 @@ export default function BudgetingPage() {
                       </span>
                     </div>
                     <p className="mt-1 text-[10px] text-slate-500">
-                      Enter baseline plan budget and target values. Changes update variance
-                      immediately.
+                      Enter your budget and save it. Variance updates after the database confirms the save.
                     </p>
                   </div>
                   <button
@@ -1950,21 +2192,15 @@ export default function BudgetingPage() {
                                     : `Budget (${selectedQuarter} ${budgetYear})`
                                   : `Budget (FY ${budgetYear}: 12-Mo Sum)`}
                             </th>
-                            <th className="px-3 py-2.5 text-right capitalize">
-                              {planningHorizon === 'monthly'
-                                ? `Target (${MONTH_NAMES[selectedMonth]} ${budgetYear})`
-                                : planningHorizon === 'quarterly'
-                                  ? selectedQuarter === 'all'
-                                    ? `Target (Quarterly Avg · FY ${budgetYear})`
-                                    : `Target (${selectedQuarter} ${budgetYear})`
-                                  : `Target (FY ${budgetYear}: 12-Mo Sum)`}
+                            <th className="px-3 py-2.5 text-right" title="Actual minus budget; positive means actual is above budget.">
+                              Variance
                             </th>
                             <th className="px-3 py-2.5 text-right capitalize">
                               {planningHorizon === 'monthly'
-                                ? `Actual (${MONTH_SHORT[selectedMonth]} Run-Rate)`
+                                ? `Actual (${MONTH_SHORT[selectedMonth]})`
                                 : planningHorizon === 'quarterly'
-                                  ? 'Actual (Quarterly Run-Rate)'
-                                  : 'Actual (Annual Run-Rate)'}
+                                  ? selectedQuarter === 'all' ? 'Actual (Quarterly Avg)' : `Actual (${selectedQuarter})`
+                                  : `Actual (FY ${budgetYear})`}
                             </th>
                           </tr>
                         </thead>
@@ -1975,38 +2211,40 @@ export default function BudgetingPage() {
                                 {item.category}
                               </th>
                               <td className="px-3 py-2 text-right">
-                                <input
-                                  aria-label={`Budget for ${item.category}`}
-                                  type="number"
-                                  min="0"
-                                  value={item.rawBudget}
-                                  onChange={(event) =>
-                                    updatePlan(item.category, 'budget', event.target.value)
+                                <DecimalInput
+                                  ariaLabel={`Budget for ${item.category}`}
+                                  value={plannerDraftBudgets[item.category] ?? 0}
+                                  disabled={isSaving}
+                                  onChange={(val) =>
+                                    updatePlan(item.category, 'budget', val)
                                   }
                                   className="h-8 w-28 rounded-md border border-slate-200 px-2 text-right tabular-nums focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500"
                                 />
                               </td>
-                              <td className="px-3 py-2 text-right">
-                                <input
-                                  aria-label={`Target for ${item.category}`}
-                                  type="number"
-                                  min="0"
-                                  value={item.rawTarget}
-                                  onChange={(event) =>
-                                    updatePlan(item.category, 'target', event.target.value)
-                                  }
-                                  className="h-8 w-28 rounded-md border border-slate-200 px-2 text-right tabular-nums focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500"
-                                />
+                              <td className="px-3 py-2 text-right tabular-nums">
+                                <span className={cn(
+                                  'font-medium',
+                                  item.variance === 0 || item.variance === null
+                                    ? 'text-slate-500'
+                                    : (item.type === 'revenue' ? item.variance > 0 : item.variance < 0)
+                                      ? 'text-emerald-700'
+                                      : 'text-rose-700',
+                                )}>
+                                  {`${(item.variance ?? 0) > 0 ? '+' : ''}${formatMoney.format(item.variance ?? 0)}`}
+                                </span>
+                                <span className="ml-1.5 text-[10px] text-slate-500">
+                                  {item.variancePct === null ? '' : `${item.variancePct > 0 ? '+' : ''}${item.variancePct.toFixed(1)}%`}
+                                </span>
                               </td>
                               <td className="px-3 py-2 text-right tabular-nums text-slate-600">
-                                {formatMoney.format(item.scaledActual)}
+                                {formatMoney.format(item.scaledActual ?? 0)}
                               </td>
                             </tr>
                           ))}
                           {plannerBudgetItems.length === 0 && (
                             <tr>
                               <td
-                                colSpan={4}
+                                colSpan={3}
                                 className="px-3 py-6 text-center text-xs text-slate-500"
                               >
                                 No budget lines are available for this period.
@@ -2031,8 +2269,19 @@ export default function BudgetingPage() {
                               <td className="px-3 py-2.5 text-right tabular-nums text-slate-900">
                                 {formatMoney.format(plannerTotals.budget)}
                               </td>
-                              <td className="px-3 py-2.5 text-right tabular-nums text-slate-900">
-                                {formatMoney.format(plannerTotals.target)}
+                              <td className={cn(
+                                'px-3 py-2.5 text-right tabular-nums',
+                                plannerTotals.variance === 0
+                                  ? 'text-slate-600'
+                                  : plannerTotals.variance < 0 ? 'text-emerald-700' : 'text-rose-700',
+                              )}>
+                                {`${plannerTotals.variance > 0 ? '+' : ''}${formatMoney.format(plannerTotals.variance)}`}
+                                <span className="ml-1.5 text-[10px] font-normal text-slate-500">
+                                  {plannerTotals.budget === 0 ||
+                                  !Number.isFinite(plannerTotals.variance / Math.abs(plannerTotals.budget))
+                                    ? ''
+                                    : `${(plannerTotals.variance / Math.abs(plannerTotals.budget) * 100) > 0 ? '+' : ''}${(plannerTotals.variance / Math.abs(plannerTotals.budget) * 100).toFixed(1)}%`}
+                                </span>
                               </td>
                               <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">
                                 {formatMoney.format(plannerTotals.actual)}
@@ -2046,102 +2295,27 @@ export default function BudgetingPage() {
                 )}
               </section>
 
-              {(() => {
-                const actualRev = profitability.revenue;
-                const rawOpex = profitability.opexFixed + profitability.opexVariable;
-                const actualGrossProfit = profitability.grossProfit;
-                const actualGrossMargin = profitability.grossMarginPct;
-                const actualEbitda = profitability.ebitda;
-                const actualEbitdaMargin = profitability.ebitdaMarginPct;
-                const startingCash = data.cashFlow13Week?.startingCash ?? 0;
-
-                const totalActual = effectiveBudgetItems.reduce((acc, i) => acc + i.actual, 0);
-                const totalBudget = effectiveBudgetItems.reduce((acc, i) => acc + i.budget, 0);
-                const totalNetVariance = totalActual - totalBudget;
-                const revItem = effectiveBudgetItems.find((i) => i.type === 'revenue');
-                const revVariance = revItem ? revItem.actual - revItem.budget : 0;
-                const revVariancePct =
-                  revItem && revItem.budget > 0 ? (revVariance / revItem.budget) * 100 : 0;
-
-                return (
-                  <section
-                    aria-label="Financial overview"
-                    className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6"
-                  >
-                    <MetricCard
-                      title="Revenue"
-                      value={formatMoney.format(actualRev)}
-                      badge={
-                        revVariance !== 0
-                          ? `${revVariance >= 0 ? '+' : ''}${revVariancePct.toFixed(1)}% vs Budget`
-                          : undefined
-                      }
-                      badgeType={revVariance >= 0 ? 'favorable' : 'unfavorable'}
-                      detail={`Actual · ${data.periodInfo?.label ?? 'selected period'}`}
-                      accent="border-l-emerald-600"
-                    />
-                    <MetricCard
-                      title="Gross margin"
-                      value={`${actualGrossMargin.toFixed(1)}%`}
-                      badge={`${formatMoney.format(actualGrossProfit)} GP`}
-                      badgeType="favorable"
-                      detail={`${formatMoney.format(actualGrossProfit)} gross profit`}
-                      accent="border-l-emerald-600"
-                    />
-                    <MetricCard
-                      title="Operating expenses"
-                      value={formatMoney.format(rawOpex)}
-                      detail={`Operating costs · ${data.periodInfo?.label ?? 'selected period'}`}
-                      accent="border-l-amber-600"
-                    />
-                    <MetricCard
-                      title="EBITDA"
-                      value={formatMoney.format(actualEbitda)}
-                      badge={`${actualEbitdaMargin.toFixed(1)}% margin`}
-                      badgeType={actualEbitda >= 0 ? 'favorable' : 'unfavorable'}
-                      detail={`${actualEbitdaMargin.toFixed(1)}% EBITDA margin`}
-                      accent={actualEbitda >= 0 ? 'border-l-emerald-600' : 'border-l-rose-600'}
-                    />
-                    <MetricCard
-                      title="Cash position"
-                      value={formatMoney.format(startingCash)}
-                      badge={
-                        startingCash > 15000
-                          ? 'Healthy'
-                          : startingCash > 8000
-                            ? 'Watch'
-                            : undefined
-                      }
-                      badgeType="favorable"
-                      detail="Current cash balance"
-                      accent="border-l-amber-600"
-                    />
-                    <MetricCard
-                      title="Net budget variance"
-                      value={formatMoney.format(totalNetVariance)}
-                      badge={totalNetVariance >= 0 ? 'Favorable' : 'Review'}
-                      badgeType={totalNetVariance >= 0 ? 'favorable' : 'unfavorable'}
-                      detail={`Budget deviation across ${effectiveBudgetItems.length} lines`}
-                      accent={totalNetVariance >= 0 ? 'border-l-emerald-600' : 'border-l-rose-600'}
-                    />
-                  </section>
-                );
-              })()}
-
               <section className="grid grid-cols-1 gap-2 xl:grid-cols-2 items-stretch">
                 <article className="flex flex-col rounded-md border border-slate-200 bg-white p-3">
                   <div className="mb-2 flex items-center justify-between">
                     <div>
-                      <h2 className="text-xs font-semibold text-slate-900">Revenue trend</h2>
+                      <h2 className="text-xs font-semibold text-slate-900">Expense trend</h2>
                       <p className="mt-0.5 text-[10px] text-slate-500">
-                        Monthly revenue recorded in Xero
+                        Monthly expense actuals from Xero
                       </p>
                     </div>
                     <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-medium text-slate-600">
-                      Monthly Actuals
+                      Expense Actuals
                     </span>
                   </div>
-                  <div ref={revenueChartRef} className="h-72 w-full" />
+                  <div className="relative h-72 w-full">
+                    <div ref={revenueChartRef} className="h-full w-full" />
+                    {!budgetItems.length && (
+                      <div className="absolute inset-0 grid place-items-center text-xs text-slate-500">
+                        No expense budget lines are available for this period.
+                      </div>
+                    )}
+                  </div>
                 </article>
 
                 <article className="flex flex-col rounded-md border border-slate-200 bg-white p-3">
@@ -2151,15 +2325,15 @@ export default function BudgetingPage() {
                       <p className="mt-0.5 text-[10px] text-slate-500">Performance by budget line</p>
                     </div>
                     <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-medium text-slate-600">
-                      {effectiveBudgetItems.length} lines
+                      {plannerBudgetItems.length} lines
                     </span>
                   </div>
-                  {effectiveBudgetItems.length > 0 ? (
+                  {plannerBudgetItems.length > 0 ? (
                     <div className="h-72 w-full overflow-y-auto overflow-x-hidden pr-1.5 scrollbar-thin">
                       <div
                         ref={budgetChartRef}
                         className="w-full"
-                        style={{ height: Math.max(288, effectiveBudgetItems.length * 36) }}
+                        style={{ height: Math.max(288, plannerBudgetItems.length * 36) }}
                       />
                     </div>
                   ) : (
@@ -2249,7 +2423,7 @@ export default function BudgetingPage() {
                               )}
                             >
                               {variancePct > 0 ? '+' : ''}
-                              {variancePct.toFixed(1)}%
+                              {variancePct.toFixed(2)}%
                             </td>
                             <td className="px-3 py-2.5 text-right">
                               <span
@@ -2337,43 +2511,42 @@ export default function BudgetingPage() {
 
           {statementView === 'cashflow' &&
             (() => {
-              const cf = data?.cashFlow13Week;
+              const cf = data!.cashFlow13Week!;
               const weeks: CashFlowWeekItem[] = effective13Weeks;
-              const startingCash = cf?.startingCash || 0;
-              const totalInflows = weeks.reduce((sum, w) => sum + (Number(w.cashIn) || 0), 0);
-              const totalOutflows = weeks.reduce((sum, w) => sum + (Number(w.cashOut) || 0), 0);
+              const startingCash = cf.startingCash;
+              const totalInflows = weeks.reduce((sum, w) => sum + w.cashIn, 0);
+              const totalOutflows = weeks.reduce((sum, w) => sum + w.cashOut, 0);
               const netChange = totalInflows - totalOutflows;
-              const endingCash =
-                weeks.length > 0
-                  ? (weeks[weeks.length - 1].endingCash ?? startingCash)
-                  : startingCash;
-              const avgWeeklyBurn =
-                totalOutflows > 0 ? totalOutflows / Math.max(1, weeks.length) : 0;
-              const runway = avgWeeklyBurn > 0 ? startingCash / (avgWeeklyBurn * 4.33) : 12;
+              const endingCash = weeks[weeks.length - 1].endingCash;
+              const avgWeeklyNetBurn = Math.max(0, -netChange / weeks.length);
+              const runway =
+                avgWeeklyNetBurn > 0 ? startingCash / (avgWeeklyNetBurn * 4.33) : null;
 
-              let minCash = startingCash;
-              let minCashWeek = 1;
+              let minCash = weeks[0].endingCash;
+              let minCashWeek = weeks[0].weekNum;
               weeks.forEach((w) => {
-                if (w.endingCash !== undefined && w.endingCash < minCash) {
+                if (w.endingCash < minCash) {
                   minCash = w.endingCash;
-                  minCashWeek = w.weekNum ?? 1;
+                  minCashWeek = w.weekNum;
                 }
               });
 
-              const dso = data?.kpiScorecard?.dso ?? 38;
-              const dpo = data?.kpiScorecard?.dpo ?? 26;
-              const ccc = data?.kpiScorecard?.workingCapitalCycle ?? 42;
+              const dso =
+                (data?.profitability?.revenue ?? 0) > 0 ? data?.kpiScorecard?.dso : null;
+              const dpo =
+                (data?.profitability?.cogs ?? 0) > 0 ? data?.kpiScorecard?.dpo : null;
 
               return (
                 <div className="space-y-4">
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-2">
                     <div>
                       <h2 className="text-xs font-semibold text-slate-900">
-                        Budgeted Cashflow Projections (13-Week)
+                        13-Week Cashflow Projection
                       </h2>
                       <p className="text-[10px] text-slate-500">
-                        Rolling 13-week cash liquidity trajectory derived from your manual budget
-                        &amp; target plan
+                        {hasCustomizedPlan
+                          ? 'Projected from the saved budget targets, anchored to the live Xero cash balance.'
+                          : 'Projected from the live Xero cash balance and scheduled Xero receivables and payables.'}
                       </p>
                     </div>
                     <span
@@ -2385,8 +2558,8 @@ export default function BudgetingPage() {
                       )}
                     >
                       {hasCustomizedPlan
-                        ? '✨ Live: Synchronized with Custom Plan & Targets'
-                        : 'Default Xero Benchmark'}
+                        ? 'Custom budget plan applied'
+                        : 'Xero scheduled cash'}
                     </span>
                   </div>
                   {/* 4 Cash KPI Cards */}
@@ -2461,11 +2634,13 @@ export default function BudgetingPage() {
                         <Activity className="h-4 w-4 text-indigo-600" />
                       </div>
                       <div className="mt-2 text-xl font-bold text-indigo-600">
-                        {runway > 36 ? '>36' : runway.toFixed(1)}{' '}
-                        <span className="text-xs font-medium text-slate-500">months</span>
+                        {runway === null ? 'No net burn' : runway > 36 ? '>36' : runway.toFixed(2)}{' '}
+                        {runway !== null && (
+                          <span className="text-xs font-medium text-slate-500">months</span>
+                        )}
                       </div>
                       <p className="mt-1 text-[10px] text-slate-500">
-                        Avg burn: {formatMoney.format(avgWeeklyBurn)} / week
+                        Avg net burn: {formatMoney.format(avgWeeklyNetBurn)} / week
                       </p>
                     </div>
                   </div>
@@ -2506,7 +2681,7 @@ export default function BudgetingPage() {
                         Days Sales Outstanding (DSO)
                       </div>
                       <div className="mt-1 text-lg font-bold text-slate-800">
-                        {dso.toFixed(0)}{' '}
+                        {typeof dso === 'number' && Number.isFinite(dso) ? dso.toFixed(2) : 'Unavailable'}{' '}
                         <span className="text-[11px] font-normal text-slate-500">days</span>
                       </div>
                       <p className="mt-0.5 text-[10px] text-slate-500">
@@ -2518,7 +2693,7 @@ export default function BudgetingPage() {
                         Days Payable Outstanding (DPO)
                       </div>
                       <div className="mt-1 text-lg font-bold text-slate-800">
-                        {dpo.toFixed(0)}{' '}
+                        {typeof dpo === 'number' && Number.isFinite(dpo) ? dpo.toFixed(2) : 'Unavailable'}{' '}
                         <span className="text-[11px] font-normal text-slate-500">days</span>
                       </div>
                       <p className="mt-0.5 text-[10px] text-slate-500">
@@ -2530,11 +2705,11 @@ export default function BudgetingPage() {
                         Cash Conversion Cycle (CCC)
                       </div>
                       <div className="mt-1 text-lg font-bold text-indigo-600">
-                        {ccc.toFixed(0)}{' '}
+                        Unavailable{' '}
                         <span className="text-[11px] font-normal text-slate-500">days</span>
                       </div>
                       <p className="mt-0.5 text-[10px] text-slate-500">
-                        Net operating cycle required to turn investments into cash
+                        Requires inventory movement actuals, which Xero did not provide for this view.
                       </p>
                     </div>
                   </div>
@@ -2601,19 +2776,14 @@ export default function BudgetingPage() {
                                   <span
                                     className={cn(
                                       'inline-flex items-center rounded-full px-2 py-0.5 text-[9px] font-semibold',
-                                      w.endingCash > 100000
+                                      w.status === 'Healthy'
                                         ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                        : w.endingCash > 30000
+                                        : w.status === 'Monitor'
                                           ? 'bg-amber-50 text-amber-700 border border-amber-200'
                                           : 'bg-rose-50 text-rose-700 border border-rose-200',
                                     )}
                                   >
-                                    {w.status ||
-                                      (w.endingCash > 100000
-                                        ? 'Healthy'
-                                        : w.endingCash > 30000
-                                          ? 'Monitor'
-                                          : 'Critical')}
+                                    {w.status ?? 'Unavailable'}
                                   </span>
                                 </td>
                               </tr>

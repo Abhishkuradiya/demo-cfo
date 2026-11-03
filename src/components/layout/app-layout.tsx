@@ -16,6 +16,7 @@ export function AppLayout({ children }: AppLayoutProps) {
   const pathname = usePathname();
   const isCopilotRoute = pathname?.startsWith('/cfo-copilot');
   const isManagementAccountsRoute = pathname === '/management-accounts';
+  const isForecastRoute = pathname === '/forecast';
   const isSidebarCollapsed = useSidebarStore((state) => state.isCollapsed);
 
   const routesWithPageHeading = new Set([
@@ -79,8 +80,8 @@ export function AppLayout({ children }: AppLayoutProps) {
         </div>
 
         {/* Dynamic page content scrollable area */}
-        <main className={`min-w-0 flex-1 bg-background ${isManagementAccountsRoute ? 'overflow-visible px-3 py-3 sm:px-4 sm:py-4 md:px-6 md:py-6 lg:px-8' : 'min-h-0 overflow-y-auto overflow-x-hidden p-6 md:p-8'}`}>
-          <div className={isManagementAccountsRoute ? 'mx-auto w-full max-w-none space-y-4 sm:space-y-6' : 'mx-auto max-w-[1600px] space-y-8'}>
+        <main className={`min-w-0 flex-1 bg-background ${isManagementAccountsRoute ? 'overflow-visible px-3 py-3 sm:px-4 sm:py-4 md:px-6 md:py-6 lg:px-8' : isForecastRoute ? 'min-h-0 overflow-y-auto overflow-x-hidden p-3.5 sm:p-4 md:p-5' : 'min-h-0 overflow-y-auto overflow-x-hidden p-6 md:p-8'}`}>
+          <div className={isManagementAccountsRoute ? 'mx-auto w-full max-w-none space-y-4 sm:space-y-6' : isForecastRoute ? 'mx-auto w-full max-w-none space-y-3' : 'mx-auto max-w-[1600px] space-y-8'}>
             {!routesWithPageHeading.has(pathname) && !isCopilotRoute && (
               <section className="rounded-xl border border-slate-200 bg-white px-4 py-4 shadow-sm sm:px-5 sm:py-5">
                 <h1 className="text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">{pageTitle}</h1>

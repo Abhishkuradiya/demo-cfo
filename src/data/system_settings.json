@@ -14,7 +14,7 @@
   "llmProvider": "omegaplus",
   "llmApiKey": "oc_9QkDtt-3S71sNp6K_F1twwXoDlnw",
   "llmBaseUrl": "https://api.omegaplusapi.com",
-  "llmDefaultModel": "claude-fable-5-1",
+  "llmDefaultModel": "claude-quantum-lite-1",
   "llmEnabledModels": [
     "claude-quantum-lite-1",
     "claude-qwen-3-8-flash",

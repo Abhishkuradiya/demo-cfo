@@ -201,27 +201,21 @@ export async function POST(req: NextRequest) {
 
     // Execute fast live fetches from Xero APIs in parallel batches to stay well under Nginx 60s timeout
     try {
-      const [
-        contactsRes,
-        paymentsRes,
-        accountsRes,
-        itemsRes,
-        taxRatesRes,
-        prepaymentsRes,
-        overpaymentsRes,
-        orgsRes,
-        plRes
-      ] = await Promise.allSettled([
+      const [contactsRes, paymentsRes, accountsRes, itemsRes] = await Promise.allSettled([
         fetchXeroResource(accessToken, xeroTenantId, 'Contacts'),
         fetchXeroResource(accessToken, xeroTenantId, 'Payments'),
         fetchXeroResource(accessToken, xeroTenantId, 'Accounts'),
         fetchXeroResource(accessToken, xeroTenantId, 'Items'),
+      ]);
+      const [taxRatesRes, prepaymentsRes, overpaymentsRes, orgsRes] = await Promise.allSettled([
         fetchXeroResource(accessToken, xeroTenantId, 'TaxRates'),
         fetchXeroResource(accessToken, xeroTenantId, 'Prepayments'),
         fetchXeroResource(accessToken, xeroTenantId, 'Overpayments'),
         fetchXeroResource(accessToken, xeroTenantId, 'Organisations'),
-        fetchXeroReport(accessToken, xeroTenantId, 'ProfitAndLoss')
       ]);
+      const plRes = await Promise.allSettled([
+        fetchXeroReport(accessToken, xeroTenantId, 'ProfitAndLoss'),
+      ]).then(([result]) => result);
 
       if (contactsRes.status === 'fulfilled' && contactsRes.value) {
         await db.saveCachedRecords(tenantId, 'contacts', contactsRes.value);

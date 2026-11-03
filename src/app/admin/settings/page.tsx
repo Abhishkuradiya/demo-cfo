@@ -229,9 +229,10 @@ export default function AdminSettingsPage() {
     }
   };
 
-  const saveSettingsPayload = async (overrideModels?: string[]) => {
+  const saveSettingsPayload = async (overrideModels?: string[], overrideDefaultModel?: string) => {
     setSaving(true);
     const modelsToSave = overrideModels || llmEnabledModels;
+    const defaultToSave = overrideDefaultModel || llmDefaultModel;
     try {
       const res = await fetch('/api/admin/settings', {
         method: 'PUT',
@@ -252,7 +253,7 @@ export default function AdminSettingsPage() {
           llmProvider,
           llmApiKey,
           llmBaseUrl,
-          llmDefaultModel,
+          llmDefaultModel: defaultToSave,
           llmEnabledModels: modelsToSave,
           llmTemperature: parseFloat(llmTemperature),
           llmMaxTokens: parseInt(llmMaxTokens)
@@ -312,7 +313,19 @@ export default function AdminSettingsPage() {
     }
   };
 
-  const toggleModelEnabled = (modelId: string) => {
+  const handleSelectModel = (modelId: string) => {
+    setLlmDefaultModel(modelId);
+    let updated = llmEnabledModels;
+    if (!updated.includes(modelId)) {
+      updated = [...updated, modelId];
+      setLlmEnabledModels(updated);
+    }
+    saveSettingsPayload(updated, modelId);
+    toast.success(`Active AI default model updated to ${modelId}`);
+  };
+
+  const toggleModelEnabled = (modelId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     let updated: string[];
     if (llmEnabledModels.includes(modelId)) {
       if (llmEnabledModels.length === 1) {
@@ -519,25 +532,40 @@ export default function AdminSettingsPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
               {availableCatalog.map((m) => {
                 const isEnabled = llmEnabledModels.includes(m.id);
+                const isDefault = llmDefaultModel === m.id;
                 return (
                   <div
                     key={m.id}
-                    onClick={() => toggleModelEnabled(m.id)}
+                    onClick={() => handleSelectModel(m.id)}
                     className={`p-3.5 rounded-2xl border cursor-pointer transition-all ${
-                      isEnabled 
-                        ? 'bg-emerald-50/60 border-emerald-400 text-slate-900 shadow-xs ring-1 ring-emerald-400/20' 
-                        : 'bg-slate-50 border-slate-200 text-slate-400 opacity-60 hover:opacity-100'
+                      isDefault
+                        ? 'bg-emerald-50 border-emerald-500 text-slate-900 shadow-sm ring-2 ring-emerald-500/30'
+                        : isEnabled 
+                          ? 'bg-emerald-50/40 border-emerald-300 text-slate-900 shadow-xs' 
+                          : 'bg-slate-50 border-slate-200 text-slate-400 opacity-60 hover:opacity-100'
                     }`}
                   >
                     <div className="flex items-center justify-between mb-1.5">
                       <span className="text-xs font-black truncate">{m.name}</span>
-                      <div className={`h-4 w-4 rounded-md flex items-center justify-center text-white shrink-0 ${isEnabled ? 'bg-emerald-600' : 'border border-slate-300'}`}>
+                      <button
+                        type="button"
+                        onClick={(e) => toggleModelEnabled(m.id, e)}
+                        title={isEnabled ? "Deactivate model" : "Activate model"}
+                        className={`h-4 w-4 rounded-md flex items-center justify-center text-white shrink-0 transition ${isDefault ? 'bg-emerald-700' : isEnabled ? 'bg-emerald-600' : 'border border-slate-300'}`}
+                      >
                         {isEnabled && <Check className="h-3 w-3" />}
-                      </div>
+                      </button>
                     </div>
-                    <span className="inline-block px-1.5 py-0.2 text-[9px] font-bold rounded bg-slate-200 text-slate-700 font-mono mb-1 truncate max-w-full">
-                      {m.badge}
-                    </span>
+                    <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                      <span className="inline-block px-1.5 py-0.2 text-[9px] font-bold rounded bg-slate-200 text-slate-700 font-mono truncate max-w-full">
+                        {m.badge}
+                      </span>
+                      {isDefault && (
+                        <span className="inline-block px-1.5 py-0.2 text-[9px] font-black rounded bg-emerald-600 text-white font-mono shadow-xs">
+                          ACTIVE MODEL
+                        </span>
+                      )}
+                    </div>
                     <p className="text-[10.5px] text-slate-500 font-medium line-clamp-1">{m.desc}</p>
                   </div>
                 );

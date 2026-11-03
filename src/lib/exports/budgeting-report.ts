@@ -1,3 +1,5 @@
+import { BUDGETING_COVER_BASE64, FORECAST_COVER_BASE64 } from "./cover-images";
+
 export type BudgetScenario = "average" | "best" | "worst";
 
 export interface ScenarioMultipliers {
@@ -10,10 +12,14 @@ export interface BudgetReportItem {
   budget: number;
   actual: number;
   type: "revenue" | "expense";
+  monthlyActual?: Record<number, number>;
 }
 
 export interface BudgetingReportData {
   currency?: string;
+  reportType?: "budgeting" | "forecast";
+  reportTitle?: string;
+  reportSubtitle?: string;
   scenario?: BudgetScenario;
   scenarioLabel?: string;
   scenarioMultipliers?: ScenarioMultipliers;
@@ -210,8 +216,9 @@ export async function exportBudgetingExcelReport(
     { width: 18 },
     { width: 18 },
   ];
+  const sheetTitle = data.reportTitle || (data.reportType === 'forecast' ? 'FINANCIAL FORECAST & VARIANCE REPORT' : 'BUDGET & VARIANCE REPORT');
   summary.mergeCells("A1:F2");
-  summary.getCell("A1").value = "BUDGET & VARIANCE REPORT";
+  summary.getCell("A1").value = sheetTitle;
   summary.getCell("A1").font = {
     name: "Segoe UI",
     size: 16,
@@ -579,11 +586,11 @@ export async function exportBudgetingExcelReport(
   scenarioSheet.getCell("A3").value = `${periodRange} | Active Export Scenario: ${scenarioTitle}`;
   scenarioSheet.getCell("A3").font = { name: "Segoe UI", size: 9, italic: true, color: { argb: colors.muted } };
 
-  // Calculate base, worst, best figures
-  const baseRev = revenue > 0 ? revenue : (data.budgeting?.revBudget ?? 770000);
+  // Calculate base, worst, best figures strictly from actual data
+  const baseRev = revenue > 0 ? revenue : (data.budgeting?.revBudget ?? (profitability?.revenue ?? 0));
   const baseCost =
-    (profitability?.opexFixed ?? 0) + (profitability?.opexVariable ?? 0) + (profitability?.cogs ?? 0) ||
-    (data.budgeting?.expBudget ?? 552000);
+    ((profitability?.opexFixed ?? 0) + (profitability?.opexVariable ?? 0) + (profitability?.cogs ?? 0)) ||
+    (data.budgeting?.expBudget ?? (data.budgeting?.expActual ?? 0));
   const baseProfit = baseRev - baseCost;
   const baseMargin = baseRev > 0 ? baseProfit / baseRev : 0;
 
@@ -646,11 +653,15 @@ export async function exportBudgetingExcelReport(
   });
 
   const xlsxBuffer = await workbook.xlsx.writeBuffer();
+  const fileName =
+    data.reportType === "forecast"
+      ? `Virtual_CFO_Forecast_${fromDate}_to_${toDate}.xlsx`
+      : `Virtual_CFO_Budget_and_Variance_${fromDate}_to_${toDate}.xlsx`;
   downloadBlob(
     new Blob([new Uint8Array(xlsxBuffer)], {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     }),
-    `Budget_Variance_${fromDate}_to_${toDate}.xlsx`,
+    fileName,
   );
 }
 
@@ -664,9 +675,9 @@ export async function exportBudgetingPdfReport(
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const pageWidth = 210;
   const pageHeight = 297;
-  const margin = 18;
-  const contentWidth = pageWidth - margin * 2; // 174mm
-  const totalPages = 6;
+  const margin = 15.35; // 10px less left and right (18mm - 2.65mm)
+  const contentWidth = pageWidth - margin * 2; // 179.3mm
+  const totalPages = 7;
 
   const currency = data.currency || "GBP";
   const symbol = currencySymbol(currency);
@@ -713,11 +724,11 @@ export async function exportBudgetingPdfReport(
   const expenseItems = budgetItems.filter((i) => i.type === "expense");
 
   const totalRevActual =
-    profitability?.revenue && profitability.revenue > 0
+    profitability?.revenue !== undefined && profitability.revenue !== null
       ? profitability.revenue
       : revenueItems.length > 0
         ? revenueItems.reduce((s, i) => s + i.actual, 0)
-        : data.budgeting?.revActual ?? 770000;
+        : (data.budgeting?.revActual ?? 0);
 
   const totalRevBudget =
     revenueItems.length > 0
@@ -727,7 +738,9 @@ export async function exportBudgetingPdfReport(
         : totalRevActual;
 
   const opexActual = (profitability?.opexFixed ?? 0) + (profitability?.opexVariable ?? 0);
-  const cogsActual = profitability?.cogs ?? Math.round(totalRevActual * 0.38);
+  const cogsActual = profitability?.cogs ?? (
+    expenseItems.filter(i => i.category.toLowerCase().includes('cost') || i.category.toLowerCase().includes('cogs') || i.category.toLowerCase().includes('purchase')).reduce((s, i) => s + i.actual, 0)
+  );
   const rawCostActual = opexActual + cogsActual;
 
   const totalCostActual =
@@ -735,21 +748,19 @@ export async function exportBudgetingPdfReport(
       ? rawCostActual
       : expenseItems.length > 0
         ? expenseItems.reduce((s, i) => s + i.actual, 0)
-        : data.budgeting?.expActual && data.budgeting.expActual > 0
-          ? data.budgeting.expActual
-          : Math.round(totalRevActual * 0.72);
+        : (data.budgeting?.expActual ?? 0);
+
+  const cogsBudget = expenseItems.filter(i => i.category.toLowerCase().includes('cost') || i.category.toLowerCase().includes('cogs') || i.category.toLowerCase().includes('purchase')).reduce((s, i) => s + i.budget, 0);
 
   const totalCostBudget =
     expenseItems.length > 0
       ? expenseItems.reduce((s, i) => s + i.budget, 0)
-      : data.budgeting?.expBudget && data.budgeting.expBudget > 0
-        ? data.budgeting.expBudget
-        : Math.round(totalCostActual * 0.95);
+      : (data.budgeting?.expBudget && data.budgeting.expBudget > 0 ? data.budgeting.expBudget : totalCostActual);
 
-  const grossProfitActual = profitability?.grossProfit ?? totalRevActual - cogsActual;
-  const grossProfitBudget = Math.round(totalRevBudget * 0.62);
-  const grossMarginActual = totalRevActual > 0 ? (grossProfitActual / totalRevActual) * 100 : 62.0;
-  const grossMarginBudget = totalRevBudget > 0 ? (grossProfitBudget / totalRevBudget) * 100 : 62.0;
+  const grossProfitActual = profitability?.grossProfit !== undefined ? profitability.grossProfit : (totalRevActual - cogsActual);
+  const grossProfitBudget = totalRevBudget - cogsBudget;
+  const grossMarginActual = totalRevActual > 0 ? (grossProfitActual / totalRevActual) * 100 : 0;
+  const grossMarginBudget = totalRevBudget > 0 ? (grossProfitBudget / totalRevBudget) * 100 : 0;
 
   const totalProfitActual = totalRevActual - totalCostActual;
   const totalProfitBudget = totalRevBudget - totalCostBudget;
@@ -761,17 +772,17 @@ export async function exportBudgetingPdfReport(
   const revDiffPct = totalRevBudget > 0 ? (totalRevVar / totalRevBudget) * 100 : 0;
   const costDiffPct = totalCostBudget > 0 ? (totalCostVar / totalCostBudget) * 100 : 0;
   const profitDiffPct = totalProfitBudget > 0 ? (totalProfitVar / totalProfitBudget) * 100 : 0;
-  const actualMarginPct = totalRevActual > 0 ? (totalProfitActual / totalRevActual) * 100 : 28.3;
+  const actualMarginPct = totalRevActual > 0 ? (totalProfitActual / totalRevActual) * 100 : 0;
 
-  // Monthly breakdown
+  // Monthly breakdown strictly from actual records
   const months = rawMonthlyTrend.length > 0
-    ? (rawMonthlyTrend.length > 6 ? rawMonthlyTrend.slice(-6) : rawMonthlyTrend).map((item, idx, arr) => {
-        const mRevActual = Math.round(item.revenue);
-        const mRevBudget = Math.round(totalRevBudget / arr.length);
+    ? (rawMonthlyTrend.length > 12 ? rawMonthlyTrend.slice(-12) : rawMonthlyTrend).map((item, idx, arr) => {
+        const mRevActual = Math.round(item.revenue || 0);
+        const mRevBudget = Math.round(totalRevBudget / (arr.length || 1));
         const mCostActual = item.grossProfit !== undefined && item.netProfit !== undefined
-          ? Math.round(Math.max(0, item.revenue - item.netProfit))
-          : Math.round(totalCostActual / arr.length);
-        const mCostBudget = Math.round(totalCostBudget / arr.length);
+          ? Math.round(Math.max(0, (item.revenue || 0) - item.netProfit))
+          : Math.round(totalCostActual / (arr.length || 1));
+        const mCostBudget = Math.round(totalCostBudget / (arr.length || 1));
         return {
           name: item.month.length > 3 ? item.month.slice(0, 3) : item.month,
           fullName: item.month,
@@ -785,28 +796,23 @@ export async function exportBudgetingPdfReport(
           profitBudget: mRevBudget - mCostBudget,
         };
       })
-    : ["Apr", "May", "Jun", "Jul", "Aug", "Sep"].map((name) => {
-        const mRevBudget = Math.round(totalRevBudget / 6);
-        const mRevActual = Math.round(totalRevActual / 6);
-        const mCostBudget = Math.round(totalCostBudget / 6);
-        const mCostActual = Math.round(totalCostActual / 6);
-        return {
-          name,
-          fullName: name,
-          revBudget: mRevBudget,
-          revActual: mRevActual,
-          costBudget: mCostBudget,
-          costActual: mCostActual,
-          revVar: mRevActual - mRevBudget,
-          costVar: mCostActual - mCostBudget,
-          profitActual: mRevActual - mCostActual,
-          profitBudget: mRevBudget - mCostBudget,
-        };
-      });
+    : [];
 
   const periodLabel = data.periodInfo?.label
     ? `${data.periodInfo.label} (${fromDate} – ${toDate})`
     : `${fromDate} – ${toDate}`;
+
+  const isForecastReport = data.reportType === "forecast";
+  const mainTitle = data.reportTitle ?? (
+    isForecastReport
+      ? "Financial Forecast & Sensitivity Cockpit"
+      : "Budget & Variance Financial Report"
+  );
+  const subTitle = data.reportSubtitle ?? (
+    isForecastReport
+      ? "Forward 12-Month Predictive Run-Rates, Cash Trajectory Simulation & Stress Testing"
+      : "A Clear View of Commercial Performance, Budget Variance & Capital Posture"
+  );
 
   const scenarioBadge = data.scenarioLabel ?? (
     data.scenario === "best"
@@ -849,8 +855,9 @@ export async function exportBudgetingPdfReport(
     doc.setFont("helvetica", "normal");
     doc.setFontSize(7.5);
     doc.setTextColor(100, 116, 139);
+    const storybookType = isForecastReport ? "Financial Forecast Storybook" : "Budget & Variance Storybook";
     doc.text(
-      `UK Virtual CFO | Budget & Variance Storybook | ${data.periodInfo?.dataSource ?? "Xero Live Ledger"}`,
+      `UK Virtual CFO | ${storybookType} | ${data.periodInfo?.dataSource ?? "Xero Live Ledger"}`,
       margin,
       pageHeight - 7,
     );
@@ -980,87 +987,148 @@ export async function exportBudgetingPdfReport(
   };
 
   // =========================================================================
-  // PAGE 1: TITLE & EXECUTIVE COVER (The Storybook Cover)
+  // PAGE 1: COVER ARTWORK & EXECUTIVE METADATA (Image 1 for Forecast, Image 2 for Budgeting)
+  // =========================================================================
+  const coverBase64 = isForecastReport ? FORECAST_COVER_BASE64 : BUDGETING_COVER_BASE64;
+  try {
+    doc.addImage(coverBase64, "JPEG", 0, 0, pageWidth, pageHeight, undefined, "FAST");
+  } catch (err) {
+    console.error("Failed to render cover image:", err);
+  }
+
+  // Cover Executive Metadata Card at bottom
+  doc.setFillColor(255, 255, 255);
+  doc.roundedRect(margin, pageHeight - 24, contentWidth, 14, 2, 2, "F");
+  doc.setDrawColor(226, 232, 240);
+  doc.setLineWidth(0.3);
+  doc.roundedRect(margin, pageHeight - 24, contentWidth, 14, 2, 2, "S");
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8);
+  doc.setTextColor(15, 23, 42);
+  doc.text(
+    data.periodInfo?.dataSource
+      ? `${data.periodInfo.dataSource} · Virtual CFO Intelligence`
+      : "Virtual CFO Intelligence Platform",
+    margin + 5,
+    pageHeight - 16,
+  );
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(7);
+  doc.setTextColor(100, 116, 139);
+  doc.text(
+    `Period: ${periodLabel}  |  Generated: ${new Date().toLocaleDateString("en-GB")}`,
+    margin + 5,
+    pageHeight - 12,
+  );
+
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(14, 116, 144);
+  doc.text(
+    `Active Scenario: ${data.scenarioLabel ?? (data.scenario === "best" ? "Best Case" : data.scenario === "worst" ? "Worst Case" : "Average Case")}`,
+    pageWidth - margin - 5,
+    pageHeight - 14,
+    { align: "right" },
+  );
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(6.5);
+  doc.setTextColor(100, 116, 139);
+  doc.text(`Currency: ${currency}`, pageWidth - margin - 5, pageHeight - 11, { align: "right" });
+
+  doc.addPage();
+
+  // =========================================================================
+  // PAGE 2: TITLE & EXECUTIVE AUDIT INDEX (Matching Storybook PDF Reference)
   // =========================================================================
   const blockX = margin;
-  const blockY = 32;
+  const blockY = 7; // Top margin around 100px less (reduced from 32mm to 7mm: ~25mm/95px higher)
   const blockW = contentWidth;
-  const blockH = 186;
+  const blockH = 158;
 
-  doc.setFillColor(15, 23, 42); // Slate 900
-  doc.roundedRect(blockX, blockY, blockW, blockH, 3, 3, "F");
+  // Background matching Page 2 (Clean slate-50 fill with slate-200 border)
+  doc.setFillColor(248, 250, 252); // Slate 50
+  doc.setDrawColor(226, 232, 240); // Slate 200
+  doc.setLineWidth(0.3);
+  doc.roundedRect(blockX, blockY, blockW, blockH, 3, 3, "FD");
+
+  // Left accent bar matching Page 2 executive styling
+  doc.setFillColor(14, 116, 144); // Cyan 700
+  doc.rect(blockX, blockY, 3.5, blockH, "F");
 
   // Top Subheader in Cover
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(9);
+  doc.setFontSize(8.5);
   doc.setTextColor(14, 116, 144); // Cyan 700
-  doc.text("VIRTUAL CFO MANAGEMENT INTELLIGENCE", blockX + 16, blockY + 22);
+  doc.text("VIRTUAL CFO MANAGEMENT INTELLIGENCE", blockX + 16, blockY + 16);
 
-  // Big Storybook Title
+  // Dynamic Title based on report type (Matching Page 2 dark slate text)
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(26);
-  doc.setTextColor(255, 255, 255);
-  doc.text("Budget & Variance", blockX + 16, blockY + 54);
-  doc.text("Storybook", blockX + 16, blockY + 66);
+  doc.setFontSize(21);
+  doc.setTextColor(15, 23, 42); // Slate 900
+  doc.text(mainTitle, blockX + 16, blockY + 38, { maxWidth: blockW - 32 });
 
-  // Subtitle
+  // Subtitle (Matching Page 2 slate-600 text)
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(9.5);
-  doc.setTextColor(203, 213, 225); // Slate 300
+  doc.setFontSize(8.5);
+  doc.setTextColor(71, 85, 105); // Slate 600
   doc.text(
-    "A Strategic Executive Narrative on Commercial Trajectory, Margin Friction & Capital Reality",
+    subTitle,
     blockX + 16,
-    blockY + 77,
+    blockY + 54,
     { maxWidth: blockW - 32 },
   );
 
-  // Active Scenario Pill Box
-  doc.setFillColor(30, 41, 59); // Slate 800
-  doc.roundedRect(blockX + 16, blockY + 88, blockW - 32, 18, 2, 2, "F");
+  // Active Scenario Pill Box (Clean sky-50 background matching Page 2)
+  doc.setFillColor(240, 249, 255); // Sky 50
+  doc.setDrawColor(186, 230, 253); // Sky 200
+  doc.setLineWidth(0.2);
+  doc.roundedRect(blockX + 16, blockY + 66, blockW - 32, 17, 2, 2, "FD");
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(7);
-  doc.setTextColor(148, 163, 184); // Slate 400
-  doc.text("ACTIVE SCENARIO MULTIPLIER MODEL", blockX + 22, blockY + 95);
+  doc.setTextColor(3, 105, 161); // Sky 700
+  doc.text("ACTIVE SCENARIO MULTIPLIER MODEL", blockX + 22, blockY + 72.5);
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
-  doc.setTextColor(255, 255, 255);
-  doc.text(scenarioBadge, blockX + 22, blockY + 101.5);
+  doc.setTextColor(15, 23, 42); // Slate 900
+  doc.text(scenarioBadge, blockX + 22, blockY + 78.5);
 
-  // 2x2 Parameter Grid inside Cover
-  const gridY = blockY + 116;
+  // 2x2 Parameter Grid inside Cover (Matching Page 2 slate-500 labels & slate-900 values)
+  const gridY = blockY + 94;
   const colHalfW = (blockW - 32) / 2;
 
   // Window
   doc.setFont("helvetica", "bold");
   doc.setFontSize(7.5);
-  doc.setTextColor(148, 163, 184);
+  doc.setTextColor(100, 116, 139); // Slate 500
   doc.text("REPORTING WINDOW", blockX + 16, gridY);
   doc.setFontSize(10.5);
-  doc.setTextColor(255, 255, 255);
+  doc.setTextColor(15, 23, 42); // Slate 900
   doc.text(periodLabel, blockX + 16, gridY + 6, { maxWidth: colHalfW - 4 });
 
   // Data Origin
   doc.setFontSize(7.5);
-  doc.setTextColor(148, 163, 184);
+  doc.setTextColor(100, 116, 139); // Slate 500
   doc.text("DATA ORIGIN", blockX + 16 + colHalfW, gridY);
   doc.setFontSize(10.5);
-  doc.setTextColor(255, 255, 255);
+  doc.setTextColor(15, 23, 42); // Slate 900
   doc.text(data.periodInfo?.dataSource ?? "Live Xero Ledger Integration", blockX + 16 + colHalfW, gridY + 6);
 
   // Prepared for & Issue Date
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(8.5);
-  doc.setTextColor(203, 213, 225);
+  doc.setFontSize(8);
+  doc.setTextColor(100, 116, 139); // Slate 500
   doc.text(
     `Currency: ${currency} (${symbol})  |  Prepared for: Board of Directors & C-Suite Leadership  |  Generated: ${new Date().toLocaleDateString("en-GB")}`,
     blockX + 16,
-    blockY + 172,
+    blockY + 144,
   );
 
   // Table of Contents Preview Ribbon below Cover Box
-  const tocY = blockY + blockH + 12;
+  const tocY = blockY + blockH + 10;
   doc.setFont("helvetica", "bold");
   doc.setFontSize(8);
   doc.setTextColor(15, 23, 42);
@@ -1085,10 +1153,10 @@ export async function exportBudgetingPdfReport(
     doc.text(ch.title, margin + 8, chY);
   });
 
-  drawPageFooter(1);
+  drawPageFooter(2);
 
   // =========================================================================
-  // PAGE 2: CHAPTER 1 — THE EXECUTIVE BRIEFING
+  // PAGE 3: CHAPTER 1 — THE EXECUTIVE BRIEFING
   // =========================================================================
   doc.addPage();
   drawChapterHeader(
@@ -1181,9 +1249,9 @@ export async function exportBudgetingPdfReport(
   // Executive Variance Table
   const p2Cols: ColumnDef[] = [
     { header: "Core Commercial Line", width: 44, align: "left" },
-    { header: "Budget Target", width: 28, align: "right" },
+    { header: isForecastReport ? "Forecast Target" : "Budget Target", width: 28, align: "right" },
     { header: "Recorded Actual", width: 28, align: "right" },
-    { header: "Variance (£)", width: 26, align: "right" },
+    { header: `Variance (${symbol})`, width: 26, align: "right" },
     { header: "Variance (%)", width: 22, align: "right" },
     { header: "Performance Assessment", width: 26, align: "center" },
   ];
@@ -1199,11 +1267,11 @@ export async function exportBudgetingPdfReport(
     ],
     [
       "Cost of Goods Sold (COGS)",
-      fmtMoney(Math.round(totalRevBudget * 0.38)),
+      fmtMoney(cogsBudget),
       fmtMoney(cogsActual),
-      fmtMoneyWithSign(cogsActual - Math.round(totalRevBudget * 0.38)),
-      `${((cogsActual - Math.round(totalRevBudget * 0.38)) / Math.max(1, Math.round(totalRevBudget * 0.38)) * 100).toFixed(1)}%`,
-      { text: cogsActual <= Math.round(totalRevBudget * 0.38) ? "Favourable" : "Adverse", color: cogsActual <= Math.round(totalRevBudget * 0.38) ? [4, 120, 87] : [190, 18, 60], bold: true },
+      fmtMoneyWithSign(cogsActual - cogsBudget),
+      `${cogsBudget > 0 ? (((cogsActual - cogsBudget) / cogsBudget) * 100).toFixed(1) : "0.0"}%`,
+      { text: cogsActual <= cogsBudget ? "Favourable" : "Adverse", color: cogsActual <= cogsBudget ? [4, 120, 87] : [190, 18, 60], bold: true },
     ],
     [
       "Gross Profit Margin",
@@ -1215,11 +1283,11 @@ export async function exportBudgetingPdfReport(
     ],
     [
       "Operating Expenses (OPEX)",
-      fmtMoney(totalCostBudget - Math.round(totalRevBudget * 0.38)),
+      fmtMoney(Math.max(0, totalCostBudget - cogsBudget)),
       fmtMoney(opexActual),
-      fmtMoneyWithSign(totalCostVar),
-      `${totalCostVar <= 0 ? "" : "+"}${costDiffPct.toFixed(1)}%`,
-      { text: totalCostVar <= 0 ? "Favourable" : "Over Budget", color: totalCostVar <= 0 ? [4, 120, 87] : [190, 18, 60], bold: true },
+      fmtMoneyWithSign(opexActual - Math.max(0, totalCostBudget - cogsBudget)),
+      `${(totalCostBudget - cogsBudget) > 0 ? (((opexActual - (totalCostBudget - cogsBudget)) / (totalCostBudget - cogsBudget)) * 100).toFixed(1) : "0.0"}%`,
+      { text: opexActual <= (totalCostBudget - cogsBudget) ? "Favourable" : "Over Budget", color: opexActual <= (totalCostBudget - cogsBudget) ? [4, 120, 87] : [190, 18, 60], bold: true },
     ],
     [
       "Operating Profit (EBITDA)",
@@ -1263,10 +1331,10 @@ export async function exportBudgetingPdfReport(
     doc.text(vl, margin + 6, verdictY + 15 + vIdx * 6.8, { maxWidth: contentWidth - 12 });
   });
 
-  drawPageFooter(2);
+  drawPageFooter(3);
 
   // =========================================================================
-  // PAGE 3: CHAPTER 2 — THE REVENUE ENGINE & CUSTOMER CONCENTRATION
+  // PAGE 4: CHAPTER 2 — THE REVENUE ENGINE & CUSTOMER CONCENTRATION
   // =========================================================================
   doc.addPage();
   drawChapterHeader(
@@ -1285,29 +1353,37 @@ export async function exportBudgetingPdfReport(
     { maxWidth: contentWidth },
   );
 
-  // Top Customer Concentration Table
-  const topCustomers = customers.length > 0
-    ? customers.slice(0, 5)
-    : [
-        { customer: "Anchor Client Alpha", revenue: Math.round(totalRevActual * 0.35), grossProfit: Math.round(totalRevActual * 0.35 * 0.64), margin: 64.0 },
-        { customer: "Beta Enterprises Ltd", revenue: Math.round(totalRevActual * 0.24), grossProfit: Math.round(totalRevActual * 0.24 * 0.58), margin: 58.0 },
-        { customer: "Gamma Global Partners", revenue: Math.round(totalRevActual * 0.18), grossProfit: Math.round(totalRevActual * 0.18 * 0.52), margin: 52.0 },
-        { customer: "Delta Services Group", revenue: Math.round(totalRevActual * 0.13), grossProfit: Math.round(totalRevActual * 0.13 * 0.61), margin: 61.0 },
-        { customer: "Epsilon Solutions", revenue: Math.round(totalRevActual * 0.10), grossProfit: Math.round(totalRevActual * 0.10 * 0.45), margin: 45.0 },
-      ];
+  // Revenue Streams / Customer Concentration Table from actual data
+  const topRevenueStreams = customers.length > 0
+    ? customers.slice(0, 5).map((c) => ({
+        name: c.customer,
+        revenue: c.revenue,
+        grossProfit: c.grossProfit,
+        margin: c.margin,
+      }))
+    : revenueItems.length > 0
+      ? revenueItems.slice(0, 5).map((r) => ({
+          name: r.category,
+          revenue: r.actual,
+          grossProfit: Math.round(r.actual * (grossMarginActual > 0 ? grossMarginActual / 100 : 1)),
+          margin: grossMarginActual > 0 ? grossMarginActual : 100,
+        }))
+      : [
+          { name: "Operational Revenue", revenue: totalRevActual, grossProfit: grossProfitActual, margin: grossMarginActual }
+        ];
 
   const custCols: ColumnDef[] = [
-    { header: "Key Customer Account", width: 54, align: "left" },
+    { header: customers.length > 0 ? "Key Customer Account" : "Revenue Stream / Category", width: 54, align: "left" },
     { header: "Recorded Revenue", width: 32, align: "right" },
     { header: "Gross Profit Yield", width: 32, align: "right" },
     { header: "Margin %", width: 24, align: "right" },
     { header: "Sales Share %", width: 32, align: "right" },
   ];
 
-  const custRows = topCustomers.map((c) => {
+  const custRows = topRevenueStreams.map((c) => {
     const share = totalRevActual > 0 ? (c.revenue / totalRevActual) * 100 : 0;
     return [
-      c.customer,
+      c.name,
       fmtMoney(c.revenue),
       fmtMoney(c.grossProfit),
       `${c.margin.toFixed(1)}%`,
@@ -1328,7 +1404,13 @@ export async function exportBudgetingPdfReport(
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9.5);
   doc.setTextColor(15, 23, 42);
-  doc.text("Monthly Revenue Delivery Velocity: Budget vs Actual", margin, c1TopY);
+  doc.text(
+    isForecastReport
+      ? "Monthly Revenue Delivery Velocity: Forecast vs Actual"
+      : "Monthly Revenue Delivery Velocity: Budget vs Actual",
+    margin,
+    c1TopY,
+  );
 
   const c1X = margin;
   const c1Y = c1TopY + 4;
@@ -1342,12 +1424,12 @@ export async function exportBudgetingPdfReport(
   doc.rect(c1X, c1Y, c1W, c1H, "S");
 
   // Chart Legend
-  doc.setFillColor(15, 23, 42); // Navy Budget
+  doc.setFillColor(15, 23, 42); // Navy Budget/Forecast
   doc.rect(c1X + 16, c1Y + 6, 3.5, 2.8, "F");
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7);
   doc.setTextColor(51, 65, 85);
-  doc.text("Budget Plan", c1X + 22, c1Y + 8.5);
+  doc.text(isForecastReport ? "Forecast Plan" : "Budget Plan", c1X + 22, c1Y + 8.5);
 
   doc.setFillColor(14, 116, 144); // Cyan Actual
   doc.rect(c1X + 54, c1Y + 6, 3.5, 2.8, "F");
@@ -1408,18 +1490,18 @@ export async function exportBudgetingPdfReport(
   doc.setTextColor(14, 116, 144);
   doc.text("COMMERCIAL TAKEAWAY & PIPELINE RESILIENCE", margin + 5, revCalloutY + 6);
 
-  const top3Share = topCustomers.slice(0, 3).reduce((acc, c) => acc + (totalRevActual > 0 ? (c.revenue / totalRevActual) * 100 : 0), 0);
-  const revAdvice = `Top 3 client accounts account for ${top3Share.toFixed(1)}% of total revenue. ${top3Share > 55 ? "Significant customer concentration risk detected: prioritize account diversification and SLA protection." : "Healthy customer distribution with stable account diversification across commercial tiers."}`;
+  const top3Share = topRevenueStreams.slice(0, 3).reduce((acc, c) => acc + (totalRevActual > 0 ? (c.revenue / totalRevActual) * 100 : 0), 0);
+  const revAdvice = `Top 3 revenue streams account for ${top3Share.toFixed(1)}% of recorded turnover. ${top3Share > 55 ? "Revenue concentration is weighted toward primary categories: ensure commercial pipeline diversification." : "Balanced turnover distribution across commercial categories."}`;
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7.5);
   doc.setTextColor(51, 65, 85);
   doc.text(revAdvice, margin + 5, revCalloutY + 12, { maxWidth: contentWidth - 10 });
 
-  drawPageFooter(3);
+  drawPageFooter(4);
 
   // =========================================================================
-  // PAGE 4: CHAPTER 3 — MARGIN EROSION & OPERATING EXPENSE OVERRUNS
+  // PAGE 5: CHAPTER 3 — MARGIN EROSION & OPERATING EXPENSE OVERRUNS
   // =========================================================================
   doc.addPage();
   drawChapterHeader(
@@ -1432,18 +1514,18 @@ export async function exportBudgetingPdfReport(
   doc.setFontSize(7.5);
   doc.setTextColor(51, 65, 85);
   doc.text(
-    `Total operating costs reached ${fmtMoney(totalCostActual)} against a planned budget of ${fmtMoney(totalCostBudget)} (${totalCostVar <= 0 ? "favourable savings of" : "unfavourable overspend of"} ${fmtMoney(Math.abs(totalCostVar))}). The table below details nominal line performance.`,
+    `Total operating costs reached ${fmtMoney(totalCostActual)} against a planned ${isForecastReport ? "forecast" : "budget"} of ${fmtMoney(totalCostBudget)} (${totalCostVar <= 0 ? "favourable savings of" : "unfavourable overspend of"} ${fmtMoney(Math.abs(totalCostVar))}). The table below details nominal line performance.`,
     margin,
     42,
     { maxWidth: contentWidth },
   );
 
-  // Line Item Budget Table
+  // Line Item Table
   const p3Cols: ColumnDef[] = [
-    { header: "Budget Line Item", width: 52, align: "left" },
-    { header: "Planned Budget", width: 28, align: "right" },
+    { header: isForecastReport ? "Forecast Line Item" : "Budget Line Item", width: 52, align: "left" },
+    { header: isForecastReport ? "Planned Forecast" : "Planned Budget", width: 28, align: "right" },
     { header: "Recorded Actual", width: 28, align: "right" },
-    { header: "Variance (£)", width: 26, align: "right" },
+    { header: `Variance (${symbol})`, width: 26, align: "right" },
     { header: "Variance %", width: 20, align: "right" },
     { header: "Audit Status", width: 20, align: "center" },
   ];
@@ -1519,10 +1601,10 @@ export async function exportBudgetingPdfReport(
     doc.text("All operating expenses and cost lines operated strictly within or below budgeted allowances.", margin + 6, watchY + 16);
   }
 
-  drawPageFooter(4);
+  drawPageFooter(5);
 
   // =========================================================================
-  // PAGE 5: CHAPTER 4 — CASH FLOW & WORKING CAPITAL REALITY
+  // PAGE 6: CHAPTER 4 — CASH FLOW & WORKING CAPITAL REALITY
   // =========================================================================
   doc.addPage();
   drawChapterHeader(
@@ -1586,7 +1668,13 @@ export async function exportBudgetingPdfReport(
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9.5);
   doc.setTextColor(15, 23, 42);
-  doc.text("Monthly Operating Profit Trajectory: Budget vs Actual", margin, c3TopY);
+  doc.text(
+    isForecastReport
+      ? "Monthly Operating Profit Trajectory: Forecast vs Actual"
+      : "Monthly Operating Profit Trajectory: Budget vs Actual",
+    margin,
+    c3TopY,
+  );
 
   const c3X = margin;
   const c3Y = c3TopY + 4;
@@ -1600,12 +1688,12 @@ export async function exportBudgetingPdfReport(
   doc.rect(c3X, c3Y, c3W, c3H, "S");
 
   // Legend
-  doc.setFillColor(15, 23, 42); // Budget Navy
+  doc.setFillColor(15, 23, 42); // Budget/Forecast Navy
   doc.rect(c3X + 16, c3Y + 6, 3.5, 2.8, "F");
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7);
   doc.setTextColor(51, 65, 85);
-  doc.text("Budget Profit Plan", c3X + 22, c3Y + 8.5);
+  doc.text(isForecastReport ? "Forecast Profit Plan" : "Budget Profit Plan", c3X + 22, c3Y + 8.5);
 
   doc.setFillColor(4, 120, 87); // Actual Green
   doc.rect(c3X + 58, c3Y + 6, 3.5, 2.8, "F");
@@ -1674,10 +1762,10 @@ export async function exportBudgetingPdfReport(
     { maxWidth: contentWidth - 10 },
   );
 
-  drawPageFooter(5);
+  drawPageFooter(6);
 
   // =========================================================================
-  // PAGE 6: CHAPTER 5 — SENSITIVITY MODELING & STRATEGIC PLAYBOOK
+  // PAGE 7: CHAPTER 5 — SENSITIVITY MODELING & STRATEGIC PLAYBOOK
   // =========================================================================
   doc.addPage();
   drawChapterHeader(
@@ -1722,7 +1810,7 @@ export async function exportBudgetingPdfReport(
     { header: "Operating Costs", width: 26, align: "right" },
     { header: "Projected Profit", width: 26, align: "right" },
     { header: "Margin %", width: 20, align: "right" },
-    { header: "Delta vs Plan", width: 30, align: "right" },
+    { header: isForecastReport ? "Delta vs Forecast" : "Delta vs Plan", width: 30, align: "right" },
   ];
 
   const sensRows = [
@@ -1846,10 +1934,12 @@ export async function exportBudgetingPdfReport(
     { maxWidth: contentWidth - 10 },
   );
 
-  drawPageFooter(6);
+  drawPageFooter(7);
 
   // Save the PDF
-  const downloadFileName = `Virtual_CFO_Budget_Storybook_${fromDate}_to_${toDate}.pdf`;
+  const downloadFileName = isForecastReport
+    ? `Virtual_CFO_Forecast_${fromDate}_to_${toDate}.pdf`
+    : `Virtual_CFO_Budget_and_Variance_${fromDate}_to_${toDate}.pdf`;
   doc.save(downloadFileName);
 }
 

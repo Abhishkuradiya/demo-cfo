@@ -227,15 +227,16 @@ export function Header() {
       });
 
       if (res.ok) {
-        toast.success(`Switched to ${name}! Clearing cache and fetching fresh data...`, { id: "switch-toast" });
+        toast.success(`Switched to ${name}. Loading its financial data...`, { id: "switch-toast" });
         setActiveXeroTenantId(id);
         setActiveOrgName(name);
 
-        // Dispatch event so other components know connection changed
-        window.dispatchEvent(new CustomEvent('xero-sync-complete'));
-
-        // Trigger automatic sync for the new organization
-        await handleSync();
+        // Rebuild the cleared organization cache in rate-safe request batches,
+        // then let the active page reload its own selected-period data.
+        const syncCompleted = await handleSync();
+        if (!syncCompleted) {
+          window.dispatchEvent(new CustomEvent('xero-sync-complete'));
+        }
 
         // Refresh router/server page data
         router.refresh();
@@ -272,22 +273,25 @@ export function Header() {
     try {
       const res = await fetch('/api/xero', { method: 'POST' });
       const contentType = res.headers.get('content-type') || '';
+      const data = contentType.includes('application/json')
+        ? await res.json().catch(() => null)
+        : null;
 
-      if (res.ok) {
-        toast.success("Xero sync completed successfully!", { id: "sync-toast" });
+      if (res.ok && data?.success) {
+        toast.success(data.message || "Xero sync completed successfully!", { id: "sync-toast" });
         setSyncTime("Just now");
         window.dispatchEvent(new CustomEvent('xero-sync-complete'));
+        router.refresh();
+        return true;
       } else if (res.status === 504 || contentType.includes('text/html')) {
-        toast.error("Live server proxy timed out (HTTP 504). background sync is continuing.", { id: "sync-toast" });
+        toast.error("The sync request timed out. Check the sync status before starting another sync.", { id: "sync-toast" });
       } else {
-        let errData: any = null;
-        try {
-          errData = await res.json();
-        } catch (e) { }
-        toast.error(errData?.message || "Xero sync failed. Please check credentials or try again.", { id: "sync-toast" });
+        toast.error(data?.message || "Xero sync failed. Please check credentials or try again.", { id: "sync-toast" });
+        return false;
       }
     } catch (err: any) {
       toast.error(err?.message || "Error triggering Xero sync.", { id: "sync-toast" });
+      return false;
     } finally {
       setIsSyncing(false);
     }

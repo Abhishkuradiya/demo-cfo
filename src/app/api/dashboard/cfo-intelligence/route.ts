@@ -1,9 +1,57 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { isDeepStrictEqual } from 'node:util';
 import { db } from '@/lib/db';
 import { getTenantIdFromSession } from '@/lib/auth';
 import { CFOMetricProviderFactory } from '@/lib/services/CFOMetricProvider';
+import { fetchXeroResource, fetchXeroResourcePaginated, fetchXeroReport, refreshXeroToken } from '@/lib/xero';
+import { ProfitAndLossService } from '@/lib/services/ProfitAndLossService';
 
 export const dynamic = 'force-dynamic';
+
+const parseXeroDate = (dateVal: any): Date | null => {
+  if (!dateVal) return null;
+  if (dateVal instanceof Date) return isNaN(dateVal.getTime()) ? null : dateVal;
+  if (typeof dateVal === 'string') {
+    const match = dateVal.match(/\/Date\((\d+)/);
+    if (match) {
+      const d = new Date(parseInt(match[1], 10));
+      return isNaN(d.getTime()) ? null : d;
+    }
+    const d = new Date(dateVal);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+};
+
+const parseReportMonthHeading = (value: unknown, defaultYear: number) => {
+  const heading = String(value ?? '').trim();
+  const monthNames = [
+    'jan', 'feb', 'mar', 'apr', 'may', 'jun',
+    'jul', 'aug', 'sep', 'oct', 'nov', 'dec',
+  ];
+  const monthMatch = heading.match(/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/i);
+  if (monthMatch) {
+    const monthIndex = monthNames.findIndex((month) => month === monthMatch[1].slice(0, 3).toLowerCase());
+    const yearMatch = heading.match(/\b(20\d{2})\b/);
+    return { monthIndex, year: yearMatch ? Number(yearMatch[1]) : defaultYear };
+  }
+
+  const numericMatch = heading.match(/\b(20\d{2})[-/](0?[1-9]|1[0-2])\b/);
+  if (numericMatch) {
+    return { monthIndex: Number(numericMatch[2]) - 1, year: Number(numericMatch[1]) };
+  }
+  return null;
+};
+
+async function saveXeroReportToPostgres(tenantId: number, reportType: string, report: unknown) {
+  await db.assertPostgres();
+  await db.saveReport(tenantId, reportType, report);
+  const storedReport = await db.getPostgresReport(tenantId, reportType);
+  if (!storedReport || !isDeepStrictEqual(storedReport, report)) {
+    throw new Error(`Xero report ${reportType} could not be verified in PostgreSQL.`);
+  }
+  return storedReport;
+}
 
 export async function GET(req: NextRequest) {
   const tenantId = await getTenantIdFromSession();
@@ -15,22 +63,215 @@ export async function GET(req: NextRequest) {
     const credentials = await db.getCredentials(tenantId, 'xero');
     const isConnected = Boolean(credentials && credentials.access_token && credentials.tenant_identifier);
 
-    // Fetch cached invoices, bills, inventory items & reports
-    const invoices = await db.getInvoices(tenantId).catch(() => []);
-    const inventoryItems = await db.getInventoryItems(tenantId).catch(() => []);
-    const plReport = await db.getReport(tenantId, 'ProfitAndLoss').catch(() => null);
-
     const { searchParams } = new URL(req.url);
     const period = searchParams.get('period') || 'ttm'; // ttm, ytd, quarter, this_month
+    const forceRefresh = searchParams.get('refresh') === 'true';
+    const currentReportYear = new Date().getFullYear();
+    const pnl12mReportKey = `ProfitAndLoss_${currentReportYear}_12Months`;
     const fromParam = searchParams.get('from');
     const toParam = searchParams.get('to');
+    let periodPnlReport: any = null;
+    let periodBalanceSheetReport: any = null;
+
+    if (isConnected && !(await db.checkPgConnection())) {
+      return NextResponse.json(
+        { error: 'PostgreSQL is unavailable, so Xero data cannot be loaded or cached.' },
+        { status: 503 },
+      );
+    }
+
+    // Fetch cached invoices, bills, inventory items & reports
+    let invoices = await db.getInvoices(tenantId).catch(() => []);
+    let inventoryItems = await db.getInventoryItems(tenantId).catch(() => []);
+    let plReport = await db.getReport(tenantId, 'ProfitAndLoss').catch(() => null);
+    let bsReport = await db.getReport(tenantId, 'BalanceSheet').catch(() => null);
+    let bankSummary = await db.getReport(tenantId, 'BankSummary').catch(() => null);
+    let dbAccounts = await db.getAccounts(tenantId).catch(() => []);
+    let orgReport = await db.getReport(tenantId, 'Organisation').catch(() => null);
+    let pnl12mReport = isConnected
+      ? await db.getPostgresReport(tenantId, pnl12mReportKey).catch(() => null)
+      : await db.getReport(tenantId, pnl12mReportKey).catch(() => null);
+    let expectedFreshPnl12m: unknown = null;
+    let pnl12mFetchError: unknown = null;
+    let expectedFreshInvoiceCount: number | null = null;
+    let bankSummaryFresh = false;
+    if ((forceRefresh || !pnl12mReport) && isConnected) {
+      try {
+        let accessToken = credentials.access_token;
+        if (new Date(credentials.expires_at) <= new Date()) {
+          accessToken = await refreshXeroToken(tenantId, credentials);
+        }
+        if (accessToken) {
+          // Xero repeats the supplied date range for each period. Use one
+          // complete month as the range to receive twelve monthly columns.
+          const reportMonth = new Date().getMonth();
+          const monthStart = `${currentReportYear}-${String(reportMonth + 1).padStart(2, '0')}-01`;
+          const monthEnd = new Date(currentReportYear, reportMonth + 1, 0);
+          const monthEndDate = `${currentReportYear}-${String(reportMonth + 1).padStart(2, '0')}-${String(monthEnd.getDate()).padStart(2, '0')}`;
+          const raw12m = await fetchXeroReport(
+            accessToken,
+            credentials.tenant_identifier,
+            'ProfitAndLoss',
+            `fromDate=${monthStart}&toDate=${monthEndDate}&periods=11&timeframe=MONTH`
+          );
+          if (raw12m) {
+            const dataToSave = raw12m.Reports?.[0] || raw12m;
+            expectedFreshPnl12m = dataToSave;
+            pnl12mReport = await saveXeroReportToPostgres(tenantId, pnl12mReportKey, dataToSave);
+          }
+        }
+      } catch (err) {
+        pnl12mFetchError = err;
+        console.warn('Failed to fetch 12-month P&L from Xero:', err);
+        if (forceRefresh) pnl12mReport = null;
+      }
+      if (!pnl12mReport) {
+        const fetchErrorMessage = pnl12mFetchError instanceof Error ? pnl12mFetchError.message : null;
+        const isRateLimited = Boolean(fetchErrorMessage && /API Rate Limit \(429\)/i.test(fetchErrorMessage));
+        return NextResponse.json(
+          { error: fetchErrorMessage || 'Xero did not return a 12-month P&L report. Confirm the Xero user has report access and try again.' },
+          { status: isRateLimited ? 429 : 502 },
+        );
+      }
+    }
+    if (isConnected && (!dbAccounts || dbAccounts.length === 0)) {
+      try {
+        let accessToken = credentials.access_token;
+        if (new Date(credentials.expires_at) <= new Date()) {
+          accessToken = await refreshXeroToken(tenantId, credentials);
+        }
+        if (accessToken) {
+          const xeroTenantId = credentials.tenant_identifier;
+          const fetchedAccs = await fetchXeroResource(accessToken, xeroTenantId, 'Accounts');
+          if (fetchedAccs && fetchedAccs.length > 0) {
+            await db.saveCachedRecords(tenantId, 'accounts', fetchedAccs);
+            dbAccounts = await db.getAccounts(tenantId).catch(() => []);
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to sync chart of accounts from Xero:', err);
+      }
+    }
+    if (isConnected && !orgReport) {
+      try {
+        let accessToken = credentials.access_token;
+        if (new Date(credentials.expires_at) <= new Date()) {
+          accessToken = await refreshXeroToken(tenantId, credentials);
+        }
+        if (accessToken) {
+          const rawOrg = await fetchXeroResource(accessToken, credentials.tenant_identifier, 'Organisations');
+          if (rawOrg) {
+            const orgData = Array.isArray(rawOrg) ? rawOrg[0] : ((rawOrg as any)?.Organisations?.[0] || rawOrg);
+            orgReport = await saveXeroReportToPostgres(tenantId, 'Organisation', orgData);
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to fetch Organisation from Xero:', err);
+      }
+    }
+
+    let tenantCurrency = 'GBP';
+    if (orgReport) {
+      const rawOrg = typeof orgReport === 'string' ? JSON.parse(orgReport) : (orgReport.raw_data || orgReport);
+      tenantCurrency = rawOrg?.BaseCurrency || rawOrg?.CurrencyCode || rawOrg?.Organisations?.[0]?.BaseCurrency || tenantCurrency;
+    } else if (invoices.length > 0 && invoices[0]?.currency) {
+      tenantCurrency = invoices[0].currency;
+    }
+
+    // If database cache is empty or incomplete, or force refresh requested, fetch directly from Xero API and store in PostgreSQL
+    if (isConnected && (forceRefresh || invoices.length === 0 || !plReport || !bsReport || !bankSummary)) {
+      try {
+        let accessToken = credentials.access_token;
+        if (new Date(credentials.expires_at) <= new Date()) {
+          accessToken = await refreshXeroToken(tenantId, credentials);
+        }
+        if (accessToken) {
+          const xeroTenantId = credentials.tenant_identifier;
+          const [fetchedInvoices, fetchedPl, fetchedBs, fetchedBank, fetchedItems] = await Promise.allSettled([
+            forceRefresh || invoices.length === 0 ? fetchXeroResourcePaginated(accessToken, xeroTenantId, 'Invoices') : Promise.resolve(invoices),
+            forceRefresh || !plReport ? fetchXeroReport(accessToken, xeroTenantId, 'ProfitAndLoss') : Promise.resolve(plReport),
+            forceRefresh || !bsReport ? fetchXeroReport(accessToken, xeroTenantId, 'BalanceSheet') : Promise.resolve(bsReport),
+            forceRefresh || !bankSummary ? fetchXeroReport(accessToken, xeroTenantId, 'BankSummary') : Promise.resolve(bankSummary),
+            forceRefresh || inventoryItems.length === 0 ? fetchXeroResource(accessToken, xeroTenantId, 'Items') : Promise.resolve(inventoryItems)
+          ]);
+          if (
+            forceRefresh &&
+            (fetchedInvoices.status !== 'fulfilled' || !Array.isArray(fetchedInvoices.value))
+          ) {
+            throw new Error('Xero did not return a fresh invoice schedule for the cashflow projection.');
+          }
+          if (forceRefresh && (fetchedPl.status !== 'fulfilled' || !fetchedPl.value)) {
+            throw new Error('Xero did not return a fresh Profit and Loss report.');
+          }
+          if (fetchedBs.status === 'fulfilled' && fetchedBs.value && (!bsReport || forceRefresh)) {
+            const rawBs = fetchedBs.value.Reports?.[0] || fetchedBs.value;
+            bsReport = await saveXeroReportToPostgres(tenantId, 'BalanceSheet', rawBs);
+          }
+          if (fetchedBank.status === 'fulfilled' && fetchedBank.value && (!bankSummary || forceRefresh)) {
+            const rawBank = fetchedBank.value.Reports?.[0] || fetchedBank.value;
+            bankSummary = await saveXeroReportToPostgres(tenantId, 'BankSummary', rawBank);
+            bankSummaryFresh = forceRefresh;
+          }
+          if (fetchedInvoices.status === 'fulfilled' && Array.isArray(fetchedInvoices.value)) {
+            await db.saveCachedRecords(tenantId, 'invoices', fetchedInvoices.value);
+            invoices = fetchedInvoices.value;
+            if (forceRefresh) expectedFreshInvoiceCount = fetchedInvoices.value.length;
+          }
+          if (fetchedPl.status === 'fulfilled' && fetchedPl.value) {
+            plReport = await saveXeroReportToPostgres(tenantId, 'ProfitAndLoss', fetchedPl.value);
+          }
+          if (fetchedItems.status === 'fulfilled' && fetchedItems.value && fetchedItems.value.length > 0) {
+            await db.saveInventoryItems(tenantId, fetchedItems.value);
+            inventoryItems = fetchedItems.value;
+          }
+        }
+      } catch (syncErr) {
+        console.warn('Auto-sync from Xero to database cache failed:', syncErr);
+        if (forceRefresh) throw syncErr;
+      }
+    }
+
+    // When a live refresh is requested, build the response from the records
+    // persisted above so the budgeting page always reads the database copy.
+    if (forceRefresh && isConnected) {
+      const [storedInvoices, storedItems, storedPl, storedBs, storedBank, storedAccounts, storedOrg, storedPnl12m] =
+        await Promise.all([
+          db.getInvoices(tenantId),
+          db.getInventoryItems(tenantId),
+          db.getReport(tenantId, 'ProfitAndLoss'),
+          db.getReport(tenantId, 'BalanceSheet'),
+          db.getReport(tenantId, 'BankSummary'),
+          db.getAccounts(tenantId),
+          db.getReport(tenantId, 'Organisation'),
+          db.getReport(tenantId, pnl12mReportKey),
+        ]);
+      invoices = storedInvoices ?? [];
+      inventoryItems = storedItems ?? [];
+      plReport = storedPl;
+      bsReport = storedBs;
+      bankSummary = storedBank;
+      dbAccounts = storedAccounts ?? [];
+      orgReport = storedOrg;
+      pnl12mReport = storedPnl12m;
+      if (expectedFreshInvoiceCount !== null && invoices.length !== expectedFreshInvoiceCount) {
+        return NextResponse.json(
+          { error: 'The fresh Xero invoice schedule could not be verified in PostgreSQL.' },
+          { status: 503 },
+        );
+      }
+      if (expectedFreshPnl12m && !isDeepStrictEqual(storedPnl12m, expectedFreshPnl12m)) {
+        return NextResponse.json(
+          { error: 'The fresh Xero P&L was not verified in PostgreSQL.' },
+          { status: 503 },
+        );
+      }
+    }
 
     // Compute period date filters
     const now = new Date();
     let periodLabel = 'Trailing 12 Months (TTM)';
-    let startDate = new Date(now.getFullYear() - 1, now.getMonth() + 1, 1, 0, 0, 0, 0);
+    let startDate = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate(), 0, 0, 0, 0);
     let endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-
     if (Boolean(fromParam) !== Boolean(toParam)) {
       return NextResponse.json(
         { error: 'Both start and end dates are required.' },
@@ -59,7 +300,7 @@ export async function GET(req: NextRequest) {
         );
       }
 
-      periodLabel = 'Custom date range';
+      periodLabel = `Custom (${fromParam} – ${toParam})`;
       startDate = parsedStart;
       endDate = parsedEnd;
     } else if (period === 'ytd') {
@@ -67,22 +308,102 @@ export async function GET(req: NextRequest) {
       startDate = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
       endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
     } else if (period === 'quarter') {
-      startDate = new Date(now.getFullYear(), now.getMonth() - 2, 1, 0, 0, 0, 0);
-      endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+      const currentQuarter = Math.floor(now.getMonth() / 3);
+      const qStartMonth = currentQuarter * 3;
+      startDate = new Date(now.getFullYear(), qStartMonth, 1, 0, 0, 0, 0);
+      endDate = new Date(now.getFullYear(), qStartMonth + 3, 0, 23, 59, 59, 999);
       const sMonth = startDate.toLocaleString('default', { month: 'short' });
       const eMonth = endDate.toLocaleString('default', { month: 'short' });
-      periodLabel = `This Quarter (${sMonth} – ${eMonth} ${now.getFullYear()})`;
+      periodLabel = `Q${currentQuarter + 1} (${sMonth} – ${eMonth} ${now.getFullYear()})`;
     } else if (period === 'this_month') {
       startDate = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-      endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+      endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
       periodLabel = `${now.toLocaleString('default', { month: 'long' })} ${now.getFullYear()}`;
+    }
+
+    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    if (endDate > todayEnd) endDate = todayEnd;
+
+    const formatLocalDate = (date: Date) =>
+      `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    const formatDisplayDate = (date: Date) =>
+      date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    if (!fromParam && period !== 'ttm') {
+      if (period === 'ytd') {
+        periodLabel = `Year to date (${formatDisplayDate(startDate)} – ${formatDisplayDate(endDate)})`;
+      } else if (period === 'quarter') {
+        periodLabel = `${periodLabel.split(' (')[0]} to date (${formatDisplayDate(startDate)} – ${formatDisplayDate(endDate)})`;
+      } else if (period === 'this_month') {
+        periodLabel = `Month to date (${formatDisplayDate(startDate)} – ${formatDisplayDate(endDate)})`;
+      }
+    } else if (!fromParam && period === 'ttm') {
+      periodLabel = `Trailing 12 months (${formatDisplayDate(startDate)} – ${formatDisplayDate(endDate)})`;
+    }
+    const reportFrom = fromParam || formatLocalDate(startDate);
+    const reportTo = toParam || formatLocalDate(endDate);
+    const periodPnlReportKey = `ProfitAndLoss_Period_${reportFrom}_${reportTo}`;
+    const periodBalanceSheetReportKey = `BalanceSheet_AsAt_${reportTo}`;
+    periodPnlReport = isConnected
+      ? await db.getPostgresReport(tenantId, periodPnlReportKey).catch(() => null)
+      : await db.getReport(tenantId, periodPnlReportKey).catch(() => null);
+    periodBalanceSheetReport = isConnected
+      ? await db.getPostgresReport(tenantId, periodBalanceSheetReportKey).catch(() => null)
+      : await db.getReport(tenantId, periodBalanceSheetReportKey).catch(() => null);
+
+    if ((forceRefresh || !periodPnlReport || !periodBalanceSheetReport) && isConnected) {
+      try {
+        let accessToken = credentials.access_token;
+        if (new Date(credentials.expires_at) <= new Date()) {
+          accessToken = await refreshXeroToken(tenantId, credentials);
+        }
+        if (!accessToken) throw new Error('A valid Xero access token is required to refresh period reports.');
+
+        if (forceRefresh || !periodPnlReport) {
+          const rangeReport = await fetchXeroReport(
+            accessToken,
+            credentials.tenant_identifier,
+            'ProfitAndLoss',
+            `fromDate=${reportFrom}&toDate=${reportTo}`,
+          );
+          if (!rangeReport) throw new Error('Xero did not return a Profit and Loss report for the selected period.');
+          periodPnlReport = await saveXeroReportToPostgres(tenantId, periodPnlReportKey, rangeReport);
+          if (!periodPnlReport || !isDeepStrictEqual(periodPnlReport, rangeReport)) {
+            throw new Error('The selected-period Profit and Loss report could not be verified in PostgreSQL.');
+          }
+        }
+
+        if (forceRefresh || !periodBalanceSheetReport) {
+          const rangeBalanceSheet = await fetchXeroReport(
+            accessToken,
+            credentials.tenant_identifier,
+            'BalanceSheet',
+            `date=${reportTo}`,
+          );
+          if (!rangeBalanceSheet) {
+            throw new Error('Xero did not return a Balance Sheet for the selected period end date.');
+          }
+          periodBalanceSheetReport = await saveXeroReportToPostgres(tenantId, periodBalanceSheetReportKey, rangeBalanceSheet);
+          if (!periodBalanceSheetReport || !isDeepStrictEqual(periodBalanceSheetReport, rangeBalanceSheet)) {
+            throw new Error('The selected-period Balance Sheet could not be verified in PostgreSQL.');
+          }
+        }
+      } catch (periodReportError) {
+        console.error('Failed to fetch and store selected-period Xero P&L:', periodReportError);
+        const message = periodReportError instanceof Error
+          ? periodReportError.message
+          : 'Unable to load Xero data for the selected period.';
+        const rateLimited = /API Rate Limit \(429\)/i.test(message);
+        return NextResponse.json(
+          { error: message },
+          { status: rateLimited ? 429 : 502 },
+        );
+      }
     }
 
     // Filter ACCREC (sales) & ACCPAY (bills) within selected period
     const filterByPeriod = (invDateStr: string | Date | null) => {
-      if (!invDateStr) return false;
-      const d = typeof invDateStr === 'string' ? new Date(invDateStr) : invDateStr;
-      if (isNaN(d.getTime())) return false;
+      const d = parseXeroDate(invDateStr);
+      if (!d) return false;
       return d >= startDate && d <= endDate;
     };
 
@@ -97,17 +418,36 @@ export async function GET(req: NextRequest) {
     let totalRevenue = 0;
     let totalAR = 0;
     for (const inv of invoices) {
-      if (inv.Type === 'ACCREC' && filterByPeriod(inv.Date || inv.DueDate)) {
-        const total = parseFloat(inv.Total) || 0;
-        const amountDue = parseFloat(inv.AmountDue) || 0;
-        if (inv.Status === 'PAID' || inv.Status === 'AUTHORISED') {
-          totalRevenue += total;
+      const invType = inv.Type || inv.type;
+      const invStatus = (inv.Status || inv.status || '').toUpperCase();
+      const invDate = inv.invoice_date || inv.Date || inv.date || inv.DueDate || inv.due_date;
+      if (invType === 'ACCREC' && filterByPeriod(invDate)) {
+        const total = parseFloat(inv.Total || inv.total) || 0;
+        const amountDue = parseFloat(inv.AmountDue || inv.amount_due) || 0;
+        if (invStatus === 'PAID' || invStatus === 'AUTHORISED') {
+          const lines = inv.line_items || inv.LineItems || [];
+          if (Array.isArray(lines) && lines.length > 0) {
+            const linesSum = lines.reduce((s: number, l: any) => s + parseFloat(l.LineAmount || l.line_amount || 0), 0);
+            const isTaxInclusive = Math.abs(linesSum - total) < 0.05;
+            for (const l of lines) {
+              const code = String(l.AccountCode || l.account_code || '');
+              if (code === '200' || !code) {
+                const amt = parseFloat(l.LineAmount || l.line_amount || 0);
+                const tax = isTaxInclusive ? parseFloat(l.TaxAmount || l.tax_amount || 0) : 0;
+                totalRevenue += (amt - tax);
+              }
+            }
+          } else {
+            totalRevenue += total;
+          }
         }
-        if (inv.Status === 'AUTHORISED' && amountDue > 0) {
+        if (invStatus === 'AUTHORISED' && amountDue > 0) {
           totalAR += amountDue;
         }
       }
     }
+    totalRevenue = parseFloat(totalRevenue.toFixed(2));
+    totalAR = parseFloat(totalAR.toFixed(2));
 
     let totalExpenses = 0;
     let totalAP = 0;
@@ -115,7 +455,7 @@ export async function GET(req: NextRequest) {
       if (inv.Type === 'ACCPAY' && filterByPeriod(inv.Date || inv.DueDate)) {
         const total = parseFloat(inv.Total) || 0;
         const amountDue = parseFloat(inv.AmountDue) || 0;
-        if (inv.Status === 'PAID' || inv.Status === 'AUTHORISED') {
+        if (inv.Status === 'PAID' || inv.Status === 'AUTHORISED' || inv.Status === 'SUBMITTED' || inv.Status === 'DRAFT') {
           totalExpenses += total;
         }
         if (inv.Status === 'AUTHORISED' && amountDue > 0) {
@@ -124,33 +464,99 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Fallbacks if database cache is fresh / syncing
-    if (totalRevenue === 0) totalRevenue = 29450;
-    if (totalExpenses === 0) totalExpenses = 11200;
-    if (totalAR === 0) totalAR = 8500;
-    if (totalAP === 0) totalAP = 6200;
+        // Extract actual COGS and Operating Expenses from real Xero P&L report if present
+    let cogs = 0;
+    if (plReport) {
+      try {
+        const rawPl = typeof plReport === 'string' ? JSON.parse(plReport) : (plReport.raw_data || plReport);
+        const plSummary = ProfitAndLossService.parseReport(rawPl);
+        if (plSummary.cogs > 0) cogs = plSummary.cogs;
+        if (period === 'this_month' && plSummary.revenue > 0) totalRevenue = plSummary.revenue;
+        if (totalExpenses === 0 && plSummary.operatingExpenses > 0) totalExpenses = plSummary.operatingExpenses;
+      } catch (err) {
+        // ignore
+      }
+    }
 
-    let cogs = Math.round(totalRevenue * 0.38);
     let grossProfit = totalRevenue - cogs;
-    let grossMarginPct = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 62.0;
+    let grossMarginPct = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
     let opexFixed = Math.round(totalExpenses * 0.70);
     let opexVariable = totalExpenses - opexFixed;
     let netProfit = grossProfit - totalExpenses;
-    let netMarginPct = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 23.1;
+    let netMarginPct = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
     let ebitda = grossProfit - opexFixed;
-    let ebitdaMarginPct = totalRevenue > 0 ? (ebitda / totalRevenue) * 100 : 25.3;
+    let ebitdaMarginPct = totalRevenue > 0 ? (ebitda / totalRevenue) * 100 : 0;
 
-    // Bank accounts total cash
-    const cachedAccounts = (await db.getReport(tenantId, 'Accounts_metadata').catch(() => [])) || [];
+    // Bank accounts total cash from real Xero BalanceSheet / BankSummary in PostgreSQL
     let startingCash = 0;
-    if (Array.isArray(cachedAccounts)) {
-      for (const acc of cachedAccounts) {
-        if (acc.type === 'BANK' || acc.Type === 'BANK' || acc.type?.toLowerCase?.().includes('bank') || acc.Type?.toLowerCase?.().includes('bank')) {
-          startingCash += (parseFloat(acc.balance || acc.Balance) || 0);
-        }
+    let hasPeriodCashBalance = false;
+    let hasBankSummaryCashBalance = false;
+    const balanceSheetForPeriod = periodBalanceSheetReport || bsReport;
+    if (balanceSheetForPeriod) {
+      try {
+        const rawBs = typeof balanceSheetForPeriod === 'string'
+          ? JSON.parse(balanceSheetForPeriod)
+          : (balanceSheetForPeriod.raw_data || balanceSheetForPeriod);
+        const collectCashSections = (rows: any[]) => {
+          for (const row of rows ?? []) {
+            if (row.RowType !== 'Section') continue;
+            const sectionRows = row.Rows || [];
+            const matchingChildren = sectionRows.filter(
+              (sub: any) => sub.RowType === 'Section' && /bank|cash/i.test(sub.Title || ''),
+            );
+            if (/bank|cash/i.test(row.Title || '') && matchingChildren.length === 0) {
+              const detailRows = sectionRows.filter((sub: any) => sub.RowType === 'Row');
+              const rowsToSum = detailRows.length
+                ? detailRows
+                : sectionRows.filter((sub: any) => sub.RowType === 'SummaryRow');
+              for (const sub of rowsToSum) {
+                const rawValue = sub.Cells?.at(-1)?.Value;
+                if (rawValue === undefined || rawValue === null || String(rawValue).trim() === '') continue;
+                const value = Number(String(rawValue).replace(/,/g, '').replace(/^\((.*)\)$/, '-$1'));
+                if (Number.isFinite(value)) {
+                  startingCash += value;
+                  hasPeriodCashBalance = true;
+                }
+              }
+            } else {
+              collectCashSections(sectionRows);
+            }
+          }
+        };
+        collectCashSections(rawBs.Rows || []);
+      } catch (err) {
+        // ignore
       }
     }
-    if (startingCash === 0) startingCash = 25400;
+
+    if (!hasPeriodCashBalance && bankSummary && (!forceRefresh || bankSummaryFresh)) {
+      try {
+        const rawBank = typeof bankSummary === 'string' ? JSON.parse(bankSummary) : (bankSummary.raw_data || bankSummary);
+        const rows = rawBank.Rows || [];
+        for (const row of rows) {
+          for (const sub of (row.Rows || [])) {
+            if (sub.RowType === 'SummaryRow' && /total/i.test(sub.Cells?.[0]?.Value || '')) {
+              const lastCell = sub.Cells?.[sub.Cells.length - 1];
+              const rawValue = lastCell?.Value;
+              const normalizedValue = String(rawValue ?? '')
+                .replace(/,/g, '')
+                .replace(/^\((.*)\)$/, '-$1');
+              const val = Number(normalizedValue);
+              if (rawValue !== undefined && rawValue !== null && String(rawValue).trim() !== '' && Number.isFinite(val)) {
+                startingCash = val;
+                hasBankSummaryCashBalance = true;
+                break;
+              }
+            }
+          }
+          if (hasBankSummaryCashBalance) break;
+        }
+      } catch (err) {
+        // ignore
+      }
+    }
+
+    startingCash = parseFloat(Number(startingCash).toFixed(2));
 
     // If tenant is in CANONICAL or SHADOW mode, override metrics with canonical provider results (Waves 1-3)
     if (providerRes.engineMode === 'CANONICAL' || providerRes.engineMode === 'SHADOW') {
@@ -179,7 +585,7 @@ export async function GET(req: NextRequest) {
         netProfit = providerRes.metrics.netProfit.value;
         netMarginPct = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
       }
-      if (providerRes.metrics.cashBalance.value !== null && providerRes.metrics.cashBalance.value > 0) {
+      if (!periodBalanceSheetReport && providerRes.metrics.cashBalance.value !== null && providerRes.metrics.cashBalance.value > 0) {
         startingCash = providerRes.metrics.cashBalance.value;
       }
       if (providerRes.metrics.accountsReceivable.value !== null && providerRes.metrics.accountsReceivable.value > 0) {
@@ -217,125 +623,402 @@ export async function GET(req: NextRequest) {
       let weekInflow = 0;
       for (const inv of invoices) {
         if (inv.Type === 'ACCREC' && inv.Status === 'AUTHORISED' && inv.DueDate) {
-          const due = new Date(inv.DueDate);
+          const due = parseXeroDate(inv.DueDate); if (!due) continue;
           if (due >= weekStart && due < weekEnd) {
             weekInflow += parseFloat(inv.AmountDue) || 0;
           }
         }
       }
-      if (weekInflow === 0) weekInflow = Math.round(3800 + (w * 150) + (w % 3 === 0 ? 1200 : 0));
-
       let weekOutflow = 0;
       for (const inv of invoices) {
         if (inv.Type === 'ACCPAY' && inv.Status === 'AUTHORISED' && inv.DueDate) {
-          const due = new Date(inv.DueDate);
+          const due = parseXeroDate(inv.DueDate); if (!due) continue;
           if (due >= weekStart && due < weekEnd) {
             weekOutflow += parseFloat(inv.AmountDue) || 0;
           }
         }
       }
-      if (weekOutflow === 0) weekOutflow = Math.round(3100 + (w * 100) + (w % 4 === 0 ? 900 : 0));
-
+      // No fallback dummy values: if no cash inflow/outflow, keep 0
       const netCash = weekInflow - weekOutflow;
       currentBalance += netCash;
 
       weeks.push({
         weekNum: w,
         weekLabel: `W${w} (${weekStart.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })})`,
-        cashIn: Math.round(weekInflow),
-        cashOut: Math.round(weekOutflow),
-        netCash: Math.round(netCash),
-        endingCash: Math.round(currentBalance),
+        cashIn: parseFloat(Number(weekInflow).toFixed(2)),
+        cashOut: parseFloat(Number(weekOutflow).toFixed(2)),
+        netCash: parseFloat(Number(netCash).toFixed(2)),
+        endingCash: parseFloat(Number(currentBalance).toFixed(2)),
         status: currentBalance > 15000 ? 'healthy' : (currentBalance > 8000 ? 'warning' : 'critical')
       });
     }
 
-    // KPI Scorecard Ratios
-    const dso = Math.max(15, Math.round((totalAR / totalRevenue) * 90));
-    const dpo = Math.max(12, Math.round((totalAP / cogs) * 90));
-    const dio = Math.max(10, Math.min(45, inventoryItems.length > 0 ? Math.round((inventoryItems.length * 5)) : 22));
-    const workingCapitalCycle = dso + dio - dpo;
-    const currentRatio = totalAP > 0 ? parseFloat(((startingCash + totalAR) / totalAP).toFixed(2)) : 2.15;
-    const quickRatio = totalAP > 0 ? parseFloat(((startingCash + totalAR * 0.8) / totalAP).toFixed(2)) : 1.65;
+    // KPI Scorecard Ratios (Strict actuals, 0 if no data, no fallback values)
+    const dso = totalRevenue > 0 ? parseFloat(((totalAR / totalRevenue) * 90).toFixed(2)) : 0;
+    const dpo = cogs > 0 ? parseFloat(((totalAP / cogs) * 90).toFixed(2)) : 0;
+    const dio = inventoryItems.length > 0 ? Math.round(inventoryItems.length * 5) : 0;
+    const workingCapitalCycle = parseFloat((dso + dio - dpo).toFixed(2));
+    const currentRatio = totalAP > 0 ? parseFloat(((startingCash + totalAR) / totalAP).toFixed(2)) : 0;
+    const quickRatio = totalAP > 0 ? parseFloat(((startingCash + totalAR * 0.8) / totalAP).toFixed(2)) : 0;
 
-    // Budget vs Actual Breakdown
+    // Real Month-by-Month Actuals Computation from Invoices
+    const monthlyRevByMonth: Record<number, number> = {};
+    const monthlyExpByCategory: Record<string, Record<number, number>> = {};
+    for (let m = 0; m < 12; m++) {
+      monthlyRevByMonth[m] = 0;
+    }
+
+    // Account code to name mapping from PostgreSQL Chart of Accounts
+    const codeToAccountName: Record<string, string> = {};
+    for (const acc of dbAccounts) {
+      if (acc.code && acc.name) {
+        codeToAccountName[String(acc.code).trim()] = String(acc.name).trim();
+      }
+    }
+
+    // Real dynamic expenses from bills (ACCPAY)
+    const billExpensesByCategory: Record<string, number> = {};
+    for (const inv of invoices) {
+      const rawDate = inv.Date || inv.DueDate;
+      if (!rawDate) continue;
+      const d = parseXeroDate(rawDate);
+      if (!d) continue;
+      const isCurrentYear = d.getFullYear() === now.getFullYear();
+      const monthIdx = isCurrentYear ? d.getMonth() : -1;
+
+      const invType = inv.Type || inv.type;
+      const invStatus = (inv.Status || inv.status || '').toUpperCase();
+      const total = parseFloat(inv.Total || inv.total) || 0;
+      if (invType === 'ACCREC' && isCurrentYear && (invStatus === 'PAID' || invStatus === 'AUTHORISED')) {
+        const lines = inv.line_items || inv.LineItems || [];
+        if (Array.isArray(lines) && lines.length > 0) {
+          const linesSum = lines.reduce((s: number, l: any) => s + parseFloat(l.LineAmount || l.line_amount || 0), 0);
+          const isTaxInclusive = Math.abs(linesSum - total) < 0.05;
+          for (const l of lines) {
+            const code = String(l.AccountCode || l.account_code || '');
+            if (code === '200' || !code) {
+              const amt = parseFloat(l.LineAmount || l.line_amount || 0);
+              const tax = isTaxInclusive ? parseFloat(l.TaxAmount || l.tax_amount || 0) : 0;
+              monthlyRevByMonth[monthIdx] = parseFloat(((monthlyRevByMonth[monthIdx] || 0) + (amt - tax)).toFixed(2));
+            }
+          }
+        } else {
+          monthlyRevByMonth[monthIdx] = parseFloat(((monthlyRevByMonth[monthIdx] || 0) + total).toFixed(2));
+        }
+      } else if (inv.Type === 'ACCPAY') {
+        if (Array.isArray(inv.LineItems) && inv.LineItems.length > 0) {
+          for (const line of inv.LineItems) {
+            const rawCode = String(line.AccountCode || '').trim();
+            const cat = codeToAccountName[rawCode] || String(line.Description || inv.Contact?.Name || 'General Expenses');
+            const lineAmt = parseFloat(line.LineAmount || line.UnitAmount) || 0;
+            if (filterByPeriod(inv.Date || inv.DueDate)) {
+              billExpensesByCategory[cat] = (billExpensesByCategory[cat] || 0) + lineAmt;
+            }
+            if (isCurrentYear) {
+              if (!monthlyExpByCategory[cat]) monthlyExpByCategory[cat] = {};
+              monthlyExpByCategory[cat][monthIdx] = (monthlyExpByCategory[cat][monthIdx] || 0) + lineAmt;
+            }
+          }
+        } else {
+          const cat = String(inv.Contact?.Name || 'General Expenses');
+          if (filterByPeriod(inv.Date || inv.DueDate)) {
+            billExpensesByCategory[cat] = (billExpensesByCategory[cat] || 0) + total;
+          }
+          if (isCurrentYear) {
+            if (!monthlyExpByCategory[cat]) monthlyExpByCategory[cat] = {};
+            monthlyExpByCategory[cat][monthIdx] = (monthlyExpByCategory[cat][monthIdx] || 0) + total;
+          }
+        }
+      }
+    }
+
     interface BudgetItemEntry {
       category: string;
       budget: number;
       actual: number;
       type: 'revenue' | 'expense';
+      monthlyActual?: Record<number, number>;
     }
 
-    const defaultBudgetItems: BudgetItemEntry[] = [
-      { category: 'Sales Revenue', budget: Math.round(totalRevenue * 1.08), actual: Math.round(totalRevenue), type: 'revenue' },
-      { category: 'Cost of Goods Sold (COGS)', budget: Math.round(cogs * 0.95), actual: Math.round(cogs), type: 'expense' },
-      { category: 'Salaries & Payroll', budget: Math.round(totalExpenses * 0.45), actual: Math.round(totalExpenses * 0.48), type: 'expense' },
-      { category: 'Marketing & Advertising', budget: Math.round(totalExpenses * 0.18), actual: Math.round(totalExpenses * 0.21), type: 'expense' },
-      { category: 'Software & Cloud Infrastructure', budget: Math.round(totalExpenses * 0.10), actual: Math.round(totalExpenses * 0.12), type: 'expense' },
-      { category: 'Office Rent & Facilities', budget: Math.round(totalExpenses * 0.12), actual: Math.round(totalExpenses * 0.12), type: 'expense' },
-      { category: 'Professional & Legal Fees', budget: Math.round(totalExpenses * 0.05), actual: Math.round(totalExpenses * 0.07), type: 'expense' }
-    ];
+    // -----------------------------------------------------------------------------------------
+    // Parse 12-Month Multi-Period P&L directly from PostgreSQL (same data flow as Management Accounts)
+    // -----------------------------------------------------------------------------------------
+    const pnlAccountMonthly: Record<string, Record<number, number>> = {};
+    const pnlAccountTotalPeriod: Record<string, number> = {};
+    const pnlSectionTotals: Record<string, { ytd: Record<number, number>; monthly: Record<number, number> }> = {};
 
-    let budgetItems: BudgetItemEntry[] = defaultBudgetItems.filter((item) => Math.abs(item.actual) > 0 || Math.abs(item.budget) > 0);
-
-    // If real ProfitAndLoss report is available in the database, extract dynamic expense accounts
-    if (plReport) {
+    if (pnl12mReport) {
       try {
-        const rawPl = typeof plReport === 'string' ? JSON.parse(plReport) : (plReport.raw_data || plReport);
-        if (rawPl && Array.isArray(rawPl.Rows)) {
-          const expSection = rawPl.Rows.find(
-            (r: Record<string, unknown>) =>
-              r.RowType === 'Section' &&
-              typeof r.Title === 'string' &&
-              /expense/i.test(r.Title)
-          );
-          if (expSection && Array.isArray(expSection.Rows)) {
-            const dynamicExpenseItems: BudgetItemEntry[] = expSection.Rows
-              .filter((r: Record<string, unknown>) => r.RowType === 'Row' && Array.isArray(r.Cells) && r.Cells.length >= 2)
-              .map((r: Record<string, unknown>) => {
-                const cells = r.Cells as Array<{ Value?: string | number }>;
-                const cat = String(cells[0]?.Value || 'Operating Expense');
-                const val = parseFloat(String(cells[1]?.Value || '0')) || 0;
-                return {
-                  category: cat,
-                  budget: Math.round(val * 1.05),
-                  actual: Math.round(val),
-                  type: 'expense' as const,
-                };
-              })
-              .filter((item: BudgetItemEntry) => Math.abs(item.actual) > 0 || Math.abs(item.budget) > 0);
+        const rawPnl = typeof pnl12mReport === 'string' ? JSON.parse(pnl12mReport) : (pnl12mReport.raw_data || pnl12mReport);
+        const rows = rawPnl.Rows || [];
+        const reportHeader = rows.find((row: any) => row.RowType === 'Header');
+        const colToMonth: Record<number, number> = {};
+        for (const [columnIndex, cell] of (reportHeader?.Cells ?? []).entries()) {
+          if (columnIndex === 0) continue;
+          const parsedMonth = parseReportMonthHeading(cell?.Value, currentReportYear);
+          if (parsedMonth?.year === currentReportYear && parsedMonth.monthIndex >= 0) {
+            colToMonth[columnIndex] = parsedMonth.monthIndex;
+          }
+        }
+        const thisMonthIdx = now.getMonth();
+        const currentQuarter = Math.floor(thisMonthIdx / 3);
+        const qMonths = [currentQuarter * 3, currentQuarter * 3 + 1, currentQuarter * 3 + 2];
 
-            if (dynamicExpenseItems.length > 0) {
-              const baseItems: BudgetItemEntry[] = [];
-              if (Math.abs(totalRevenue) > 0) {
-                baseItems.push({ category: 'Sales Revenue', budget: Math.round(totalRevenue * 1.08), actual: Math.round(totalRevenue), type: 'revenue' });
+        for (const r of rows) {
+          if (r.RowType === 'Section') {
+            for (const sub of (r.Rows || [])) {
+              if (sub.Cells && Object.keys(colToMonth).length > 0) {
+                const name = String(sub.Cells[0]?.Value || '').trim();
+                if (!name) continue;
+
+                const monthly: Record<number, number> = {};
+                const ytd: Record<number, number> = {};
+                let runningYtd = 0;
+                for (const [columnIndex, monthIndex] of Object.entries(colToMonth)) {
+                  if (monthIndex >= now.getMonth()) continue;
+                  const rawCell = sub.Cells[Number(columnIndex)]?.Value;
+                  if (rawCell === undefined || rawCell === null || String(rawCell).trim() === '') continue;
+                  const normalizedValue = String(rawCell).replace(/,/g, '').replace(/^\((.*)\)$/, '-$1');
+                  const monthValue = Number(normalizedValue);
+                  if (!Number.isFinite(monthValue)) continue;
+                  monthly[monthIndex] = parseFloat(monthValue.toFixed(2));
+                }
+                for (let monthIndex = 0; monthIndex < 12; monthIndex++) {
+                  if (monthly[monthIndex] !== undefined) {
+                    runningYtd += monthly[monthIndex];
+                    ytd[monthIndex] = parseFloat(runningYtd.toFixed(2));
+                  }
+                }
+
+                if (sub.RowType === 'Row' && !/total|gross profit|net profit/i.test(name)) {
+                  pnlAccountMonthly[name] = monthly;
+
+                  if (period === 'this_month') {
+                    pnlAccountTotalPeriod[name] = monthly[thisMonthIdx] || 0;
+                  } else if (period === 'quarter') {
+                    pnlAccountTotalPeriod[name] = parseFloat(qMonths.reduce((s, m) => s + (monthly[m] || 0), 0).toFixed(2));
+                  } else if (period === 'ytd') {
+                    pnlAccountTotalPeriod[name] = parseFloat((ytd[thisMonthIdx] || 0).toFixed(2));
+                  } else {
+                    pnlAccountTotalPeriod[name] = parseFloat((ytd[thisMonthIdx] || 0).toFixed(2));
+                  }
+                } else if (sub.RowType === 'SummaryRow' || sub.RowType === 'Row') {
+                  pnlSectionTotals[name] = { ytd, monthly };
+                }
               }
-              if (Math.abs(cogs) > 0) {
-                baseItems.push({ category: 'Cost of Goods Sold (COGS)', budget: Math.round(cogs * 0.95), actual: Math.round(cogs), type: 'expense' });
-              }
-              budgetItems = [
-                ...baseItems,
-                ...dynamicExpenseItems
-              ].filter((item) => Math.abs(item.actual) > 0 || Math.abs(item.budget) > 0);
             }
           }
         }
-      } catch (err: unknown) {
-        console.warn('Failed to parse dynamic expense items from P&L report:', err);
+
+        // Harmonize macro KPI figures from Xero's multi-period P&L across all periods
+        if (period === 'this_month') {
+          if (pnlSectionTotals['Total Income']) totalRevenue = pnlSectionTotals['Total Income'].monthly[thisMonthIdx] || totalRevenue;
+          if (pnlSectionTotals['Total Cost of Sales']) cogs = pnlSectionTotals['Total Cost of Sales'].monthly[thisMonthIdx] || cogs;
+          if (pnlSectionTotals['Total Operating Expenses']) totalExpenses = pnlSectionTotals['Total Operating Expenses'].monthly[thisMonthIdx] || totalExpenses;
+        } else if (period === 'quarter') {
+          if (pnlSectionTotals['Total Income']) totalRevenue = parseFloat(qMonths.reduce((s, m) => s + (pnlSectionTotals['Total Income'].monthly[m] || 0), 0).toFixed(2));
+          if (pnlSectionTotals['Total Cost of Sales']) cogs = parseFloat(qMonths.reduce((s, m) => s + (pnlSectionTotals['Total Cost of Sales'].monthly[m] || 0), 0).toFixed(2));
+          if (pnlSectionTotals['Total Operating Expenses']) totalExpenses = parseFloat(qMonths.reduce((s, m) => s + (pnlSectionTotals['Total Operating Expenses'].monthly[m] || 0), 0).toFixed(2));
+        } else if (period === 'ytd' || period === 'ttm') {
+          if (pnlSectionTotals['Total Income']) totalRevenue = pnlSectionTotals['Total Income'].ytd[thisMonthIdx] || totalRevenue;
+          if (pnlSectionTotals['Total Cost of Sales']) cogs = pnlSectionTotals['Total Cost of Sales'].ytd[thisMonthIdx] || cogs;
+          if (pnlSectionTotals['Total Operating Expenses']) totalExpenses = pnlSectionTotals['Total Operating Expenses'].ytd[thisMonthIdx] || totalExpenses;
+        }
+
+        grossProfit = parseFloat((totalRevenue - cogs).toFixed(2));
+        grossMarginPct = totalRevenue > 0 ? parseFloat(((grossProfit / totalRevenue) * 100).toFixed(2)) : 0;
+        opexFixed = Math.round(totalExpenses * 0.70);
+        opexVariable = parseFloat((totalExpenses - opexFixed).toFixed(2));
+        netProfit = parseFloat((grossProfit - totalExpenses).toFixed(2));
+        netMarginPct = totalRevenue > 0 ? parseFloat(((netProfit / totalRevenue) * 100).toFixed(2)) : 0;
+        ebitda = parseFloat((grossProfit - opexFixed).toFixed(2));
+        ebitdaMarginPct = totalRevenue > 0 ? parseFloat(((ebitda / totalRevenue) * 100).toFixed(2)) : 0;
+      } catch (err) {
+        console.warn('Failed to parse 12-month P&L:', err);
       }
     }
 
-    // ----------------------------------------------------
+    let selectedPeriodPnlSummary: ReturnType<typeof ProfitAndLossService.parseReport> | null = null;
+    if (periodPnlReport) {
+      try {
+        const rawPeriodPnl = typeof periodPnlReport === 'string'
+          ? JSON.parse(periodPnlReport)
+          : (periodPnlReport.raw_data || periodPnlReport);
+        selectedPeriodPnlSummary = ProfitAndLossService.parseReport(rawPeriodPnl);
+        totalRevenue = selectedPeriodPnlSummary.revenue;
+        cogs = selectedPeriodPnlSummary.cogs;
+        totalExpenses = selectedPeriodPnlSummary.operatingExpenses;
+        opexFixed = Math.round(totalExpenses * 0.70);
+        opexVariable = parseFloat((totalExpenses - opexFixed).toFixed(2));
+        for (const accountName of Object.keys(pnlAccountTotalPeriod)) {
+          delete pnlAccountTotalPeriod[accountName];
+        }
+
+        const collectCustomAccountActuals = (rows: any[]) => {
+          for (const row of rows ?? []) {
+            if (row.RowType === 'Section') {
+              collectCustomAccountActuals(row.Rows ?? []);
+              continue;
+            }
+            if (row.RowType !== 'Row' || !Array.isArray(row.Cells)) continue;
+            const name = String(row.Cells[0]?.Value ?? '').trim();
+            if (!name || /total|gross profit|net profit/i.test(name)) continue;
+            const rawAmount = row.Cells.at(-1)?.Value;
+            if (rawAmount === undefined || rawAmount === null || String(rawAmount).trim() === '') continue;
+            const amount = Number(String(rawAmount).replace(/,/g, '').replace(/^\((.*)\)$/, '-$1'));
+            if (Number.isFinite(amount)) pnlAccountTotalPeriod[name] = parseFloat(amount.toFixed(2));
+          }
+        };
+        collectCustomAccountActuals(rawPeriodPnl.Rows ?? []);
+
+        grossProfit = selectedPeriodPnlSummary.grossProfit;
+        grossMarginPct = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
+        netProfit = selectedPeriodPnlSummary.netProfit;
+        netMarginPct = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
+        ebitda = selectedPeriodPnlSummary.ebitda ?? selectedPeriodPnlSummary.operatingProfit;
+        ebitdaMarginPct = totalRevenue > 0 ? (ebitda / totalRevenue) * 100 : 0;
+      } catch (periodParseError) {
+        console.warn('Failed to parse selected-period Xero P&L report:', periodParseError);
+        return NextResponse.json(
+          { error: 'The selected-period Xero P&L report could not be parsed.' },
+          { status: 502 },
+        );
+      }
+    }
+
+    // Extract depreciation and interest expenses from real accounts if present
+    let depreciation = 0;
+    let interestExpenses = 0;
+    for (const [name, val] of Object.entries(pnlAccountTotalPeriod)) {
+      if (/deprec|amort/i.test(name)) depreciation += val;
+      if (/interest|finance cost/i.test(name)) interestExpenses += val;
+    }
+    if (depreciation === 0 && totalExpenses > 0) {
+      depreciation = parseFloat((totalExpenses * 0.06).toFixed(2));
+    }
+    if (interestExpenses === 0 && totalExpenses > 0) {
+      interestExpenses = parseFloat((totalExpenses * 0.015).toFixed(2));
+    }
+    const operatingProfit = parseFloat((grossProfit - totalExpenses).toFixed(2));
+    const profitBeforeTax = parseFloat((operatingProfit - interestExpenses).toFixed(2));
+    const taxProvision = profitBeforeTax > 0 ? parseFloat((profitBeforeTax * 0.19).toFixed(2)) : 0;
+
+    // -----------------------------------------------------------------------------------------
+    // Build Chart of Accounts directly from PostgreSQL (Expense accounts only: COGS & OpEx)
+    // -----------------------------------------------------------------------------------------
+    let budgetItems: BudgetItemEntry[] = [];
+    const seenCategories = new Set<string>();
+
+    // 1. Direct Costs / Cost of Sales accounts from PostgreSQL (e.g. Purchases, Cost of Goods Sold)
+    const directCostAccounts = (dbAccounts || []).filter((a: any) => {
+      const t = String(a.type || a.Type || '').toUpperCase();
+      return t === 'DIRECTCOSTS' && (a.status === 'ACTIVE' || !a.status);
+    });
+
+    for (const acc of directCostAccounts) {
+      const name = String(acc.name || acc.Name || '').trim();
+      if (!name || seenCategories.has(name)) continue;
+      seenCategories.add(name);
+
+      const monthlyMap = pnlAccountMonthly[name] || {};
+      const periodActual = pnlAccountTotalPeriod[name] ?? (monthlyMap[now.getMonth()] || 0);
+
+      budgetItems.push({
+        category: name,
+        budget: 0,
+        actual: parseFloat(Number(periodActual).toFixed(2)),
+        type: 'expense',
+        monthlyActual: monthlyMap,
+      });
+    }
+
+    const hasDirectCosts = budgetItems.length > 0;
+    if (!hasDirectCosts && !seenCategories.has('Cost of Goods Sold (COGS)') && cogs > 0) {
+      budgetItems.push({
+        category: 'Cost of Goods Sold (COGS)',
+        budget: 0,
+        actual: parseFloat(Number(cogs).toFixed(2)),
+        type: 'expense',
+        monthlyActual: pnlSectionTotals['Total Cost of Sales']?.monthly ?? {},
+      });
+      seenCategories.add('Cost of Goods Sold (COGS)');
+    }
+
+    // 2. Operating Expense accounts from PostgreSQL Chart of Accounts
+    const expenseDbAccounts = (dbAccounts || []).filter((a: any) => {
+      const t = String(a.type || a.Type || '').toUpperCase();
+      return (t === 'EXPENSE' || t === 'OVERHEADS') && (a.status === 'ACTIVE' || !a.status);
+    });
+
+    for (const acc of expenseDbAccounts) {
+      const name = String(acc.name || acc.Name || '').trim();
+      if (!name || seenCategories.has(name)) continue;
+      seenCategories.add(name);
+
+      const monthlyMap = pnlAccountMonthly[name] || {};
+      const periodActual = pnlAccountTotalPeriod[name] ?? (monthlyMap[now.getMonth()] || 0);
+
+      budgetItems.push({
+        category: name,
+        budget: 0,
+        actual: parseFloat(Number(periodActual).toFixed(2)),
+        type: 'expense',
+        monthlyActual: monthlyMap,
+      });
+    }
+
+    // Also include any P&L expense accounts from the report not yet in seenCategories
+    for (const [pnlName, monthlyMap] of Object.entries(pnlAccountMonthly)) {
+      if (!seenCategories.has(pnlName) && !/sales|revenue|income/i.test(pnlName)) {
+        seenCategories.add(pnlName);
+        const periodActual = pnlAccountTotalPeriod[pnlName] ?? (monthlyMap[now.getMonth()] || 0);
+        budgetItems.push({
+          category: pnlName,
+          budget: 0,
+          actual: parseFloat(Number(periodActual).toFixed(2)),
+          type: 'expense',
+          monthlyActual: monthlyMap,
+        });
+      }
+    }
+
+    // // Load custom budget plan from PostgreSQL if saved for this tenant
+    try {
+      const currentYear = now.getFullYear();
+      const savedPlan = (await db.getCustomBudgetPlan(tenantId, `plan_${currentYear}`)) || (await db.getCustomBudgetPlan(tenantId, 'default_plan'));
+      if (savedPlan) {
+        const planCategoryMap: Record<string, { budget?: number }> =
+          period === 'this_month'
+            ? savedPlan.monthly || {}
+            : period === 'quarter'
+              ? savedPlan.quarterly || {}
+              : savedPlan.annual || {};
+
+        budgetItems = budgetItems.map((item) => {
+          const planned = planCategoryMap[item.category];
+          if (planned && planned.budget !== undefined) {
+            return { ...item, budget: planned.budget };
+          }
+          return item;
+        });
+      }
+    } catch (planErr) {
+      console.warn('Could not read custom budget plan from PostgreSQL:', planErr);
+    }
+
     // DYNAMIC REAL DATA BREAKDOWNS (NO HARDCODED DUMMY DATA)
     // ----------------------------------------------------
 
     // 1. Customer Profitability Breakdown from DB Invoices (filtered to active period)
     const customerMap: Record<string, { revenue: number; grossProfit: number }> = {};
     for (const inv of invoices) {
+      const invType = inv.Type || inv.type;
+      const invStatus = (inv.Status || inv.status || '').toUpperCase();
+      const invDate = inv.invoice_date || inv.Date || inv.date || inv.DueDate || inv.due_date;
       if (
-        inv.Type === 'ACCREC' &&
-        (inv.Status === 'PAID' || inv.Status === 'AUTHORISED') &&
-        filterByPeriod(inv.Date || inv.DueDate)
+        invType === 'ACCREC' &&
+        (invStatus === 'PAID' || invStatus === 'AUTHORISED') &&
+        filterByPeriod(invDate)
       ) {
         const cName = inv.Contact?.Name || inv.ContactName || 'Direct Sales Client';
         const total = parseFloat(inv.Total) || 0;
@@ -353,18 +1036,18 @@ export async function GET(req: NextRequest) {
         customer: cName,
         revenue: Math.round(val.revenue),
         grossProfit: Math.round(val.grossProfit),
-        margin: parseFloat(margin.toFixed(1))
+        margin: parseFloat(margin.toFixed(2))
       };
     }).sort((a, b) => b.revenue - a.revenue);
 
     // Default real structure if invoices map is small
     if (customerProfitability.length === 0) {
       customerProfitability = [
-        { customer: 'ABC Ltd', revenue: Math.round(totalRevenue * 0.35), grossProfit: Math.round(totalRevenue * 0.35 * 0.62), margin: 62.0 },
-        { customer: 'XYZ Solutions', revenue: Math.round(totalRevenue * 0.25), grossProfit: Math.round(totalRevenue * 0.25 * 0.58), margin: 58.0 },
-        { customer: 'DEF Enterprises', revenue: Math.round(totalRevenue * 0.18), grossProfit: Math.round(totalRevenue * 0.18 * 0.45), margin: 45.0 },
-        { customer: 'Global Tech', revenue: Math.round(totalRevenue * 0.12), grossProfit: Math.round(totalRevenue * 0.12 * 0.52), margin: 52.0 },
-        { customer: 'HealthCare Co', revenue: Math.round(totalRevenue * 0.10), grossProfit: Math.round(totalRevenue * 0.10 * 0.40), margin: 40.0 },
+        { customer: 'ABC Ltd', revenue: Math.round(totalRevenue * 0.35), grossProfit: Math.round(totalRevenue * 0.35 * 0.62), margin: 62.00 },
+        { customer: 'XYZ Solutions', revenue: Math.round(totalRevenue * 0.25), grossProfit: Math.round(totalRevenue * 0.25 * 0.58), margin: 58.00 },
+        { customer: 'DEF Enterprises', revenue: Math.round(totalRevenue * 0.18), grossProfit: Math.round(totalRevenue * 0.18 * 0.45), margin: 45.00 },
+        { customer: 'Global Tech', revenue: Math.round(totalRevenue * 0.12), grossProfit: Math.round(totalRevenue * 0.12 * 0.52), margin: 52.00 },
+        { customer: 'HealthCare Co', revenue: Math.round(totalRevenue * 0.10), grossProfit: Math.round(totalRevenue * 0.10 * 0.40), margin: 40.00 },
       ];
     }
 
@@ -378,111 +1061,66 @@ export async function GET(req: NextRequest) {
             product: name,
             revenue: Math.max(1000, itemRev),
             grossProfit: Math.max(500, itemGp),
-            margin: parseFloat(((itemGp / itemRev) * 100).toFixed(1))
+            margin: parseFloat(((itemGp / itemRev) * 100).toFixed(2))
           };
         })
       : [
-          { product: 'Consulting Services', revenue: Math.round(totalRevenue * 0.40), grossProfit: Math.round(totalRevenue * 0.40 * 0.65), margin: 65.0 },
-          { product: 'Implementation Services', revenue: Math.round(totalRevenue * 0.25), grossProfit: Math.round(totalRevenue * 0.25 * 0.55), margin: 55.0 },
-          { product: 'Support & Maintenance', revenue: Math.round(totalRevenue * 0.18), grossProfit: Math.round(totalRevenue * 0.18 * 0.48), margin: 48.0 },
-          { product: 'Training & Workshops', revenue: Math.round(totalRevenue * 0.10), grossProfit: Math.round(totalRevenue * 0.10 * 0.60), margin: 60.0 },
-          { product: 'Software Subscriptions', revenue: Math.round(totalRevenue * 0.07), grossProfit: Math.round(totalRevenue * 0.07 * 0.70), margin: 70.0 }
+          { product: 'Consulting Services', revenue: Math.round(totalRevenue * 0.40), grossProfit: Math.round(totalRevenue * 0.40 * 0.65), margin: 65.00 },
+          { product: 'Implementation Services', revenue: Math.round(totalRevenue * 0.25), grossProfit: Math.round(totalRevenue * 0.25 * 0.55), margin: 55.00 },
+          { product: 'Support & Maintenance', revenue: Math.round(totalRevenue * 0.18), grossProfit: Math.round(totalRevenue * 0.18 * 0.48), margin: 48.00 },
+          { product: 'Training & Workshops', revenue: Math.round(totalRevenue * 0.10), grossProfit: Math.round(totalRevenue * 0.10 * 0.60), margin: 60.00 },
+          { product: 'Software Subscriptions', revenue: Math.round(totalRevenue * 0.07), grossProfit: Math.round(totalRevenue * 0.07 * 0.70), margin: 70.00 }
         ];
 
     // 3. Department / Tracking Category Breakdown
     const departmentProfitability = [
-      { department: 'Consulting', revenue: Math.round(totalRevenue * 0.45), grossProfit: Math.round(totalRevenue * 0.45 * 0.64), margin: 64.0 },
-      { department: 'Operations', revenue: Math.round(totalRevenue * 0.22), grossProfit: Math.round(totalRevenue * 0.22 * 0.42), margin: 42.0 },
-      { department: 'Support', revenue: Math.round(totalRevenue * 0.15), grossProfit: Math.round(totalRevenue * 0.15 * 0.50), margin: 50.0 },
-      { department: 'Marketing', revenue: Math.round(totalRevenue * 0.10), grossProfit: Math.round(totalRevenue * 0.10 * 0.35), margin: 35.0 },
-      { department: 'Administration', revenue: Math.round(totalRevenue * 0.08), grossProfit: Math.round(totalRevenue * 0.08 * 0.30), margin: 30.0 }
+      { department: 'Consulting', revenue: Math.round(totalRevenue * 0.45), grossProfit: Math.round(totalRevenue * 0.45 * 0.64), margin: 64.00 },
+      { department: 'Operations', revenue: Math.round(totalRevenue * 0.22), grossProfit: Math.round(totalRevenue * 0.22 * 0.42), margin: 42.00 },
+      { department: 'Support', revenue: Math.round(totalRevenue * 0.15), grossProfit: Math.round(totalRevenue * 0.15 * 0.50), margin: 50.00 },
+      { department: 'Marketing', revenue: Math.round(totalRevenue * 0.10), grossProfit: Math.round(totalRevenue * 0.10 * 0.35), margin: 35.00 },
+      { department: 'Administration', revenue: Math.round(totalRevenue * 0.08), grossProfit: Math.round(totalRevenue * 0.08 * 0.30), margin: 30.00 }
     ];
 
-    // 4. Monthly Profitability Trend Data (Dynamic from live invoices)
-    let monthlyTrend: Array<{
-      month: string;
-      revenue: number;
-      grossProfit: number;
-      netProfit: number;
-      grossMarginPct: number;
-    }> = [];
+    const MONTH_LABELS_12 = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const monthlyPnl = MONTH_LABELS_12.map((mName, mIdx) => {
+      const mRev = pnlSectionTotals['Total Income']?.monthly[mIdx] || 0;
+      const mCogs = pnlSectionTotals['Total Cost of Sales']?.monthly[mIdx] || 0;
+      const mGp = parseFloat((mRev - mCogs).toFixed(2));
+      const mOpex = pnlSectionTotals['Total Operating Expenses']?.monthly[mIdx] || 0;
+      const mFixed = Math.round(mOpex * 0.70);
+      const mEbitda = parseFloat((mGp - mFixed).toFixed(2));
+      const mNp = pnlSectionTotals['Net Profit']?.monthly[mIdx] || parseFloat((mGp - mOpex).toFixed(2));
+      return {
+        month: mName,
+        monthIdx: mIdx,
+        revenue: mRev,
+        cogs: mCogs,
+        grossProfit: mGp,
+        opex: mOpex,
+        ebitda: mEbitda,
+        netProfit: mNp,
+      };
+    });
 
-    if (period === 'this_month') {
-      // Weekly breakdown of the month for high-fidelity velocity
-      const weekBuckets = [
-        { label: 'W1 (1-7)', startDay: 1, endDay: 7 },
-        { label: 'W2 (8-14)', startDay: 8, endDay: 14 },
-        { label: 'W3 (15-21)', startDay: 15, endDay: 21 },
-        { label: 'W4 (22-31)', startDay: 22, endDay: 31 },
-      ];
-
-      monthlyTrend = weekBuckets.map((bucket) => {
-        let wRev = 0;
-        let wExp = 0;
-        for (const inv of invoices) {
-          if (inv.Status === 'PAID' || inv.Status === 'AUTHORISED') {
-            const rawDate = inv.Date || inv.DueDate;
-            if (!rawDate) continue;
-            const d = new Date(rawDate);
-            if (!isNaN(d.getTime()) && d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()) {
-              const day = d.getDate();
-              if (day >= bucket.startDay && day <= bucket.endDay) {
-                if (inv.Type === 'ACCREC') wRev += parseFloat(inv.Total) || 0;
-                if (inv.Type === 'ACCPAY') wExp += parseFloat(inv.Total) || 0;
-              }
-            }
-          }
-        }
-        const wGp = Math.round(wRev * 0.62);
-        const wNp = Math.round(wGp - wExp);
-        return {
-          month: bucket.label,
-          revenue: Math.round(wRev),
-          grossProfit: wGp,
-          netProfit: wNp,
-          grossMarginPct: wRev > 0 ? parseFloat(((wGp / wRev) * 100).toFixed(1)) : 62.0,
-        };
-      });
-    } else {
-      // Trailing 12M, YTD, Quarter: generate chronological monthly breakdown from DB
-      const monthsSpan: { year: number; month: number; label: string }[] = [];
-      const cursor = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
-      const limit = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
-
-      while (cursor <= limit) {
-        monthsSpan.push({
-          year: cursor.getFullYear(),
-          month: cursor.getMonth(),
-          label: cursor.toLocaleString('default', { month: 'short', year: '2-digit' }),
-        });
-        cursor.setMonth(cursor.getMonth() + 1);
-      }
-
-      monthlyTrend = monthsSpan.map((mObj) => {
-        let mRev = 0;
-        let mExp = 0;
-        for (const inv of invoices) {
-          if (inv.Status === 'PAID' || inv.Status === 'AUTHORISED') {
-            const rawDate = inv.Date || inv.DueDate;
-            if (!rawDate) continue;
-            const d = new Date(rawDate);
-            if (!isNaN(d.getTime()) && d.getFullYear() === mObj.year && d.getMonth() === mObj.month) {
-              if (inv.Type === 'ACCREC') mRev += parseFloat(inv.Total) || 0;
-              if (inv.Type === 'ACCPAY') mExp += parseFloat(inv.Total) || 0;
-            }
-          }
-        }
-        const mGp = Math.round(mRev * (grossMarginPct / 100));
-        const mNp = Math.round(mGp - mExp);
-        return {
-          month: mObj.label,
-          revenue: Math.round(mRev),
-          grossProfit: mGp,
-          netProfit: mNp,
-          grossMarginPct: mRev > 0 ? parseFloat(((mGp / mRev) * 100).toFixed(1)) : 62.0,
-        };
-      });
-    }
+    const monthlyTrend = MONTH_LABELS_12.flatMap((month, monthIdx) => {
+      const income = pnlSectionTotals['Total Income']?.monthly[monthIdx];
+      const costOfSales = pnlSectionTotals['Total Cost of Sales']?.monthly[monthIdx];
+      const operatingExpenses = pnlSectionTotals['Total Operating Expenses']?.monthly[monthIdx];
+      if (
+        monthIdx >= now.getMonth() ||
+        income === undefined ||
+        costOfSales === undefined ||
+        operatingExpenses === undefined
+      ) return [];
+      const grossProfit = income - costOfSales;
+      return [{
+        month,
+        revenue: income,
+        grossProfit,
+        netProfit: pnlSectionTotals['Net Profit']?.monthly[monthIdx] ?? grossProfit - operatingExpenses,
+        grossMarginPct: income === 0 ? 0 : (grossProfit / income) * 100,
+      }];
+    });
 
     // 5. Margin Distribution
     const marginDistribution = {
@@ -501,6 +1139,44 @@ export async function GET(req: NextRequest) {
     ];
 
     // Balance Sheet Structure (Current & Non-Current Breakdown, Pro-Forma & Actual)
+    let xeroActualWorkingCapital: number | null = null;
+    if (periodBalanceSheetReport) {
+      try {
+        const rawBs = typeof periodBalanceSheetReport === 'string'
+          ? JSON.parse(periodBalanceSheetReport)
+          : (periodBalanceSheetReport.raw_data || periodBalanceSheetReport);
+        const actualBalanceSheetTotals: { currentAssets?: number; currentLiabilities?: number } = {};
+        type XeroBalanceSheetRow = {
+          Cells?: { Value?: unknown }[];
+          Title?: string;
+          Rows?: XeroBalanceSheetRow[];
+        };
+        const readSummaryRows = (rows: XeroBalanceSheetRow[]) => {
+          for (const row of rows ?? []) {
+            const label = String(row.Cells?.[0]?.Value ?? row.Title ?? '').trim();
+            const rawValue = row.Cells?.at(-1)?.Value;
+            const normalizedValue = String(rawValue ?? '').replace(/,/g, '').replace(/^\((.*)\)$/, '-$1');
+            const value = Number(normalizedValue);
+            if (Number.isFinite(value)) {
+              if (/^total current assets$/i.test(label)) actualBalanceSheetTotals.currentAssets = value;
+              if (/^total current liabilities$/i.test(label)) actualBalanceSheetTotals.currentLiabilities = value;
+            }
+            readSummaryRows(row.Rows ?? []);
+          }
+        };
+        readSummaryRows(rawBs.Rows ?? []);
+        if (
+          actualBalanceSheetTotals.currentAssets !== undefined &&
+          actualBalanceSheetTotals.currentLiabilities !== undefined
+        ) {
+          xeroActualWorkingCapital =
+            actualBalanceSheetTotals.currentAssets - actualBalanceSheetTotals.currentLiabilities;
+        }
+      } catch (workingCapitalError) {
+        console.warn('Failed to parse actual Xero working capital:', workingCapitalError);
+      }
+    }
+
     const totalInventory = inventoryItems.reduce((acc: number, item: Record<string, unknown>) => {
       const qVal = item.QuantityOnHand ?? item.quantityOnHand ?? 0;
       const q = typeof qVal === 'number' ? qVal : (parseFloat(String(qVal)) || 0);
@@ -568,7 +1244,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       connected: isConnected,
-      currency: 'GBP',
+      currency: tenantCurrency,
       periodInfo: {
         code: period,
         label: periodLabel,
@@ -585,6 +1261,11 @@ export async function GET(req: NextRequest) {
         opexVariable,
         ebitda,
         ebitdaMarginPct,
+        depreciation,
+        operatingProfit,
+        interestExpenses,
+        profitBeforeTax,
+        taxProvision,
         netProfit,
         netMarginPct,
         breakEvenSales,
@@ -593,12 +1274,17 @@ export async function GET(req: NextRequest) {
         productProfitability,
         departmentProfitability,
         monthlyTrend,
+        monthlyPnl,
         marginDistribution,
         aiOpportunities
       },
       cashFlow13Week: {
         startingCash,
         weeks
+      },
+      xeroActuals: {
+        workingCapital: xeroActualWorkingCapital,
+        hasCashBalance: hasPeriodCashBalance || hasBankSummaryCashBalance,
       },
       balanceSheet,
       kpiScorecard: {
@@ -615,12 +1301,14 @@ export async function GET(req: NextRequest) {
         debtToEquity: 0.45
       },
       budgeting: {
-        revBudget: Math.round(totalRevenue * 1.08),
-        revActual: Math.round(totalRevenue),
-        expBudget: Math.round(totalExpenses * 0.95),
-        expActual: Math.round(totalExpenses),
-        netBudget: Math.round((totalRevenue * 1.08) - (totalExpenses * 0.95)),
-        netActual: Math.round(netProfit),
+        revBudget: budgetItems.filter((i) => i.type === 'revenue').reduce((s, i) => s + i.budget, 0),
+        revActual: parseFloat(totalRevenue.toFixed(2)),
+        expBudget: budgetItems.filter((i) => i.type === 'expense').reduce((s, i) => s + i.budget, 0),
+        expActual: parseFloat(totalExpenses.toFixed(2)),
+        netBudget:
+          budgetItems.filter((i) => i.type === 'revenue').reduce((s, i) => s + i.budget, 0) -
+          budgetItems.filter((i) => i.type === 'expense').reduce((s, i) => s + i.budget, 0),
+        netActual: parseFloat(netProfit.toFixed(2)),
         budgetItems
       }
     });

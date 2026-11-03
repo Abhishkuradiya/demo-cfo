@@ -162,7 +162,11 @@ export async function fetchXeroReport(
   });
 
   if (res.status === 429) {
-    throw new Error(`Xero API Rate Limit (429) Exceeded for report [${reportPath}]`);
+    const retryAfter = res.headers.get('Retry-After');
+    const limitType = res.headers.get('X-Rate-Limit-Problem');
+    const retryMessage = retryAfter ? ` Retry after ${retryAfter} seconds.` : '';
+    const limitMessage = limitType ? ` Limit reached: ${limitType}.` : '';
+    throw new Error(`Xero API Rate Limit (429) Exceeded for report [${reportPath}].${limitMessage}${retryMessage}`);
   }
 
   if (!res.ok) {
