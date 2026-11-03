@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getTenantIdFromSession } from '@/lib/auth';
 import { getXeroAccessToken, fetchXeroResource } from '@/lib/xero';
+import { getOrFetchManagementReport } from '@/lib/managementAccountsStorage';
 
 // Helper to determine Account Group and Class
 function getAccountDetails(type: string, cls?: string) {
@@ -53,35 +54,23 @@ export async function GET(req: NextRequest) {
     const isConnected = !!tokenInfo;
 
     // 1. Fetch Organisation details to get true Base Currency
-    let orgReport = await db.getReport(tenantId, 'Organisation');
-    if (!orgReport && isConnected) {
-      try {
-        const rawOrg = await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Organisation');
-        if (rawOrg && rawOrg.length > 0) {
-          orgReport = rawOrg[0];
-          await db.saveReport(tenantId, 'Organisation', orgReport);
-        }
-      } catch (err: any) {
-        console.error('Failed to sync Organisation report in chart-of-accounts route:', err.message);
-      }
-    }
-
-    const orgBaseCurrency = orgReport?.raw_data?.BaseCurrency || orgReport?.BaseCurrency || orgReport?.CurrencyCode || 'USD';
+    const orgReport = tokenInfo
+      ? await getOrFetchManagementReport(
+          tenantId,
+          'Organisation',
+          async () => (await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Organisations'))[0] ?? null,
+        )
+      : await db.getPostgresReport(tenantId, 'Organisation');
+    const orgBaseCurrency = orgReport?.BaseCurrency || orgReport?.CurrencyCode || null;
 
     // 2. Fetch full Accounts_metadata from report storage or Xero API
-    let rawAccounts = await db.getReport(tenantId, 'Accounts_metadata');
-    if ((!rawAccounts || !Array.isArray(rawAccounts) || rawAccounts.length === 0) && isConnected) {
-      try {
-        const fetchedAccounts = await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Accounts');
-        if (fetchedAccounts && fetchedAccounts.length > 0) {
-          rawAccounts = fetchedAccounts;
-          await db.saveReport(tenantId, 'Accounts_metadata', rawAccounts);
-          await db.saveCachedRecords(tenantId, 'accounts', rawAccounts);
-        }
-      } catch (err: any) {
-        console.error('Failed to sync Accounts_metadata in chart-of-accounts route:', err.message);
-      }
-    }
+    const rawAccounts = tokenInfo
+      ? await getOrFetchManagementReport(
+          tenantId,
+          'Accounts_metadata',
+          () => fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Accounts'),
+        ) as any[] | null
+      : await db.getPostgresReport(tenantId, 'Accounts_metadata') as any[] | null;
 
     // 3. Process rawAccounts if available (Full Xero accounts with exact CurrencyCode, Class, TaxType, Description)
     if (Array.isArray(rawAccounts) && rawAccounts.length > 0) {

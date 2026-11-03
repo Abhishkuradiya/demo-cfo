@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getTenantIdFromSession } from '@/lib/auth';
 import { XeroBudgetService } from '@/lib/budgetService';
 import { getXeroAccessToken } from '@/lib/xero';
-import { db } from '@/lib/db';
+import { fetchXeroResource } from '@/lib/xero';
+import { getOrFetchManagementReport } from '@/lib/managementAccountsStorage';
 
 export async function GET(req: NextRequest) {
   const tenantId = await getTenantIdFromSession();
@@ -29,13 +30,16 @@ export async function GET(req: NextRequest) {
 
   try {
     const tokenInfo = await getXeroAccessToken(tenantId);
-    if (!tokenInfo) {
-      return NextResponse.json({ connected: false });
-    }
     const summary = await XeroBudgetService.getBudgetVsActual(tenantId, startDate, endDate, forceSync);
-    const org = await db.getReport(tenantId, 'Organisation');
-    const currency = org?.BaseCurrency || 'USD';
-    return NextResponse.json({ ...summary, connected: true, meta: { currency } });
+    const org = tokenInfo
+      ? await getOrFetchManagementReport(
+          tenantId,
+          'Organisation',
+          async () => (await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Organisations'))[0] ?? null,
+        ) as { BaseCurrency?: string } | null
+      : null;
+    const currency = org?.BaseCurrency ?? null;
+    return NextResponse.json({ ...summary, connected: true, xero_connected: Boolean(tokenInfo), meta: { currency } });
   } catch (err: any) {
     return NextResponse.json({ error: err.message || 'Failed to fetch budget vs actual data' }, { status: 500 });
   }

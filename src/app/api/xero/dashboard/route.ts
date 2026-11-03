@@ -722,9 +722,9 @@ export async function GET(req: NextRequest) {
     if (isConnected) {
       try {
         const budgetSummary = await XeroBudgetService.getBudgetVsActual(tenantId, startDate, endDate);
-        budgetYtd = budgetSummary.budget_ytd;
-        budgetActual = budgetSummary.actual_ytd;
-        budgetVariance = budgetSummary.variance;
+        budgetYtd = budgetSummary.budget_ytd ?? 0;
+        budgetActual = budgetSummary.actual_ytd ?? 0;
+        budgetVariance = budgetSummary.variance ?? 0;
       } catch (e) {
         console.error('Failed to parse budget for dashboard summary:', e);
       }

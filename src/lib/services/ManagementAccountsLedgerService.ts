@@ -48,23 +48,17 @@ function dateText(value: unknown): string | null {
   return Number.isFinite(parsed.getTime()) ? parsed.toISOString().slice(0, 10) : null;
 }
 
-async function refreshXeroOrganisation(tenantId: number, accessToken: string, xeroTenantId: string) {
+async function loadOrganisationMetadata(tenantId: number, accessToken: string, xeroTenantId: string) {
   try {
-    const [organisation] = await fetchXeroResource(accessToken, xeroTenantId, 'Organisations');
-    if (organisation) {
-      await db.savePostgresReport(tenantId, 'Organisation', organisation);
-      return await db.getPostgresReport(tenantId, 'Organisation');
-    }
+    return await getOrFetchManagementReport(tenantId, 'Organisation', async () => (await fetchXeroResource(accessToken, xeroTenantId, 'Organisations'))[0] ?? null);
   } catch (error) {
-    console.warn('Unable to refresh Xero organisation lock dates:', error);
+    console.warn('Unable to load Xero organisation metadata:', error);
   }
   return db.getPostgresReport(tenantId, 'Organisation');
 }
 
-async function refreshXeroAccounts(tenantId: number, accessToken: string, xeroTenantId: string) {
-  const accounts = await fetchXeroResource(accessToken, xeroTenantId, 'Accounts');
-  await db.savePostgresReport(tenantId, 'Accounts_metadata', accounts);
-  const storedAccounts = await db.getPostgresReport(tenantId, 'Accounts_metadata');
+async function loadAccountMetadata(tenantId: number, accessToken: string, xeroTenantId: string) {
+  const storedAccounts = await getOrFetchManagementReport(tenantId, 'Accounts_metadata', () => fetchXeroResource(accessToken, xeroTenantId, 'Accounts'));
   if (!Array.isArray(storedAccounts)) throw new Error('Xero accounts were not available after saving to PostgreSQL.');
   return storedAccounts;
 }
@@ -191,11 +185,11 @@ export async function listManagementLedger(tenantId: number, fromDate: string, t
   beforeStart.setUTCDate(beforeStart.getUTCDate() - 1);
   const openingDate = beforeStart.toISOString().slice(0, 10);
   const [accountsRaw, pnlReport, openingBs, closingBs, org, manualJournals] = await Promise.all([
-    refreshXeroAccounts(tenantId, token.accessToken, token.xeroTenantId),
+    loadAccountMetadata(tenantId, token.accessToken, token.xeroTenantId),
     getOrFetchManagementReport(tenantId, `ProfitAndLoss_${fromDate}_${toDate}`, () => fetchXeroReport(token.accessToken, token.xeroTenantId, 'ProfitAndLoss', `fromDate=${fromDate}&toDate=${toDate}`)),
     getOrFetchManagementReport(tenantId, `BalanceSheet_${openingDate}`, () => fetchXeroReport(token.accessToken, token.xeroTenantId, 'BalanceSheet', `date=${openingDate}`)),
     getOrFetchManagementReport(tenantId, `BalanceSheet_${toDate}`, () => fetchXeroReport(token.accessToken, token.xeroTenantId, 'BalanceSheet', `date=${toDate}`)),
-    refreshXeroOrganisation(tenantId, token.accessToken, token.xeroTenantId),
+    loadOrganisationMetadata(tenantId, token.accessToken, token.xeroTenantId),
     listManagementManualJournals(tenantId, fromDate, toDate),
   ]);
   await db.assertPostgres();
@@ -403,7 +397,7 @@ export async function loadLedgerAccountDetail(tenantId: number, accountId: strin
   await db.assertPostgres();
   const token = await getXeroAccessToken(tenantId);
   if (!token) throw new Error('Xero is not connected.');
-  const accountsRaw = await refreshXeroAccounts(tenantId, token.accessToken, token.xeroTenantId);
+  const accountsRaw = await loadAccountMetadata(tenantId, token.accessToken, token.xeroTenantId);
   const source = (Array.isArray(accountsRaw) ? accountsRaw.map(record) : []).find((item) => String(item.AccountID ?? '') === accountId && isActiveXeroAccount(item));
   if (!source) throw new Error('The requested account is not active in this Xero organisation.');
   const account: RecordValue = { ...source, AccountID: accountId };

@@ -100,10 +100,11 @@ export default function ContactsPage() {
     fetchContacts();
   }, [date]);
 
-  const currencyCode = data?.meta?.currency || 'GBP';
-  const currencySymbol = currencyCode === 'GBP' ? '£' : (currencyCode === 'EUR' ? '€' : '$');
+  const currencyCode = data?.meta?.currency;
+  const currencySymbol = currencyCode === 'GBP' ? '£' : (currencyCode === 'EUR' ? '€' : (currencyCode === 'INR' ? '₹' : currencyCode || ''));
 
-  const formatAmount = (val: number) => {
+  const formatAmount = (val: number | null | undefined) => {
+    if (val === null || val === undefined || !currencyCode) return '—';
     return `${currencySymbol}${val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
@@ -275,7 +276,7 @@ export default function ContactsPage() {
                       <td className="py-3.5 px-4 text-slate-600 font-medium">{c.email || '—'}</td>
                       <td className="py-3.5 px-4 text-slate-600 font-medium">{c.phone || '—'}</td>
                       <td className={cn("py-3.5 px-4 font-black text-right", c.outstanding > 0 ? "text-rose-600" : "text-slate-500")}>
-                        {c.outstanding > 0 ? formatAmount(c.outstanding) : '£0.00'}
+                        {formatAmount(c.outstanding)}
                       </td>
                       <td className="py-3.5 px-4 text-center">
                         <button className="p-1 text-slate-400 hover:text-slate-700 rounded hover:bg-slate-100 transition cursor-pointer">

@@ -45,6 +45,7 @@ interface PLItem {
 
 interface PLData {
   connected: boolean;
+  available?: boolean;
   summary: {
     revenue: number;
     turnover?: number;
@@ -264,9 +265,9 @@ export default function ProfitAndLossPage() {
           id: doc.id || `pay-${Date.now()}`,
           refNumber: doc.refNumber || 'Receive Money',
           contactName: doc.contactName || 'Client',
-          date: doc.date || '01 Apr 2026',
-          dueDate: doc.dueDate || doc.date || '01 Apr 2026',
-          paymentDate: doc.paymentDate || doc.date || '01 Apr 2026',
+          date: doc.date || 'Not available',
+          dueDate: doc.dueDate || doc.date || 'Not available',
+          paymentDate: doc.paymentDate || doc.date || 'Not available',
           desc: doc.desc || 'Payment Document',
           amount: doc.amount || 0,
           subTotal: doc.subTotal || doc.amount || 0,
@@ -355,7 +356,7 @@ export default function ProfitAndLossPage() {
     const cleanRef = selectedInvoice.reference.replace(/^Invoice\s+/i, '').trim();
 
     const invTotalVal = customAmount !== undefined ? customAmount : (selectedInvoice.amount || 0);
-    const pDate = customPaymentDate || selectedInvoice.date || '10 Apr 2026';
+    const pDate = customPaymentDate || selectedInvoice.date || 'Not available';
 
     setSelectedPayment({
       paymentDate: pDate,
@@ -394,8 +395,10 @@ export default function ProfitAndLossPage() {
     fetchProfitAndLoss();
   }, [fromDate, toDate]);
 
-  const currencyCode = data?.meta?.currency || 'GBP';
-  const getCurrencySymbol = (code: string) => {
+  const currencyCode = data?.meta?.currency || null;
+  const hasPnlData = data?.available === true;
+  const getCurrencySymbol = (code: string | null) => {
+    if (!code) return '';
     try {
       const parts = new Intl.NumberFormat('en-US', { style: 'currency', currency: code }).formatToParts(0);
       return parts.find(p => p.type === 'currency')?.value || '';
@@ -405,20 +408,20 @@ export default function ProfitAndLossPage() {
   };
   const currencySymbol = getCurrencySymbol(currencyCode);
 
-  const formatAmount = (val: number) => {
-    if (val === undefined || val === null || isNaN(val)) return `${currencySymbol}0.00`;
+  const formatAmount = (val: number | null | undefined) => {
+    if (!hasPnlData || val === undefined || val === null || isNaN(val)) return 'Not available';
     const absVal = Math.abs(val);
     const formatted = `${currencySymbol}${absVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     return val < 0 ? `(${formatted})` : formatted;
   };
 
-  const revenueVal = data?.summary?.revenue || 0;
-  const turnoverVal = data?.summary?.turnover || 0;
-  const otherIncomeVal = data?.summary?.otherIncome || 0;
-  const cogsVal = data?.summary?.cogs || 0;
-  const expensesVal = data?.summary?.expenses || 0;
-  const grossVal = data?.summary?.grossProfit || 0;
-  const netVal = data?.summary?.netProfit || 0;
+  const revenueVal = data?.summary?.revenue ?? 0;
+  const turnoverVal = data?.summary?.turnover ?? 0;
+  const otherIncomeVal = data?.summary?.otherIncome ?? 0;
+  const cogsVal = data?.summary?.cogs ?? 0;
+  const expensesVal = data?.summary?.expenses ?? 0;
+  const grossVal = data?.summary?.grossProfit ?? 0;
+  const netVal = data?.summary?.netProfit ?? 0;
 
   const turnoverList: PLItem[] = data?.income?.operating || [];
   const cogsList: PLItem[] = data?.cogs || [];
@@ -443,27 +446,29 @@ export default function ProfitAndLossPage() {
     );
   });
 
-  const trendLabels = (data && data.trends && data.trends.length > 0)
+  const trendLabels = (hasPnlData && data && data.trends && data.trends.length > 0)
     ? data.trends.map((t: any) => t.month) 
-    : ['Apr 2026', 'May 2026', 'Jun 2026', 'Jul 2026', 'Aug 2026', 'Sep 2026'];
+    : [];
     
-  const revenueTrendData = (data && data.trends && data.trends.length > 0)
+  const revenueTrendData = (hasPnlData && data && data.trends && data.trends.length > 0)
     ? data.trends.map((t: any) => t.revenue) 
-    : [2450000, 3100000, 3150000, 3250000, 3320000, revenueVal];
+    : [];
     
-  const grossProfitTrendData = [-120000, -140000, -160000, -170000, -180000, grossVal];
-  const expenseTrendData = (data && data.trends && data.trends.length > 0)
+  const grossProfitTrendData = (hasPnlData && data && data.trends && data.trends.length > 0)
+    ? data.trends.map((t: any) => t.grossProfit)
+    : [];
+  const expenseTrendData = (hasPnlData && data && data.trends && data.trends.length > 0)
     ? data.trends.map((t: any) => t.expenses) 
-    : [210000, 240000, 260000, 255000, 265000, expensesVal];
+    : [];
 
-  const netProfitTrendData = (data && data.trends && data.trends.length > 0)
+  const netProfitTrendData = (hasPnlData && data && data.trends && data.trends.length > 0)
     ? data.trends.map((t: any) => t.netProfit) 
-    : [-310000, -380000, -420000, -440000, -460000, netVal];
+    : [];
 
   // ECharts Multi-Line Chart
   const profitabilityTrendOption = {
     grid: { left: '3%', right: '4%', top: '15%', bottom: '10%', containLabel: true },
-    tooltip: { trigger: 'axis', confine: true, backgroundColor: '#0f172a', borderColor: '#334155', textStyle: { color: '#ffffff', fontSize: 11 } },
+    tooltip: { trigger: 'axis', confine: true, backgroundColor: '#0f172a', borderColor: '#334155', textStyle: { color: '#ffffff', fontSize: 11 }, valueFormatter: (value: number) => formatAmount(value) },
     legend: { data: ['Revenue', 'Gross Profit', 'Operating Expenses', 'Net Profit'], top: '0%', right: '4%', textStyle: { color: '#475569', fontSize: 10, fontWeight: 'bold' } },
     xAxis: {
       type: 'category',
@@ -516,7 +521,7 @@ export default function ProfitAndLossPage() {
     if (colKey === 'source') return item.source || '';
     if (colKey === 'desc') return item.description || item.desc || '';
     if (colKey === 'ref') return item.reference || item.ref || (item.source === 'Receive Money' ? 'Receive Money' : 'INV-001');
-    if (colKey === 'currency') return item.currency || 'GBP';
+    if (colKey === 'currency') return item.currency || 'Not available';
     if (colKey === 'debitGbp') return item.debit ? formatAmount(item.debit) : '-';
     if (colKey === 'creditGbp') return item.credit ? formatAmount(item.credit) : '-';
     if (colKey === 'runningBalance') return item.runningBalance !== undefined ? formatAmount(item.runningBalance) : '-';
@@ -565,7 +570,7 @@ export default function ProfitAndLossPage() {
         else if (colKey === 'source') { valA = a.source || ''; valB = b.source || ''; }
         else if (colKey === 'desc') { valA = a.description || a.desc || ''; valB = b.description || b.desc || ''; }
         else if (colKey === 'ref') { valA = a.reference || a.ref || ''; valB = b.reference || b.ref || ''; }
-        else if (colKey === 'currency') { valA = a.currency || 'GBP'; valB = b.currency || 'GBP'; }
+        else if (colKey === 'currency') { valA = a.currency || ''; valB = b.currency || ''; }
         else if (colKey === 'debitGbp') { valA = a.debit || 0; valB = b.debit || 0; }
         else if (colKey === 'creditGbp') { valA = a.credit || 0; valB = b.credit || 0; }
         else if (colKey === 'runningBalance') { valA = a.runningBalance || 0; valB = b.runningBalance || 0; }
@@ -2027,7 +2032,7 @@ export default function ProfitAndLossPage() {
                   <span className="text-[10px] font-extrabold uppercase tracking-widest opacity-80 block">TOTAL REVENUE & INCOME</span>
                   <span className="text-xs font-medium opacity-90">Combined Income Accounts</span>
                 </div>
-                <span className="text-xl font-black font-sans tabular-nums">{formatAmount(turnoverVal + otherIncomeVal)}</span>
+                <span className="text-xl font-black font-sans tabular-nums">{formatAmount(hasPnlData ? turnoverVal + otherIncomeVal : null)}</span>
               </div>
 
             </div>
@@ -2109,7 +2114,7 @@ export default function ProfitAndLossPage() {
                   <span className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 block">TOTAL OPERATING COSTS</span>
                   <span className="text-xs font-medium text-slate-300">COGS + Administrative Expenses</span>
                 </div>
-                <span className="text-xl font-black font-sans tabular-nums text-rose-400">{formatAmount(cogsVal + expensesVal)}</span>
+                <span className="text-xl font-black font-sans tabular-nums text-rose-400">{formatAmount(hasPnlData ? cogsVal + expensesVal : null)}</span>
               </div>
 
             </div>

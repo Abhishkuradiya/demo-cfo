@@ -47,15 +47,16 @@ interface TrialBalanceAccount {
 
 interface TBData {
   connected: boolean;
+  available?: boolean;
   summary: {
     totalDebit: number;
     totalCredit: number;
     difference: number;
     balanced: boolean;
-  };
+  } | null;
   accounts: TrialBalanceAccount[];
   meta: {
-    currency: string;
+    currency: string | null;
     calculatedAt: string;
   };
 }
@@ -122,8 +123,9 @@ export default function TrialBalancePage() {
     fetchTrialBalance();
   }, [date]);
 
-  const currencyCode = data?.meta?.currency || 'USD';
-  const getCurrencySymbol = (code: string) => {
+  const currencyCode = data?.meta?.currency || null;
+  const getCurrencySymbol = (code: string | null) => {
+    if (!code) return '';
     try {
       const parts = new Intl.NumberFormat('en-US', { style: 'currency', currency: code }).formatToParts(0);
       return parts.find(p => p.type === 'currency')?.value || '';
@@ -133,17 +135,19 @@ export default function TrialBalancePage() {
   };
   const currencySymbol = getCurrencySymbol(currencyCode);
 
-  const formatAmount = (val: number) => {
+  const formatAmount = (val: number | null | undefined) => {
+    if (val === null || val === undefined || !Number.isFinite(val)) return 'Not available';
     if (val === 0) return '-';
     const prefix = val < 0 ? '-' : '';
     const absVal = Math.abs(val);
-    return `${prefix}${currencySymbol}${absVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currencyCode}`;
+    return `${prefix}${currencySymbol}${absVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${currencyCode ? ` ${currencyCode}` : ''}`;
   };
 
-  const formatKpiAmount = (val: number) => {
+  const formatKpiAmount = (val: number | null | undefined) => {
+    if (val === null || val === undefined || !Number.isFinite(val)) return 'Not available';
     const prefix = val < 0 ? '-' : '';
     const absVal = Math.abs(val);
-    return `${prefix}${currencySymbol}${absVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currencyCode}`;
+    return `${prefix}${currencySymbol}${absVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${currencyCode ? ` ${currencyCode}` : ''}`;
   };
 
   const getFilteredAccounts = () => {
@@ -431,7 +435,7 @@ export default function TrialBalancePage() {
       )}
 
       {/* ─── Main dynamic view ─── */}
-      {!loading && !error && data && data.connected !== false && (
+      {!loading && !error && data && data.connected !== false && data.summary && (
         <>
           {/* Summary widgets cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 select-none">

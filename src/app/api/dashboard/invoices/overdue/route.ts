@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getTenantIdFromSession } from '@/lib/auth';
 import { db, parseXeroDate } from '@/lib/db';
 import { getXeroAccessToken, fetchXeroResource } from '@/lib/xero';
+import { getOrFetchManagementReport } from '@/lib/managementAccountsStorage';
 
 export async function GET(req: NextRequest) {
   const tenantId = await getTenantIdFromSession();
@@ -24,44 +25,28 @@ export async function GET(req: NextRequest) {
     const tokenInfo = await getXeroAccessToken(tenantId);
     const isConnected = !!tokenInfo;
 
-    let rawInvoicesList: any[] = [];
+    const orgReport = isConnected
+      ? await getOrFetchManagementReport(
+          tenantId,
+          'Organisation',
+          async () => (await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Organisations'))[0] ?? null,
+        )
+      : await db.getPostgresReport(tenantId, 'Organisation');
+    const currency = orgReport?.raw_data?.BaseCurrency || orgReport?.BaseCurrency || orgReport?.CurrencyCode || null;
 
-    // 1. Fetch from DB
-    const pgInvoices = await db.getInvoices(tenantId);
-    if (Array.isArray(pgInvoices) && pgInvoices.length > 0) {
-      rawInvoicesList = pgInvoices.filter((inv: any) => {
+    const storedInvoices = isConnected
+      ? await getOrFetchManagementReport(
+          tenantId,
+          'Invoices',
+          () => fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Invoices'),
+        )
+      : await db.getPostgresReport(tenantId, 'Invoices');
+    const rawInvoicesList: any[] = Array.isArray(storedInvoices)
+      ? storedInvoices.filter((inv: any) => {
         const t = (inv.Type || inv.type || '').toUpperCase();
         return t === 'ACCREC';
-      });
-    }
-
-    // 2. Report Fallback
-    if (rawInvoicesList.length === 0) {
-      const cachedReport = await db.getReport(tenantId, 'Invoices');
-      if (cachedReport && Array.isArray(cachedReport)) {
-        rawInvoicesList = cachedReport.filter((inv: any) => {
-          const t = (inv.Type || inv.type || '').toUpperCase();
-          return t === 'ACCREC';
-        });
-      }
-    }
-
-    // 3. Live Xero Fallback
-    if (rawInvoicesList.length === 0 && isConnected) {
-      try {
-        const xeroInvoices = await fetchXeroResource(
-          tokenInfo.accessToken,
-          tokenInfo.xeroTenantId,
-          'Invoices',
-          'where=Type=="ACCREC"'
-        );
-        if (Array.isArray(xeroInvoices) && xeroInvoices.length > 0) {
-          rawInvoicesList = xeroInvoices;
-        }
-      } catch (err: any) {
-        console.error('Failed to fetch Xero ACCREC invoices for overdue API:', err.message);
-      }
-    }
+      })
+      : [];
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -77,7 +62,7 @@ export async function GET(req: NextRequest) {
       const amountDue = inv.amount_due !== undefined && inv.amount_due !== null ? parseFloat(inv.amount_due) : (inv.AmountDue !== undefined && inv.AmountDue !== null ? parseFloat(inv.AmountDue) : Math.max(0, total - amountPaid));
 
       const status = (inv.status || inv.Status || 'AUTHORISED').toUpperCase();
-      const currency = inv.currency || inv.CurrencyCode || 'GBP';
+      const invoiceCurrency = inv.currency || inv.CurrencyCode || currency;
       const rawLineItems = inv.line_items || inv.LineItems || [];
 
       let subTotal = inv.sub_total ?? inv.SubTotal;
@@ -130,7 +115,7 @@ export async function GET(req: NextRequest) {
         amount_due: amountDue,
         amount_paid: amountPaid,
         status,
-        currency,
+        currency: invoiceCurrency,
         line_items: typeof rawLineItems === 'string' ? JSON.parse(rawLineItems) : (rawLineItems || []),
         attachments: inv.attachments || inv.Attachments || [],
         overdue_days: overdueDays
@@ -163,6 +148,22 @@ export async function GET(req: NextRequest) {
     const totalOverdueCount = overdueInvoices.length;
     const totalAccrecCount = allInvoices.length;
     const overduePercentage = totalAccrecCount > 0 ? (totalOverdueCount / totalAccrecCount) * 100 : 0;
+
+    // Historical display trend derived from the stored invoice balances and due dates.
+    // No synthetic/demo points are used.
+    const trendEndDate = toDate ? new Date(`${toDate}T23:59:59.999Z`) : new Date();
+    const trendLabels: string[] = [];
+    const trendValues: number[] = [];
+    for (let i = 29; i >= 0; i--) {
+      const day = new Date(trendEndDate);
+      day.setUTCDate(day.getUTCDate() - i);
+      trendLabels.push(day.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', timeZone: 'UTC' }));
+      const dayEnd = day.getTime();
+      trendValues.push(overdueInvoices.reduce((sum: number, inv: any) => {
+        const dueDate = parseXeroDate(inv.due_date);
+        return dueDate && dueDate.getTime() <= dayEnd ? sum + inv.amount_due : sum;
+      }, 0));
+    }
 
     const avgOverdueDays = totalOverdueCount > 0
       ? Math.round(overdueInvoices.reduce((sum: number, inv: any) => sum + inv.overdue_days, 0) / totalOverdueCount)
@@ -262,6 +263,8 @@ export async function GET(req: NextRequest) {
         uniqueCustomersCount: uniqueCustomers.length,
         overduePercentage
       },
+      meta: { currency, dataAvailable: storedInvoices !== null },
+      trend: { labels: trendLabels, values: trendValues },
       agingBuckets,
       topCustomers,
       customersList: uniqueCustomers,
@@ -286,7 +289,7 @@ export async function GET(req: NextRequest) {
         overdueDays: inv.overdue_days,
         status: inv.overdue_days > 0 && inv.amount_due > 0 ? 'OVERDUE' : (inv.status || 'PAID'),
         rawStatus: inv.status || 'AUTHORISED',
-        currency: inv.currency || 'GBP',
+        currency: inv.currency || currency,
         lineItems: inv.line_items || [],
         attachments: inv.attachments || []
       }))

@@ -96,7 +96,7 @@ interface TaxData {
   effective_rate: number;
   total_transactions: number;
   meta?: {
-    currency: string;
+    currency: string | null;
   };
 }
 
@@ -176,9 +176,10 @@ export default function TaxCenterPage() {
     window.print();
   };
 
-  const currencyCode = data?.meta?.currency || 'USD';
+  const currencyCode = data?.meta?.currency;
 
-  const formatCurrency = (val: number) => {
+  const formatCurrency = (val: number | null | undefined) => {
+    if (val === null || val === undefined || !currencyCode) return '—';
     const isNegative = val < 0;
     const absVal = Math.abs(val);
     const formatted = new Intl.NumberFormat('en-US', {
@@ -311,8 +312,8 @@ export default function TaxCenterPage() {
           show: true,
           position: 'center',
           formatter: () => {
-            const rate = data?.effective_rate ?? 8.42;
-            return `${rate.toFixed(2)}%\nEffective Rate`;
+            const rate = data?.effective_rate;
+            return rate === null || rate === undefined ? '—\nEffective Rate' : `${rate.toFixed(2)}%\nEffective Rate`;
           },
           textStyle: { fontSize: 11, fontWeight: 'bold', color: '#1e293b', lineHeight: 16 }
         },
@@ -333,13 +334,7 @@ export default function TaxCenterPage() {
 
   // Sparkline generator under overall metric values
   const renderCardSparkline = (color: string) => {
-    // Basic wave shape coordinates
-    const path = "M 5 25 Q 15 5, 25 22 T 45 10 T 65 25 T 85 8 T 105 20";
-    return (
-      <svg className="w-full h-8 overflow-visible mt-2" viewBox="0 0 110 30">
-        <path d={path} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" />
-      </svg>
-    );
+    return <div className="h-8 mt-2" aria-hidden="true" />;
   };
 
   return (
@@ -398,7 +393,7 @@ export default function TaxCenterPage() {
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Tax Collected</span>
                 <Tooltip text="Total GST/VAT collected on sales invoices during this period. This is the output tax you've charged to customers." />
               </div>
-              <h3 className="text-2xl font-black text-slate-800 tracking-tight mt-1">{loading ? '—' : formatCurrency(data?.tax_collected || 0)}</h3>
+              <h3 className="text-2xl font-black text-slate-800 tracking-tight mt-1">{loading ? '—' : formatCurrency(data?.tax_collected)}</h3>
               <span className="text-[9px] text-slate-400 font-medium">Total tax collected</span>
             </div>
             <div className="h-9 w-9 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center flex-shrink-0">
@@ -417,7 +412,7 @@ export default function TaxCenterPage() {
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Tax Paid</span>
                 <Tooltip text="Total GST/VAT paid on supplier bills and expenses during this period. This is the input tax you've paid to suppliers." />
               </div>
-              <h3 className="text-2xl font-black text-slate-800 tracking-tight mt-1">{loading ? '—' : formatCurrency(data?.tax_paid || 0)}</h3>
+              <h3 className="text-2xl font-black text-slate-800 tracking-tight mt-1">{loading ? '—' : formatCurrency(data?.tax_paid)}</h3>
               <span className="text-[9px] text-slate-400 font-medium">Total tax paid</span>
             </div>
             <div className="h-9 w-9 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center flex-shrink-0">
@@ -438,9 +433,9 @@ export default function TaxCenterPage() {
               </div>
               <h3 className={cn(
                 "text-2xl font-black tracking-tight mt-1",
-                (data?.tax_payable || 0) >= 0 ? "text-rose-500" : "text-emerald-600"
+                (data?.tax_payable ?? 0) >= 0 ? "text-rose-500" : "text-emerald-600"
               )}>
-                {loading ? '—' : formatCurrency(data?.tax_payable || 0)}
+                {loading ? '—' : formatCurrency(data?.tax_payable)}
               </h3>
               <span className="text-[9px] text-slate-400 font-medium">Net tax payable</span>
             </div>
@@ -904,7 +899,7 @@ export default function TaxCenterPage() {
           </div>
           <div className="space-y-1.5">
             <div className="flex items-center gap-1.75"><RefreshCw className="h-3.5 w-3.5 text-slate-400" /><span>Report Basis: Accrual</span></div>
-            <div className="flex items-center gap-1.75"><Database className="h-3.5 w-3.5 text-slate-400" /><span>Data Source: Xero Accounting</span></div>
+            <div className="flex items-center gap-1.75"><Database className="h-3.5 w-3.5 text-slate-400" /><span>Data Source: PostgreSQL (Xero-synced)</span></div>
           </div>
           <div className="space-y-1.5">
             <div className="flex items-center gap-1.75"><CheckCircle2 className="h-3.5 w-3.5 text-slate-400" /><span>Currency: {currencyCode}</span></div>

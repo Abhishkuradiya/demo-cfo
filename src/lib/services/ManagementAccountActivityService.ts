@@ -76,7 +76,7 @@ function accountMatches(target: ManagementAccountActivityTarget, line: Record<st
   return lineName.toLocaleLowerCase() === target.name.toLocaleLowerCase();
 }
 
-function buildActivities(targets: ManagementAccountActivityTarget[], journals: Record<string, unknown>[], manualJournals: Record<string, unknown>[], fromDate: string, toDate: string) {
+function buildActivities(targets: ManagementAccountActivityTarget[], journals: Record<string, unknown>[], manualJournals: Record<string, unknown>[], fromDate: string, toDate: string, activeAccountKeys?: Set<string>) {
   const output = new Map<string, ManagementAccountActivity>();
   const manualIdsInSystemJournals = new Set(journals.map((journal) => String(journal.SourceID ?? '')).filter(Boolean));
   for (const target of targets) {
@@ -96,7 +96,7 @@ function buildActivities(targets: ManagementAccountActivityTarget[], journals: R
           debit: signedAmount > 0 ? signedAmount : 0,
           credit: signedAmount < 0 ? Math.abs(signedAmount) : 0,
         };
-      }).filter((line) => line.debit > 0 || line.credit > 0);
+      }).filter((line) => (line.debit > 0 || line.credit > 0) && (!activeAccountKeys || activeAccountKeys.has(line.accountId.toLowerCase()) || activeAccountKeys.has(`code:${line.accountCode}`) || activeAccountKeys.has(`name:${line.accountName.toLocaleLowerCase()}`)));
       const targetLines = journalLines.filter((line) => accountMatches(target, {
         AccountID: line.accountId, AccountCode: line.accountCode, AccountName: line.accountName,
       }));
@@ -134,9 +134,22 @@ function buildActivities(targets: ManagementAccountActivityTarget[], journals: R
 
 export async function loadManagementAccountActivities(tenantId: number, targets: ManagementAccountActivityTarget[], fromDate: string, toDate: string) {
   if (targets.length === 0) return new Map<string, ManagementAccountActivity>();
+  const accountMetadata = await db.getPostgresReport(tenantId, 'Accounts_metadata');
+  const activeAccountKeys = new Set<string>();
+  if (Array.isArray(accountMetadata)) {
+    for (const account of accountMetadata) {
+      if (String(account.Status ?? account.status ?? '').trim().toUpperCase() !== 'ACTIVE') continue;
+      const id = String(account.AccountID ?? '').trim().toLowerCase();
+      const code = String(account.Code ?? '').trim();
+      const name = String(account.Name ?? '').trim().toLocaleLowerCase();
+      if (id) activeAccountKeys.add(id);
+      if (code) activeAccountKeys.add(`code:${code}`);
+      if (name) activeAccountKeys.add(`name:${name}`);
+    }
+  }
   let journals = records(await db.getPostgresReport(tenantId, 'Journals'));
   let manualJournals = records(await db.getPostgresReport(tenantId, 'ManualJournals'));
-  let activities = buildActivities(targets, journals, manualJournals, fromDate, toDate);
+  let activities = buildActivities(targets, journals, manualJournals, fromDate, toDate, activeAccountKeys.size ? activeAccountKeys : undefined);
 
   // Refresh the journal feed while building the multi-account report, so opening
   // an account later can use already-persisted activity without a second fetch.
@@ -166,7 +179,7 @@ export async function loadManagementAccountActivities(tenantId: number, targets:
       }
       journals = records(await db.getPostgresReport(tenantId, 'Journals'));
       manualJournals = records(await db.getPostgresReport(tenantId, 'ManualJournals'));
-      activities = buildActivities(targets, journals, manualJournals, fromDate, toDate);
+      activities = buildActivities(targets, journals, manualJournals, fromDate, toDate, activeAccountKeys.size ? activeAccountKeys : undefined);
     } catch (error) {
       console.warn('Unable to refresh Xero general ledger for Management Accounts:', error);
       refreshWarning = error instanceof Error ? error.message : 'Xero journal activity could not be refreshed.';

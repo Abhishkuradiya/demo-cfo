@@ -36,7 +36,7 @@ interface SummaryData {
   totalSpent: number;
   avgSpendPerVendor: number;
   totalOutstandingPayables: number;
-  paidOnTimePercentage: number;
+  paidOnTimePercentage: number | null;
 }
 
 interface VendorRow {
@@ -45,7 +45,7 @@ interface VendorRow {
   spent: number;
   pctOfTotal: number;
   outstanding: number;
-  paidOnTime: number;
+  paidOnTime: number | null;
   status: string;
   avatar: string;
 }
@@ -74,6 +74,7 @@ export default function VendorsPage() {
   const [topVendors, setTopVendors] = useState<VendorRow[]>([]);
   const [topCategories, setTopCategories] = useState<CategoryItem[]>([]);
   const [vendors, setVendors] = useState<VendorRow[]>([]);
+  const [currencyCode, setCurrencyCode] = useState<string | null>(null);
 
   // Search & Filter state
   const [search, setSearch] = useState('');
@@ -90,8 +91,8 @@ export default function VendorsPage() {
   const defaultFrom = searchParams.get('from_date') || '2026-04-01';
   const defaultTo = searchParams.get('to_date') || '2026-09-30';
 
-  const [fromDate, setFromDate] = useState(defaultFrom);
-  const [toDate, setToDate] = useState(defaultTo);
+  const fromDate = searchParams.get('from_date') || defaultFrom;
+  const toDate = searchParams.get('to_date') || defaultTo;
 
   const barChartRef = useRef<HTMLDivElement>(null);
   const donutChartRef = useRef<HTMLDivElement>(null);
@@ -118,6 +119,7 @@ export default function VendorsPage() {
         setTopVendors(data.topVendors || []);
         setTopCategories(data.topCategories || []);
         setVendors(data.vendors || []);
+        setCurrencyCode(data.meta?.currency || null);
 
         setTotalPages(data.pagination.totalPages);
         setTotalRecords(data.pagination.totalRecords);
@@ -161,7 +163,7 @@ export default function VendorsPage() {
         textStyle: { color: '#ffffff', fontSize: 11 },
         formatter: (params: any) => {
           const item = params[0];
-          const formatted = new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' }).format(item.value);
+          const formatted = currencyCode ? new Intl.NumberFormat('en-GB', { style: 'currency', currency: currencyCode, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(item.value) : '—';
           return `<div class="font-bold text-xs">${item.name}</div><div class="text-xs text-orange-400 font-semibold mt-0.5">Amount Spent: ${formatted}</div>`;
         }
       },
@@ -266,8 +268,9 @@ export default function VendorsPage() {
     };
   }, [topVendors, loading]);
 
-  const formatCurrency = (val: number) => {
-    return new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(val);
+  const formatCurrency = (val: number | null | undefined) => {
+    if (val === null || val === undefined || !currencyCode) return '—';
+    return new Intl.NumberFormat('en-GB', { style: 'currency', currency: currencyCode, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val);
   };
 
   const colorsList = ['#f97316', '#8b5cf6', '#eab308', '#ec4899', '#3b82f6'];
@@ -300,26 +303,6 @@ export default function VendorsPage() {
 
           {/* Action Controls */}
           <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-            <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-1.5 shadow-2xs text-[11.5px] font-semibold text-slate-700">
-              <Calendar className="h-4 w-4 text-orange-500 shrink-0" />
-              <input
-                type="date"
-                value={fromDate}
-                onChange={(e) => setFromDate(e.target.value)}
-                className="font-semibold text-slate-700 outline-none bg-transparent cursor-pointer"
-              />
-              <span className="text-slate-400 text-xs">-</span>
-              <input
-                type="date"
-                value={toDate}
-                onChange={(e) => setToDate(e.target.value)}
-                className="font-semibold text-slate-700 outline-none bg-transparent cursor-pointer"
-              />
-              <span className="ml-1 text-[9.5px] font-extrabold text-orange-600 bg-orange-50 border border-orange-200 px-1.5 py-0.5 rounded">
-                MTD
-              </span>
-            </div>
-
             <button
               onClick={() => fetchData()}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-lg shadow-2xs text-[11.5px] font-bold text-slate-700 hover:bg-slate-50 transition cursor-pointer"
@@ -580,13 +563,13 @@ export default function VendorsPage() {
                           <td className="py-3 px-3.5 font-black text-slate-900 text-right">{formatCurrency(row.spent)}</td>
                           <td className="py-3 px-3.5 font-extrabold text-slate-700 text-right">{row.pctOfTotal}%</td>
                           <td className={cn("py-3 px-3.5 font-bold text-right", row.outstanding > 0 ? "text-rose-600" : "text-slate-500")}>
-                            {row.outstanding > 0 ? formatCurrency(row.outstanding) : '£0'}
+                            {formatCurrency(row.outstanding)}
                           </td>
                           <td className="py-3 px-3.5">
                             <div className="space-y-1">
-                              <span className="font-bold text-slate-800 block text-[10px]">{row.paidOnTime}%</span>
+                              <span className="font-bold text-slate-800 block text-[10px]">{row.paidOnTime === null ? '—' : `${row.paidOnTime}%`}</span>
                               <div className="h-1.5 w-24 bg-slate-100 rounded-full overflow-hidden">
-                                <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${row.paidOnTime}%` }} />
+                                <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${row.paidOnTime ?? 0}%` }} />
                               </div>
                             </div>
                           </td>
@@ -711,7 +694,7 @@ export default function VendorsPage() {
                   <div>
                     <h5 className="font-extrabold text-emerald-950">On-Time Payments</h5>
                     <p className="text-emerald-800 mt-0.5 leading-snug">
-                      {summary.paidOnTimePercentage > 0
+                      {summary.paidOnTimePercentage !== null && summary.paidOnTimePercentage > 0
                         ? `Paid on time rate is currently ${summary.paidOnTimePercentage}%.`
                         : 'No payment performance data available.'}
                     </p>

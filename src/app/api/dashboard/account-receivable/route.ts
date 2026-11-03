@@ -3,6 +3,7 @@ import { db, parseXeroDate } from '@/lib/db';
 import { getTenantIdFromSession } from '@/lib/auth';
 import { getXeroAccessToken, fetchXeroResource } from '@/lib/xero';
 import { resolveBrandingTheme } from '@/lib/constants/brandingThemes';
+import { getOrFetchManagementReport } from '@/lib/managementAccountsStorage';
 
 export async function GET(req: NextRequest) {
   const tenantId = await getTenantIdFromSession();
@@ -21,45 +22,29 @@ export async function GET(req: NextRequest) {
     const isConnected = !!tokenInfo;
 
     // 1. Fetch Base Currency
-    let orgReport = await db.getReport(tenantId, 'Organisation');
-    if (!orgReport && isConnected) {
-      try {
-        const rawOrg = await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Organisation');
-        if (rawOrg && rawOrg.length > 0) {
-          orgReport = rawOrg[0];
-          await db.saveReport(tenantId, 'Organisation', orgReport);
-        }
-      } catch (err: any) {
-        console.error('Failed to sync Organisation report:', err.message);
-      }
-    }
-    const currency = orgReport?.raw_data?.BaseCurrency || orgReport?.BaseCurrency || orgReport?.CurrencyCode || 'GBP';
+    const orgReport = isConnected
+      ? await getOrFetchManagementReport(
+          tenantId,
+          'Organisation',
+          async () => (await fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Organisations'))[0] ?? null,
+        )
+      : await db.getPostgresReport(tenantId, 'Organisation');
+    const currency = orgReport?.raw_data?.BaseCurrency || orgReport?.BaseCurrency || orgReport?.CurrencyCode || null;
 
     // 2. DB-First Fetch: Avoid Xero Rate Limit by checking PostgreSQL first
-    let rawInvoicesList: any[] = [];
-    const pgInvoices = await db.getInvoices(tenantId);
-    if (Array.isArray(pgInvoices) && pgInvoices.length > 0) {
-      rawInvoicesList = pgInvoices.filter((inv: any) => {
+    const storedInvoices = isConnected
+      ? await getOrFetchManagementReport(
+          tenantId,
+          'Invoices',
+          () => fetchXeroResource(tokenInfo.accessToken, tokenInfo.xeroTenantId, 'Invoices'),
+        )
+      : await db.getPostgresReport(tenantId, 'Invoices');
+    const rawInvoicesList: any[] = Array.isArray(storedInvoices)
+      ? storedInvoices.filter((inv: any) => {
         const t = (inv.Type || inv.type || '').toUpperCase();
         return t === 'ACCREC' || t === 'ACCRECCRED';
-      });
-    }
-
-    if (rawInvoicesList.length === 0 && isConnected) {
-      try {
-        const xeroInvoices = await fetchXeroResource(
-          tokenInfo.accessToken,
-          tokenInfo.xeroTenantId,
-          'Invoices',
-          'where=(Type=="ACCREC" OR Type=="ACCRECCRED")'
-        );
-        if (Array.isArray(xeroInvoices) && xeroInvoices.length > 0) {
-          rawInvoicesList = xeroInvoices;
-        }
-      } catch (err: any) {
-        console.error('Failed to fetch Xero ACCREC invoices & credit notes:', err.message);
-      }
-    }
+      })
+      : [];
 
     const asOnDate = new Date(asOnDateStr);
     asOnDate.setHours(23, 59, 59, 999);
@@ -205,10 +190,10 @@ export async function GET(req: NextRequest) {
       }
     });
 
-    const getPct = (val: number) => totalReceivables > 0 ? ((val / totalReceivables) * 100).toFixed(2) : '0.00';
+    const getPct = (val: number) => totalReceivables > 0 ? ((val / totalReceivables) * 100).toFixed(2) : null;
 
     const kpiSummary = {
-      totalReceivables: { amount: totalReceivables, pct: '100.00' },
+      totalReceivables: { amount: totalReceivables, pct: totalReceivables > 0 ? '100.00' : null },
       currentNotDue: { amount: currentNotDue, pct: getPct(currentNotDue) },
       days1to30: { amount: days1to30, pct: getPct(days1to30) },
       days31to60: { amount: days31to60, pct: getPct(days31to60) },
@@ -330,27 +315,29 @@ export async function GET(req: NextRequest) {
     // Collection Efficiency & Quick Insights
     const totalIssued = processedInvoices.reduce((acc, inv) => acc + inv.total, 0);
     const totalCollected = processedInvoices.reduce((acc, inv) => acc + inv.amountPaid, 0);
-    const collectionRate = totalIssued > 0 ? parseFloat(((totalCollected / totalIssued) * 100).toFixed(1)) : 78.4;
+    const collectionRate = totalIssued > 0 ? parseFloat(((totalCollected / totalIssued) * 100).toFixed(1)) : null;
 
     const quickInsights = [
       {
         type: 'success',
         title: 'Receivables due within 30 days',
         amount: days1to30,
-        text: `${getPct(days1to30)}% of receivables are due within 30 days.`
+        text: getPct(days1to30) === null ? 'Not available' : `${getPct(days1to30)}% of receivables are due within 30 days.`
       },
       {
         type: 'warning',
         title: 'Overdue Invoices',
         count: overdueInvoicesCount,
         amount: totalReceivables - currentNotDue,
-        text: `${overdueInvoicesCount} Invoices (${currency} ${(totalReceivables - currentNotDue).toLocaleString('en-GB', { minimumFractionDigits: 2 })}) are overdue and require attention.`
+        text: currency === null
+          ? 'Not available'
+          : `${overdueInvoicesCount} Invoices (${currency} ${(totalReceivables - currentNotDue).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}) are overdue and require attention.`
       },
       {
         type: 'danger',
         title: 'High Risk (90+ Days)',
         amount: days90Plus,
-        text: `${getPct(days90Plus)}% of receivables are 90+ days overdue.`
+        text: getPct(days90Plus) === null ? 'Not available' : `${getPct(days90Plus)}% of receivables are 90+ days overdue.`
       }
     ];
 
@@ -371,7 +358,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       asOnDate: asOnDateStr,
-      meta: { currency, totalActiveInvoices: activeReceivables.length },
+      meta: { currency, totalActiveInvoices: activeReceivables.length, dataAvailable: storedInvoices !== null },
       summary: kpiSummary,
       ageingDistribution: [
         { key: 'current', label: 'Current (Not Due)', amount: currentNotDue, pct: getPct(currentNotDue), color: '#2563eb' },
@@ -390,8 +377,8 @@ export async function GET(req: NextRequest) {
       allReceivableInvoices: activeReceivables,
       collectionEfficiency: {
         rate: collectionRate,
-        status: collectionRate >= 75 ? 'Good' : collectionRate >= 50 ? 'Fair' : 'Needs Attention',
-        vsLastMonth: '+5.6%'
+        status: collectionRate === null ? 'Not available' : collectionRate >= 75 ? 'Good' : collectionRate >= 50 ? 'Fair' : 'Needs Attention',
+        vsLastMonth: null
       },
       quickInsights
     });

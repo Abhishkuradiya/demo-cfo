@@ -29,10 +29,10 @@ const ReactECharts = dynamic(() => import('echarts-for-react'), { ssr: false });
 
 interface BudgetVsActualCategory {
   category: string;
-  budget: number;
-  actual: number;
-  variance: number;
-  variance_pct: number;
+  budget: number | null;
+  actual: number | null;
+  variance: number | null;
+  variance_pct: number | null;
 }
 
 interface MonthlyTrend {
@@ -44,15 +44,15 @@ interface MonthlyTrend {
 
 interface BudgetData {
   connected?: boolean;
-  budget_ytd: number;
-  actual_ytd: number;
-  variance: number;
-  variance_pct: number;
+  budget_ytd: number | null;
+  actual_ytd: number | null;
+  variance: number | null;
+  variance_pct: number | null;
   last_synced: string;
   categories: BudgetVsActualCategory[];
   monthly_trends: MonthlyTrend[];
   meta?: {
-    currency: string;
+    currency: string | null;
   };
 }
 
@@ -123,9 +123,10 @@ export default function BudgetActualPage() {
     window.print();
   };
 
-  const currencyCode = data?.meta?.currency || 'USD';
+  const currencyCode = data?.meta?.currency;
 
-  const formatCurrency = (val: number) => {
+  const formatCurrency = (val: number | null | undefined) => {
+    if (val === null || val === undefined || !currencyCode) return '—';
     const isNegative = val < 0;
     const absVal = Math.abs(val);
     const formatted = new Intl.NumberFormat('en-US', {
@@ -137,7 +138,7 @@ export default function BudgetActualPage() {
   };
 
   const formatPercent = (val: number | undefined | null) => {
-    if (val === undefined || val === null || isNaN(val)) return '0.00%';
+    if (val === undefined || val === null || isNaN(val)) return '—';
     return `${val >= 0 ? '' : ''}${val.toFixed(2)}%`;
   };
 
@@ -151,13 +152,25 @@ export default function BudgetActualPage() {
   };
 
   const filteredCategories = getFilteredCategories();
-  const totalRow = data?.categories?.find(cat => cat.category === 'Total') || {
-    category: 'Total',
-    budget: 0,
-    actual: 22973.18,
-    variance: -22973.18,
-    variance_pct: -100
+  const totalRow = data?.categories?.find(cat => cat.category === 'Total') ?? {
+    category: 'Total', budget: null, actual: null, variance: null, variance_pct: null,
   };
+
+  // The stored Xero report is period-level when no monthly breakdown exists.
+  // Render that real period aggregate so the chart remains useful without
+  // inventing month-by-month values.
+  const chartTrends = data?.monthly_trends?.length
+    ? data.monthly_trends
+    : data?.budget_ytd !== null && data?.budget_ytd !== undefined
+      && data?.actual_ytd !== null && data?.actual_ytd !== undefined
+      && data?.variance !== null && data?.variance !== undefined
+      ? [{
+          month: 'Selected period',
+          budget: data.budget_ytd,
+          actual: data.actual_ytd,
+          variance: data.variance,
+        }]
+      : [];
 
   // ECharts: Budget vs Actual Overview Line Chart
   const overviewOption = {
@@ -175,7 +188,7 @@ export default function BudgetActualPage() {
     xAxis: {
       type: 'category',
       boundaryGap: false,
-      data: data?.monthly_trends?.map(t => t.month) || ['Apr 2026', 'May 2026', 'Jun 2026', 'Jul 2026', 'Aug 2026'],
+      data: chartTrends.map(t => t.month),
       axisLine: { lineStyle: { color: '#cbd5e1' } },
       axisLabel: { color: '#64748b', fontSize: 10 }
     },
@@ -200,7 +213,7 @@ export default function BudgetActualPage() {
         showSymbol: true,
         lineStyle: { width: 2, type: 'dashed', color: '#10b981' },
         itemStyle: { color: '#10b981' },
-        data: data?.monthly_trends?.map(t => t.budget) || [0, 0, 0, 0, 0]
+        data: chartTrends.map(t => t.budget)
       },
       {
         name: 'Actual',
@@ -219,7 +232,7 @@ export default function BudgetActualPage() {
         },
         lineStyle: { width: 3, color: '#0064eb' },
         itemStyle: { color: '#0064eb' },
-        data: data?.monthly_trends?.map(t => t.actual) || [3450, 10450, 15000, 21700, 19700]
+        data: chartTrends.map(t => t.actual)
       },
       {
         name: 'Variance',
@@ -228,7 +241,7 @@ export default function BudgetActualPage() {
         showSymbol: true,
         lineStyle: { width: 2, type: 'dotted', color: '#ef4444' },
         itemStyle: { color: '#ef4444' },
-        data: data?.monthly_trends?.map(t => t.variance) || [-3450, -10450, -15000, -21700, -19700]
+        data: chartTrends.map(t => t.variance)
       }
     ]
   };
@@ -249,7 +262,7 @@ export default function BudgetActualPage() {
     return data.categories
       .filter(c => c.category !== 'Total')
       .map(c => {
-        const val = Math.abs(c.actual);
+        const val = Math.abs(c.actual || 0);
         return {
           name: c.category,
           value: val > 0 ? val : 0,
@@ -284,8 +297,10 @@ export default function BudgetActualPage() {
           show: true,
           position: 'center',
           formatter: () => {
-            const sum = data?.actual_ytd || 0;
-            return `$${sum.toLocaleString(undefined, { maximumFractionDigits: 0 })}\nActual Total`;
+            const sum = data?.actual_ytd;
+            return sum === null || sum === undefined || !currencyCode
+              ? '—\nActual Total'
+              : new Intl.NumberFormat('en-US', { style: 'currency', currency: currencyCode, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(sum) + '\nActual Total';
           },
           textStyle: { fontSize: 12, fontWeight: 'bold', color: '#1e293b', lineHeight: 18 }
         },
@@ -301,7 +316,7 @@ export default function BudgetActualPage() {
     grid: { left: '3%', right: '3%', bottom: '5%', top: '8%', containLabel: true },
     xAxis: {
       type: 'category',
-      data: data?.monthly_trends?.map(t => t.month) || ['Apr 2026', 'May 2026', 'Jun 2026', 'Jul 2026', 'Aug 2026'],
+      data: chartTrends.map(t => t.month),
       axisLine: { lineStyle: { color: '#cbd5e1' } },
       axisLabel: { color: '#64748b', fontSize: 10 }
     },
@@ -321,39 +336,14 @@ export default function BudgetActualPage() {
           },
           borderRadius: 4
         },
-        data: data?.monthly_trends?.map(t => t.variance) || [-3450, -10450, -15000, -21700, -19700]
+        data: chartTrends.map(t => t.variance)
       }
     ]
   };
 
   // Render Mini SVGs as sparklines in table
   const renderSparkline = (category: string) => {
-    // Generate mini sparklines based on category
-    let path = "M0,15 L20,15 L40,15 L60,15 L80,15"; // fallback straight line
-    let strokeColor = "#cbd5e1";
-
-    if (category === 'Income') {
-      path = "M0,25 C15,20 30,10 45,5 C60,12 70,8 80,2";
-      strokeColor = "#0064eb";
-    } else if (category === 'Cost of Goods Sold') {
-      path = "M0,2 C15,10 30,8 45,18 C60,12 70,22 80,25";
-      strokeColor = "#f59e0b";
-    } else if (category === 'Operating Expenses') {
-      path = "M0,5 C15,8 30,15 45,22 C60,15 70,18 80,20";
-      strokeColor = "#ef4444";
-    } else if (category === 'Other Income') {
-      path = "M0,25 L20,20 L40,22 L60,15 L80,10";
-      strokeColor = "#10b981";
-    } else if (category === 'Other Expenses') {
-      path = "M0,10 L20,12 L40,18 L60,25 L80,25";
-      strokeColor = "#a855f7";
-    }
-
-    return (
-      <svg className="w-20 h-6 overflow-visible" viewBox="0 0 80 30">
-        <path d={path} fill="none" stroke={strokeColor} strokeWidth="1.8" strokeLinecap="round" />
-      </svg>
-    );
+    return <span className="text-slate-400">—</span>;
   };
 
   return (
@@ -431,7 +421,7 @@ export default function BudgetActualPage() {
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Budget (YTD)</span>
                   <Tooltip text="Your projected target budget set in Xero for this period." />
                 </div>
-                <h3 className="text-2xl font-black text-slate-800 tracking-tight mt-1">{formatCurrency(data?.budget_ytd || 0)}</h3>
+                <h3 className="text-2xl font-black text-slate-800 tracking-tight mt-1">{formatCurrency(data?.budget_ytd)}</h3>
                 <span className="text-[9px] text-slate-400 font-medium">Set budget for the period</span>
               </div>
               <div className="h-9 w-9 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center flex-shrink-0">
@@ -457,7 +447,7 @@ export default function BudgetActualPage() {
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Actual (YTD)</span>
                   <Tooltip text="Actual accumulated cash flows or revenue/expenses recorded in Xero during this period." />
                 </div>
-                <h3 className="text-2xl font-black text-slate-800 tracking-tight mt-1">{formatCurrency(data?.actual_ytd || 0)}</h3>
+                <h3 className="text-2xl font-black text-slate-800 tracking-tight mt-1">{formatCurrency(data?.actual_ytd)}</h3>
                 <span className="text-[9px] text-slate-400 font-medium">Actual performance</span>
               </div>
               <div className="h-9 w-9 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
@@ -487,7 +477,7 @@ export default function BudgetActualPage() {
                   "text-2xl font-black tracking-tight mt-1",
                   (data?.variance || 0) >= 0 ? "text-emerald-600" : "text-rose-500"
                 )}>
-                  {formatCurrency(data?.variance || 0)}
+                  {formatCurrency(data?.variance)}
                 </h3>
                 <span className="text-[9px] text-slate-400 font-medium">
                   {(data?.variance || 0) >= 0 ? 'Above/Ahead of budget' : 'Under budget'}
@@ -708,11 +698,11 @@ export default function BudgetActualPage() {
                 const variancePct = data.variance_pct;
                 const budgetYtd = data.budget_ytd;
 
-                let gaugeValueText = `${variancePct >= 0 ? '+' : ''}${variancePct.toFixed(1)}%`;
-                let gaugeStatusText = variancePct >= 0 ? 'Ahead of Budget' : 'Below Budget';
-                let gaugeDescText = variancePct >= 0 ? 'Performance is exceeding target budget.' : 'Performance is currently below target budget.';
-                let strokeColor = variancePct >= 0 ? '#10b981' : '#ef4444';
-                let textColorClass = variancePct >= 0 ? 'text-emerald-600' : 'text-rose-500';
+                let gaugeValueText = variancePct === null || variancePct === undefined ? '—' : `${variancePct >= 0 ? '+' : ''}${variancePct.toFixed(1)}%`;
+                let gaugeStatusText = variancePct === null || variancePct === undefined ? 'Not available' : variancePct >= 0 ? 'Ahead of Budget' : 'Below Budget';
+                let gaugeDescText = variancePct === null || variancePct === undefined ? 'Variance is not available for this period.' : variancePct >= 0 ? 'Performance is exceeding target budget.' : 'Performance is currently below target budget.';
+                let strokeColor = variancePct === null || variancePct === undefined ? '#cbd5e1' : variancePct >= 0 ? '#10b981' : '#ef4444';
+                let textColorClass = variancePct === null || variancePct === undefined ? 'text-slate-450' : variancePct >= 0 ? 'text-emerald-600' : 'text-rose-500';
 
                 if (budgetYtd === 0) {
                   gaugeValueText = 'N/A';
@@ -723,8 +713,8 @@ export default function BudgetActualPage() {
                 }
 
                 // Calculate dash offset (126 is empty, 0 is fully filled)
-                const absVariance = Math.min(100, Math.abs(variancePct));
-                const dashOffset = budgetYtd === 0 ? 126 : 126 - (126 * absVariance / 100);
+                const absVariance = Math.min(100, Math.abs(variancePct ?? 0));
+                const dashOffset = !budgetYtd ? 126 : 126 - (126 * absVariance / 100);
 
                 return (
                   <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-sm text-center flex-1 flex flex-col justify-between items-center">
@@ -815,13 +805,13 @@ export default function BudgetActualPage() {
                       <td className="py-3 px-3 text-right text-slate-800 font-bold">{formatCurrency(cat.actual)}</td>
                       <td className={cn(
                         "py-3 px-3 text-right font-bold",
-                        cat.variance >= 0 ? "text-emerald-600" : "text-rose-500"
+                        (cat.variance ?? 0) >= 0 ? "text-emerald-600" : "text-rose-500"
                       )}>
                         {formatCurrency(cat.variance)}
                       </td>
                       <td className={cn(
                         "py-3 px-3 text-right font-bold",
-                        cat.variance >= 0 ? "text-emerald-600" : "text-rose-500"
+                        (cat.variance ?? 0) >= 0 ? "text-emerald-600" : "text-rose-500"
                       )}>
                         {formatPercent(cat.variance_pct)}
                       </td>
@@ -846,13 +836,13 @@ export default function BudgetActualPage() {
                     <td className="py-3 px-3 text-right">{formatCurrency(totalRow.actual)}</td>
                     <td className={cn(
                       "py-3 px-3 text-right border-double border-b-4 border-slate-400 font-bold",
-                      totalRow.variance >= 0 ? "text-emerald-600" : "text-rose-500"
+                      (totalRow.variance ?? 0) >= 0 ? "text-emerald-600" : "text-rose-500"
                     )}>
                       {formatCurrency(totalRow.variance)}
                     </td>
                     <td className={cn(
                       "py-3 px-3 text-right border-double border-b-4 border-slate-400 font-bold",
-                      totalRow.variance >= 0 ? "text-emerald-600" : "text-rose-500"
+                      (totalRow.variance ?? 0) >= 0 ? "text-emerald-600" : "text-rose-500"
                     )}>
                       {formatPercent(totalRow.variance_pct)}
                     </td>
@@ -882,14 +872,14 @@ export default function BudgetActualPage() {
               <div className="flex-1 flex flex-col justify-center gap-3">
                 {data.categories
                   .filter(c => c.category !== 'Total')
-                  .sort((a, b) => a.variance - b.variance) // Sort by most negative variance
+                  .sort((a, b) => (a.variance ?? 0) - (b.variance ?? 0)) // Sort by most negative variance
                   .slice(0, 5)
                   .map((c, i) => (
                     <div key={i} className="flex justify-between items-center py-2 px-3 bg-slate-50 border border-slate-100 rounded-lg text-xs">
                       <span className="text-slate-600 font-bold">{c.category}</span>
                       <span className={cn(
                         "font-extrabold font-mono",
-                        c.variance >= 0 ? "text-emerald-600" : "text-rose-500"
+                        (c.variance ?? 0) >= 0 ? "text-emerald-600" : "text-rose-500"
                       )}>
                         {formatCurrency(c.variance)}
                       </span>
@@ -942,7 +932,7 @@ export default function BudgetActualPage() {
           </div>
           <div className="space-y-1.5">
             <div className="flex items-center gap-1.75"><RefreshCw className="h-3.5 w-3.5 text-slate-400" /><span>Report Basis: Accrual</span></div>
-            <div className="flex items-center gap-1.75"><Database className="h-3.5 w-3.5 text-slate-400" /><span>Data Source: Xero Accounting API</span></div>
+            <div className="flex items-center gap-1.75"><Database className="h-3.5 w-3.5 text-slate-400" /><span>Data Source: PostgreSQL (Xero-synced)</span></div>
           </div>
           <div className="space-y-1.5">
             <div className="flex items-center gap-1.75"><CheckCircle2 className="h-3.5 w-3.5 text-slate-400" /><span>Currency: {currencyCode}</span></div>

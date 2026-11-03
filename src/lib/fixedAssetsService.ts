@@ -224,11 +224,6 @@ export const XeroFixedAssetsService = {
     // Save mapping directly to db
     await db.saveFixedAssets(tenantId, allMappedAssets);
 
-    // Save sync timestamp in tenant credentials
-    await db.saveCredentials(tenantId, 'xero', {
-      last_synced_at: new Date().toISOString()
-    });
-
     // Clear stale cached summary so next getDashboard fetch recalculates fresh totals
     await db.saveFixedAssetsCache(tenantId, 'FixedAssetsDashboardSummary', null, 0);
   },
