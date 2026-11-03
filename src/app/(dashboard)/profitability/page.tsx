@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { BreakevenAnalysis } from '@/components/dashboard/BreakevenAnalysis';
 
 export default function ProfitabilityAnalysisPage() {
   const [isLoading, setIsLoading] = useState(true);
@@ -986,6 +987,9 @@ export default function ProfitabilityAnalysisPage() {
           </div>
         </section>
       </div>
+
+      {/* 4. Breakeven Analysis */}
+      <BreakevenAnalysis data={data} fmt={fmt} />
 
       <section className="bg-white p-5 rounded-3xl border border-slate-200 shadow-2xs space-y-3">
         <div className="flex items-center justify-between border-b border-slate-100 pb-3">

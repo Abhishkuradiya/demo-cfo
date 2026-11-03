@@ -596,8 +596,7 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const breakEvenSales: number | null = null;
-    const marginOfSafetyPct: number | null = null;
+
 
     // 13-Week Schedule generation from real unpaid invoices & bills
     interface CashFlowWeekScheduleItem {
@@ -1149,6 +1148,68 @@ export async function GET(req: NextRequest) {
       .map(([account, actual]) => ({ account, accountType: expenseAccountTypes.get(account), actual }))
       .sort((a, b) => Math.abs(b.actual) - Math.abs(a.actual));
 
+    // Breakeven Analysis Calculation
+    const variableCostAccounts = new Set(['purchases', 'cost of goods sold', 'freight & courier', 'freight', 'shipping', 'packaging']);
+    let variableCosts = cogs;
+    let fixedCosts = 0;
+
+    for (const [name, val] of Object.entries(pnlAccountTotalPeriod)) {
+      const type = expenseAccountTypes.get(name);
+      if (type === 'DIRECTCOSTS') {
+        // Included in COGS
+      } else if (type === 'EXPENSE' || type === 'OVERHEADS') {
+        const lower = name.toLowerCase();
+        if (variableCostAccounts.has(lower) || /freight|shipping|packaging/i.test(lower)) {
+          variableCosts += val;
+        } else {
+          fixedCosts += val;
+        }
+      }
+    }
+
+    if (fixedCosts === 0 && totalExpenses > 0) {
+      fixedCosts = totalExpenses;
+    }
+    const totalCosts = parseFloat((fixedCosts + variableCosts).toFixed(2));
+    const variableCostRatio = totalRevenue > 0 ? parseFloat((variableCosts / totalRevenue).toFixed(4)) : 0;
+    const contributionMarginRatio = totalRevenue > 0 ? parseFloat(((totalRevenue - variableCosts) / totalRevenue).toFixed(4)) : 0;
+    const breakEvenSales = contributionMarginRatio > 0 ? parseFloat((fixedCosts / contributionMarginRatio).toFixed(2)) : null;
+    const marginOfSafety = breakEvenSales !== null ? parseFloat((totalRevenue - breakEvenSales).toFixed(2)) : null;
+    const marginOfSafetyPct = totalRevenue > 0 && marginOfSafety !== null ? parseFloat(((marginOfSafety / totalRevenue) * 100).toFixed(2)) : null;
+
+    const topCostAccounts = (expenseAnalysis || []).slice(0, 10);
+    const topRevenueAccounts = Object.entries(pnlAccountTotalPeriod)
+      .filter(([name]) => {
+        const t = expenseAccountTypes.get(name);
+        return t === 'REVENUE' || /sales|income|turnover|revenue/i.test(name);
+      })
+      .map(([account, actual]) => ({ account, actual }))
+      .sort((a, b) => Math.abs(b.actual) - Math.abs(a.actual))
+      .slice(0, 10);
+
+    if (topRevenueAccounts.length === 0 && (customerProfitability || []).length > 0) {
+      for (const c of (customerProfitability || []).slice(0, 10)) {
+        topRevenueAccounts.push({ account: c.customer, actual: c.revenue });
+      }
+    }
+    if (topRevenueAccounts.length === 0 && totalRevenue > 0) {
+      topRevenueAccounts.push({ account: 'Sales & Operating Revenue', actual: totalRevenue });
+    }
+
+    const breakeven = {
+      available: totalRevenue > 0 || totalCosts > 0,
+      revenue: totalRevenue,
+      totalCosts,
+      fixedCosts: parseFloat(fixedCosts.toFixed(2)),
+      variableCosts: parseFloat(variableCosts.toFixed(2)),
+      variableCostRatio,
+      breakEvenSales,
+      marginOfSafety,
+      marginOfSafetyPct,
+      topRevenueAccounts,
+      topCostAccounts
+    };
+
     // Balance Sheet Structure (Current & Non-Current Breakdown, Pro-Forma & Actual)
     let xeroActualWorkingCapital: number | null = null;
     if (periodBalanceSheetReport) {
@@ -1510,7 +1571,8 @@ export async function GET(req: NextRequest) {
         expenseAnalysis,
         budgetVsActual: budgetItems.filter((item) => Number(item.budget) !== 0),
         priorPeriod,
-        comparisonLabel
+        comparisonLabel,
+        breakeven
       },
       cashFlow13Week: {
         startingCash,
