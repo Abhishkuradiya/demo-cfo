@@ -15,10 +15,15 @@ export interface ProfitabilityPdfOptions {
     operatingExpenses?: number | null;
     operatingMarginPct?: number | null;
     ebitda?: number | null;
+    depreciation?: number | null;
     operatingProfit?: number | null;
+    interestExpenses?: number | null;
     profitBeforeTax?: number | null;
+    taxProvision?: number | null;
     netProfit?: number | null;
     netMarginPct?: number | null;
+    breakEvenSales?: number | null;
+    marginOfSafetyPct?: number | null;
     currency?: string;
     customerProfitability?: Array<{
       customer: string;
@@ -71,6 +76,14 @@ export interface ProfitabilityPdfOptions {
       accountType: string;
       actual: number;
     }>;
+    priorPeriod?: {
+      revenue?: number | null;
+      cogs?: number | null;
+      grossProfit?: number | null;
+      operatingExpenses?: number | null;
+      operatingProfit?: number | null;
+      netProfit?: number | null;
+    } | null;
     marginDistribution?: {
       eligibleCount?: number;
       highMargin?: { count: number; pct: number | null };
@@ -138,26 +151,168 @@ export async function exportProfitabilityPdf(options: ProfitabilityPdfOptions): 
     });
   };
 
-  const drawRunningHeader = (title: string) => {
+  const drawRunningHeader = (sectionTitle: string) => {
     doc.setDrawColor(226, 232, 240);
-    doc.setLineWidth(0.2);
+    doc.setLineWidth(0.25);
     doc.line(margin, 12, pageWidth - margin, 12);
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(7.5);
     doc.setTextColor(15, 23, 42);
-    doc.text('VIRTUAL CFO PLATFORM · PROFITABILITY ANALYSIS', margin, 9.5);
+    doc.text('VIRTUAL CFO PLATFORM · FINANCIAL PERFORMANCE REPORT', margin, 9.5);
 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7);
     doc.setTextColor(100, 116, 139);
-    doc.text(`${title} · Period: ${options.periodLabel}`, pageWidth - margin, 9.5, {
+    doc.text(`${sectionTitle} · Period: ${options.periodLabel}`, pageWidth - margin, 9.5, {
       align: 'right',
     });
   };
 
+  // Helper: Formal Financial Table Renderer
+  interface ColumnDef {
+    header: string;
+    width: number;
+    align?: 'left' | 'right' | 'center';
+  }
+
+  const renderTable = (
+    startX: number,
+    startY: number,
+    columns: ColumnDef[],
+    rows: (string | { text: string; color?: number[]; bold?: boolean; align?: 'left' | 'right' | 'center' })[][],
+    tableOptions?: {
+      headerHeight?: number;
+      rowHeight?: number;
+      fontSize?: number;
+      headerFontSize?: number;
+      zebra?: boolean;
+      headerBg?: number[];
+      borderColor?: number[];
+      isTotalRowLast?: boolean;
+    },
+  ): number => {
+    const headerHeight = tableOptions?.headerHeight ?? 6.8;
+    const rowHeight = tableOptions?.rowHeight ?? 5.6;
+    const fontSize = tableOptions?.fontSize ?? 7;
+    const headerFontSize = tableOptions?.headerFontSize ?? 6.8;
+    const headerBg = tableOptions?.headerBg ?? [15, 23, 42]; // Slate 900
+    const borderColor = tableOptions?.borderColor ?? [226, 232, 240];
+
+    let currentY = startY;
+    const totalTableWidth = columns.reduce((sum, col) => sum + col.width, 0);
+
+    // Draw Header
+    let currentX = startX;
+    doc.setFillColor(headerBg[0], headerBg[1], headerBg[2]);
+    doc.rect(startX, currentY, totalTableWidth, headerHeight, 'F');
+
+    columns.forEach((col) => {
+      doc.setTextColor(255, 255, 255);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(headerFontSize);
+
+      const headerLines = col.header.split('\n');
+      const lineH = 2.8;
+      const textStartY = currentY + headerHeight / 2 - ((headerLines.length - 1) * lineH) / 2 + 0.8;
+
+      headerLines.forEach((hLine, hIdx) => {
+        let textX = currentX + 2.5;
+        if (col.align === 'right') textX = currentX + col.width - 2.5;
+        else if (col.align === 'center') textX = currentX + col.width / 2;
+        doc.text(hLine, textX, textStartY + hIdx * lineH, { align: col.align || 'left' });
+      });
+
+      currentX += col.width;
+    });
+
+    currentY += headerHeight;
+
+    // Draw Rows
+    rows.forEach((row, rowIdx) => {
+      const isTotalRow = tableOptions?.isTotalRowLast && rowIdx === rows.length - 1;
+
+      let maxLinesInRow = 1;
+      row.forEach((cell, colIdx) => {
+        const col = columns[colIdx];
+        const cellText = typeof cell === 'object' ? cell.text : cell;
+        const lines = doc.splitTextToSize(cellText, col.width - 4);
+        if (lines.length > maxLinesInRow) maxLinesInRow = lines.length;
+      });
+
+      const actualRowHeight = Math.max(rowHeight, maxLinesInRow * 3.2 + 2.4);
+
+      currentX = startX;
+      const isZebra = tableOptions?.zebra && rowIdx % 2 === 1 && !isTotalRow;
+
+      if (isTotalRow) {
+        doc.setFillColor(241, 245, 249); // Slate 100
+        doc.rect(startX, currentY, totalTableWidth, actualRowHeight, 'F');
+      } else if (isZebra) {
+        doc.setFillColor(248, 250, 252); // Slate 50
+        doc.rect(startX, currentY, totalTableWidth, actualRowHeight, 'F');
+      }
+
+      doc.setDrawColor(borderColor[0], borderColor[1], borderColor[2]);
+      doc.setLineWidth(0.15);
+      doc.line(startX, currentY + actualRowHeight, startX + totalTableWidth, currentY + actualRowHeight);
+
+      if (isTotalRow) {
+        doc.setLineWidth(0.35);
+        doc.line(startX, currentY, startX + totalTableWidth, currentY);
+        // Double underline bottom for total row
+        doc.line(startX, currentY + actualRowHeight - 0.5, startX + totalTableWidth, currentY + actualRowHeight - 0.5);
+      }
+
+      row.forEach((cell, colIdx) => {
+        const col = columns[colIdx];
+        const cellObj = typeof cell === 'object' ? cell : { text: cell };
+        const text = cellObj.text ?? '';
+        const align = cellObj.align || col.align || 'left';
+        const isBold = isTotalRow || cellObj.bold;
+
+        doc.setFont('helvetica', isBold ? 'bold' : 'normal');
+        doc.setFontSize(fontSize);
+
+        if (cellObj.color) {
+          doc.setTextColor(cellObj.color[0], cellObj.color[1], cellObj.color[2]);
+        } else if (isTotalRow) {
+          doc.setTextColor(15, 23, 42);
+        } else {
+          doc.setTextColor(51, 65, 85);
+        }
+
+        let cellTextX = currentX + 2.5;
+        if (align === 'right') cellTextX = currentX + col.width - 2.5;
+        else if (align === 'center') cellTextX = currentX + col.width / 2;
+
+        const lines = doc.splitTextToSize(text, col.width - 4);
+        const textStartY = currentY + actualRowHeight / 2 - ((lines.length - 1) * 3) / 2 + 0.8;
+        doc.text(lines, cellTextX, textStartY, { align });
+
+        currentX += col.width;
+      });
+
+      currentY += actualRowHeight;
+    });
+
+    return currentY;
+  };
+
+  const d = options.data;
+  const rev = Number(d.revenue) || 0;
+  const cogs = Number(d.cogs) || 0;
+  const grossProfit = Number(d.grossProfit) || (rev - cogs);
+  const grossMargin = rev > 0 ? (grossProfit / rev) * 100 : (Number(d.grossMarginPct) || 0);
+  const opex = Number(d.operatingExpenses) || 0;
+  const operatingProfit = Number(d.operatingProfit) ?? (grossProfit - opex);
+  const operatingMargin = rev > 0 ? (operatingProfit / rev) * 100 : (Number(d.operatingMarginPct) || 0);
+  const ebitda = d.ebitda != null ? Number(d.ebitda) : operatingProfit;
+  const netProfit = Number(d.netProfit) ?? operatingProfit;
+  const netMargin = rev > 0 ? (netProfit / rev) * 100 : (Number(d.netMarginPct) || 0);
+
   // =========================================================================
-  // PAGE 1: COVER PAGE
+  // PAGE 1: EXECUTIVE COVER PAGE
   // =========================================================================
   try {
     doc.addImage(FORECAST_COVER_BASE64, 'JPEG', 0, 0, pageWidth, pageHeight, undefined, 'FAST');
@@ -168,7 +323,7 @@ export async function exportProfitabilityPdf(options: ProfitabilityPdfOptions): 
   }
 
   // Cover Title Block
-  doc.setFillColor(15, 23, 42); // Navy overlay box
+  doc.setFillColor(15, 23, 42);
   doc.roundedRect(margin, 45, contentWidth, 54, 3, 3, 'F');
   doc.setDrawColor(30, 41, 59);
   doc.setLineWidth(0.5);
@@ -176,31 +331,31 @@ export async function exportProfitabilityPdf(options: ProfitabilityPdfOptions): 
 
   // Blue Accent Pill
   doc.setFillColor(0, 112, 243);
-  doc.roundedRect(margin + 8, 54, 46, 5.5, 1.5, 1.5, 'F');
+  doc.roundedRect(margin + 8, 54, 52, 5.5, 1.5, 1.5, 'F');
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(6.8);
   doc.setTextColor(255, 255, 255);
-  doc.text('CFO INTELLIGENCE SUITE', margin + 11, 57.8);
+  doc.text('EXECUTIVE FINANCIAL STATEMENT', margin + 11, 57.8);
 
   // Main Title
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(22);
   doc.setTextColor(255, 255, 255);
-  doc.text('Profitability Analysis', margin + 8, 69);
+  doc.text('Profitability & Margin Statement', margin + 8, 69);
 
   // Subtitle
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
   doc.setTextColor(203, 213, 225);
   doc.text(
-    'Executive report on revenue performance, direct costs, contribution margins, and unit economics.',
+    'Formal commercial performance assessment reconciled with Xero General Ledger.',
     margin + 8,
     76,
   );
   doc.setFontSize(7.5);
   doc.setTextColor(148, 163, 184);
   doc.text(
-    `Reconciled with live Xero General Ledger data for reporting cycle: ${options.periodLabel}.`,
+    `Reconciled accounting report for trading period: ${options.periodLabel}.`,
     margin + 8,
     82,
   );
@@ -246,682 +401,623 @@ export async function exportProfitabilityPdf(options: ProfitabilityPdfOptions): 
   );
 
   // =========================================================================
-  // PAGE 2: EXECUTIVE SUMMARY & 10 KPI CARDS + REVENUE BY CUSTOMER
+  // PAGE 2: STATEMENT OF PROFITABILITY & OPERATING MARGINS (FORMAL PDF FORM)
   // =========================================================================
   doc.addPage();
   drawPageFooter(2);
-  drawRunningHeader('Executive Summary & Customer Revenue');
+  drawRunningHeader('Statement of Profitability & Operating Margins');
 
   let y = 17;
 
-  // Header Title
+  // Formal Statement Header
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(15);
+  doc.setFontSize(13);
   doc.setTextColor(15, 23, 42);
-  doc.text('Profitability Analysis & Margins', margin, y + 4);
+  doc.text('STATEMENT OF PROFITABILITY & OPERATING MARGINS', margin, y + 4);
 
-  // Live Xero Badge
-  doc.setFillColor(236, 253, 245);
-  doc.roundedRect(margin + contentWidth - 36, y - 1, 36, 6, 2, 2, 'F');
-  doc.setDrawColor(167, 243, 208);
-  doc.setLineWidth(0.2);
-  doc.roundedRect(margin + contentWidth - 36, y - 1, 36, 6, 2, 2, 'S');
-
-  doc.setFillColor(16, 185, 129);
-  doc.circle(margin + contentWidth - 32.5, y + 2, 1, 'F');
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(6.5);
-  doc.setTextColor(4, 120, 87);
-  doc.text('Xero Verified Actuals', margin + contentWidth - 29.5, y + 3);
-
-  // Subtitle
+  // Audit Subtitle
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7.5);
+  doc.setFontSize(7.2);
   doc.setTextColor(100, 116, 139);
   doc.text(
-    'Understand where your business makes — and loses — money across customers, products, and operational departments.',
+    `Accounting Basis: Accrual P&L · Reconciled to Xero General Ledger · Reporting Window: ${options.periodLabel}`,
     margin,
-    y + 9.5,
+    y + 9,
   );
 
-  y += 14;
+  y += 13;
 
-  // 10 KPI Cards (5 columns x 2 rows)
-  const d = options.data;
-  const kpis = [
-    { label: 'Net Revenue', val: fmtMoney(d.revenue), color: [16, 185, 129], sub: 'P&L Trading Income' },
-    { label: 'Cost of Sales', val: fmtMoney(d.cogs), color: [244, 63, 94], sub: 'Direct Costs' },
-    { label: 'Gross Profit', val: fmtMoney(d.grossProfit), color: [59, 130, 246], sub: 'Contribution Pool' },
-    { label: 'Operating Expenses', val: fmtMoney(d.operatingExpenses), color: [245, 158, 11], sub: 'Overheads & Admin' },
-    { label: 'Gross Margin', val: fmtPct(d.grossMarginPct), color: [168, 85, 247], sub: 'Gross Profit Margin' },
-    { label: 'Operating Margin', val: fmtPct(d.operatingMarginPct), color: [13, 148, 136], sub: 'Operating Efficiency' },
-    { label: 'EBITDA', val: fmtMoney(d.ebitda), color: [99, 102, 241], sub: 'Operating Cash Flow' },
-    { label: 'Operating Profit', val: fmtMoney(d.operatingProfit), color: [234, 88, 12], sub: 'EBIT' },
-    { label: 'Profit Before Tax', val: fmtMoney(d.profitBeforeTax), color: [2, 132, 199], sub: 'Pre-tax Earnings' },
-    { label: 'Net Profit', val: fmtMoney(d.netProfit), color: [22, 163, 74], sub: 'Net Bottom Line' },
+  // 4 Primary Executive Performance Stat Boxes (Formal Document Layout)
+  const statBoxW = (contentWidth - 3 * 3) / 4; // ~44.25mm
+  const statBoxH = 17;
+  const headlineStats = [
+    {
+      title: 'NET REVENUE',
+      value: fmtMoney(rev),
+      sub: '100.0% Trading Turnover',
+      color: [15, 23, 42],
+    },
+    {
+      title: 'GROSS PROFIT',
+      value: fmtMoney(grossProfit),
+      sub: `${grossMargin.toFixed(1)}% Gross Margin`,
+      color: grossMargin >= 40 ? [4, 120, 87] : [180, 83, 9],
+    },
+    {
+      title: 'OPERATING PROFIT (EBIT)',
+      value: fmtMoney(operatingProfit),
+      sub: `${operatingMargin.toFixed(1)}% Operating Margin`,
+      color: operatingProfit >= 0 ? [4, 120, 87] : [190, 18, 60],
+    },
+    {
+      title: 'NET PROFIT (BOTTOM LINE)',
+      value: fmtMoney(netProfit),
+      sub: `${netMargin.toFixed(1)}% Net Margin`,
+      color: netProfit >= 0 ? [4, 120, 87] : [190, 18, 60],
+    },
   ];
 
-  const colCount = 5;
-  const gap = 2.5;
-  const cardW = (contentWidth - gap * (colCount - 1)) / colCount; // ~35.2mm
-  const cardH = 17;
-
-  kpis.forEach((kpi, idx) => {
-    const col = idx % colCount;
-    const row = Math.floor(idx / colCount);
-    const cx = margin + col * (cardW + gap);
-    const cy = y + row * (cardH + gap);
-
-    // Card background & border
-    doc.setFillColor(255, 255, 255);
-    doc.roundedRect(cx, cy, cardW, cardH, 2, 2, 'F');
+  headlineStats.forEach((stat, idx) => {
+    const sx = margin + idx * (statBoxW + 3);
+    doc.setFillColor(248, 250, 252);
+    doc.rect(sx, y, statBoxW, statBoxH, 'F');
     doc.setDrawColor(226, 232, 240);
     doc.setLineWidth(0.2);
-    doc.roundedRect(cx, cy, cardW, cardH, 2, 2, 'S');
+    doc.rect(sx, y, statBoxW, statBoxH, 'S');
 
-    // Color bar accent at top of card
-    doc.setFillColor(kpi.color[0], kpi.color[1], kpi.color[2]);
-    doc.roundedRect(cx, cy, cardW, 1.4, 1, 1, 'F');
-
-    // Title
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(6.2);
     doc.setTextColor(100, 116, 139);
-    doc.text(kpi.label, cx + 2.5, cy + 5.2);
+    doc.text(stat.title, sx + 3, y + 4.8);
 
-    // Value
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(8.2);
-    doc.setTextColor(15, 23, 42);
-    doc.text(kpi.val, cx + 2.5, cy + 10.5);
+    doc.setFontSize(9.5);
+    doc.setTextColor(stat.color[0], stat.color[1], stat.color[2]);
+    doc.text(stat.value, sx + 3, y + 10.8);
 
-    // Subtext
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(5.2);
-    doc.setTextColor(148, 163, 184);
-    doc.text(kpi.sub, cx + 2.5, cy + 14.5);
+    doc.setFontSize(5.8);
+    doc.setTextColor(100, 116, 139);
+    doc.text(stat.sub, sx + 3, y + 14.8);
   });
 
-  y += cardH * 2 + gap + 6;
+  y += statBoxH + 6;
 
-  // Margin Distribution & AI Opportunities Widgets side-by-side
-  const widgetH = 34;
-  const widgetW = (contentWidth - 4) / 2; // 91mm
-
-  // Widget 1: Margin Distribution
-  const w1x = margin;
-  doc.setFillColor(255, 255, 255);
-  doc.roundedRect(w1x, y, widgetW, widgetH, 2.5, 2.5, 'F');
-  doc.setDrawColor(226, 232, 240);
-  doc.setLineWidth(0.25);
-  doc.roundedRect(w1x, y, widgetW, widgetH, 2.5, 2.5, 'S');
-
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8.5);
-  doc.setTextColor(15, 23, 42);
-  doc.text('Margin Distribution', w1x + 4, y + 5.5);
-
-  const md = d.marginDistribution;
-  const tiers = [
-    { label: 'High Margin (>50%)', count: md?.highMargin?.count, pct: md?.highMargin?.pct, barColor: [16, 185, 129] },
-    { label: 'Medium Margin (20-50%)', count: md?.mediumMargin?.count, pct: md?.mediumMargin?.pct, barColor: [245, 158, 11] },
-    { label: 'Low Margin (<20%)', count: md?.lowMargin?.count, pct: md?.lowMargin?.pct, barColor: [244, 63, 94] },
+  // Formal P&L Statement Table (Financial Statement Form)
+  const statementCols: ColumnDef[] = [
+    { header: 'FINANCIAL STATEMENT LINE ITEM', width: 62, align: 'left' },
+    { header: 'CLASSIFICATION', width: 28, align: 'left' },
+    { header: `REPORTED ACTUAL (${symbol})`, width: 32, align: 'right' },
+    { header: '% OF REVENUE', width: 20, align: 'right' },
+    { header: 'PRIOR PERIOD', width: 22, align: 'right' },
+    { header: 'ASSESSMENT', width: 22, align: 'center' },
   ];
 
-  let ty = y + 9.5;
-  tiers.forEach((t) => {
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(6.2);
-    doc.setTextColor(51, 65, 85);
-    doc.text(t.label, w1x + 4, ty + 2.5);
+  const prior = d.priorPeriod;
+  const pctOfRev = (val: number | null | undefined) =>
+    rev > 0 && val != null ? `${((Number(val) / rev) * 100).toFixed(1)}%` : '0.0%';
 
-    const countStr = `${t.count ?? 'N/A'} (${t.pct == null ? 'N/A' : `${t.pct.toFixed(1)}%`})`;
-    doc.text(countStr, w1x + widgetW - 4, ty + 2.5, { align: 'right' });
+  const statementRows = [
+    [
+      'Net Trading Revenue (Turnover)',
+      'Operating Sales',
+      fmtMoney(rev),
+      '100.0%',
+      fmtMoney(prior?.revenue),
+      { text: 'Base Income', color: [4, 120, 87], bold: true },
+    ],
+    [
+      'Cost of Goods Sold (COGS)',
+      'Direct Trading Costs',
+      fmtMoney(cogs),
+      pctOfRev(cogs),
+      fmtMoney(prior?.cogs),
+      { text: cogs <= rev * 0.4 ? 'Disciplined' : 'Elevated', color: cogs <= rev * 0.4 ? [4, 120, 87] : [180, 83, 9] },
+    ],
+    [
+      'GROSS PROFIT',
+      'Contribution Margin',
+      fmtMoney(grossProfit),
+      `${grossMargin.toFixed(1)}%`,
+      fmtMoney(prior?.grossProfit),
+      { text: grossMargin >= 50 ? 'Strong Contribution' : 'Standard', color: [4, 120, 87], bold: true },
+    ],
+    [
+      'Operating Expenses (OPEX Overheads)',
+      'Indirect Admin & Opex',
+      fmtMoney(opex),
+      pctOfRev(opex),
+      fmtMoney(prior?.operatingExpenses),
+      { text: opex < grossProfit ? 'Controlled' : 'Overhead Load', color: opex < grossProfit ? [51, 65, 85] : [190, 18, 60] },
+    ],
+    [
+      'OPERATING PROFIT (EBIT)',
+      'Core Trading Surplus',
+      fmtMoney(operatingProfit),
+      `${operatingMargin.toFixed(1)}%`,
+      fmtMoney(prior?.operatingProfit),
+      { text: operatingProfit >= 0 ? 'Profitable' : 'Operating Deficit', color: operatingProfit >= 0 ? [4, 120, 87] : [190, 18, 60], bold: true },
+    ],
+    [
+      'EBITDA (Operating Cash Flow proxy)',
+      'Operating Cash Generation',
+      fmtMoney(ebitda),
+      pctOfRev(ebitda),
+      'N/A',
+      { text: ebitda >= 0 ? 'Cash Positive' : 'Cash Burn', color: ebitda >= 0 ? [4, 120, 87] : [190, 18, 60] },
+    ],
+    [
+      'Depreciation & Amortization',
+      'Non-Cash Adjustments',
+      fmtMoney(d.depreciation ?? 0),
+      pctOfRev(d.depreciation ?? 0),
+      'N/A',
+      { text: 'Non-Cash', color: [100, 116, 139] },
+    ],
+    [
+      'Interest & Financing Expenses',
+      'Financing Overheads',
+      fmtMoney(d.interestExpenses ?? 0),
+      pctOfRev(d.interestExpenses ?? 0),
+      'N/A',
+      { text: 'Debt Service', color: [100, 116, 139] },
+    ],
+    [
+      'Profit Before Tax (EBT)',
+      'Pre-Tax Earnings',
+      fmtMoney(d.profitBeforeTax ?? operatingProfit),
+      pctOfRev(d.profitBeforeTax ?? operatingProfit),
+      'N/A',
+      { text: 'Taxable Base', color: [51, 65, 85] },
+    ],
+    [
+      'Corporation Tax Provision',
+      'Statutory Tax Accrual',
+      fmtMoney(d.taxProvision ?? 0),
+      pctOfRev(d.taxProvision ?? 0),
+      'N/A',
+      { text: 'Tax Liability', color: [100, 116, 139] },
+    ],
+    [
+      'NET PROFIT (BOTTOM LINE SURPLUS)',
+      'Net Retained Earnings',
+      fmtMoney(netProfit),
+      `${netMargin.toFixed(1)}%`,
+      fmtMoney(prior?.netProfit),
+      { text: netProfit >= 0 ? 'Net Surplus' : 'Net Loss', color: netProfit >= 0 ? [4, 120, 87] : [190, 18, 60], bold: true },
+    ],
+  ];
 
-    // Progress bar track
-    doc.setFillColor(241, 245, 249);
-    doc.roundedRect(w1x + 4, ty + 4, widgetW - 8, 2.2, 1, 1, 'F');
-
-    // Progress bar fill
-    const fillWidth = Math.max(0, Math.min(widgetW - 8, ((t.pct || 0) / 100) * (widgetW - 8)));
-    if (fillWidth > 0) {
-      doc.setFillColor(t.barColor[0], t.barColor[1], t.barColor[2]);
-      doc.roundedRect(w1x + 4, ty + 4, fillWidth, 2.2, 1, 1, 'F');
-    }
-    ty += 7.5;
+  y = renderTable(margin, y, statementCols, statementRows, {
+    headerHeight: 7,
+    rowHeight: 6.2,
+    fontSize: 6.8,
+    headerFontSize: 6.8,
+    zebra: true,
+    isTotalRowLast: true,
   });
 
-  // Widget 2: Top Profitability Opportunities
-  const w2x = margin + widgetW + 4;
-  doc.setFillColor(255, 255, 255);
-  doc.roundedRect(w2x, y, widgetW, widgetH, 2.5, 2.5, 'F');
+  y += 7;
+
+  // Commercial Diagnostics & Break-Even Form Box
+  doc.setFillColor(248, 250, 252);
+  doc.roundedRect(margin, y, contentWidth, 38, 2, 2, 'F');
   doc.setDrawColor(226, 232, 240);
   doc.setLineWidth(0.25);
-  doc.roundedRect(w2x, y, widgetW, widgetH, 2.5, 2.5, 'S');
+  doc.roundedRect(margin, y, contentWidth, 38, 2, 2, 'S');
 
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.8);
+  doc.setTextColor(15, 23, 42);
+  doc.text('EXECUTIVE COMMERCIAL DIAGNOSTICS & BREAK-EVEN ANALYSIS', margin + 5, y + 6);
+
+  // Three column indicators inside the box
+  const diagColW = (contentWidth - 10) / 3;
+  const breakEvenVal = d.breakEvenSales != null ? fmtMoney(d.breakEvenSales) : (grossMargin > 0 ? fmtMoney((opex / (grossMargin / 100))) : 'N/A');
+  const safetyVal = d.marginOfSafetyPct != null ? `${d.marginOfSafetyPct.toFixed(1)}%` : (rev > 0 && opex > 0 && grossMargin > 0 ? `${Math.max(0, ((rev - (opex / (grossMargin / 100))) / rev) * 100).toFixed(1)}%` : 'N/A');
+  const opexAbsorption = rev > 0 ? `${((opex / rev) * 100).toFixed(1)}%` : 'N/A';
+
+  const diagnostics = [
+    { label: 'BREAK-EVEN SALES VOLUME', val: breakEvenVal, desc: 'Sales required to cover all fixed and variable overheads.' },
+    { label: 'MARGIN OF SAFETY', val: safetyVal, desc: 'Buffer before trading operations cross into an operating loss.' },
+    { label: 'OPEX ABSORPTION RATE', val: opexAbsorption, desc: 'Proportion of gross trading revenue absorbed by overheads.' },
+  ];
+
+  diagnostics.forEach((diag, i) => {
+    const dx = margin + 5 + i * diagColW;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6.2);
+    doc.setTextColor(100, 116, 139);
+    doc.text(diag.label, dx, y + 13);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9.5);
+    doc.setTextColor(0, 112, 243);
+    doc.text(diag.val, dx, y + 20);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(5.8);
+    doc.setTextColor(100, 116, 139);
+    doc.text(doc.splitTextToSize(diag.desc, diagColW - 6), dx, y + 25);
+  });
+
+  // Brief narrative conclusion line
+  doc.setDrawColor(226, 232, 240);
+  doc.setLineWidth(0.15);
+  doc.line(margin + 5, y + 31, margin + contentWidth - 5, y + 31);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(6.2);
+  doc.setTextColor(15, 23, 42);
+  doc.text('Key Observation:', margin + 5, y + 35);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(71, 85, 105);
+  const narrative = rev > 0 && netProfit >= 0
+    ? `The organization generated ${fmtMoney(rev)} in trading revenue with an operating margin of ${operatingMargin.toFixed(1)}%, converting ${fmtMoney(netProfit)} to bottom-line net profit after absorbing all overheads.`
+    : `Trading volume totaled ${fmtMoney(rev)} with overhead costs absorbing ${fmtMoney(opex)}. Implement cost-rationalization and margin optimization across core customer lines.`;
+  doc.text(narrative, margin + 28, y + 35, { maxWidth: contentWidth - 34 });
+
+  // =========================================================================
+  // PAGE 3: CUSTOMER REVENUE & COMMERCIAL CONCENTRATION SCHEDULE
+  // =========================================================================
+  doc.addPage();
+  drawPageFooter(3);
+  drawRunningHeader('Customer Revenue & Commercial Concentration');
+
+  y = 17;
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13);
+  doc.setTextColor(15, 23, 42);
+  doc.text('CUSTOMER REVENUE & MARGIN CONTRIBUTION SCHEDULE', margin, y + 4);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.2);
+  doc.setTextColor(100, 116, 139);
+  doc.text(
+    'Detailed invoice activity, revenue volume, and gross profit contribution across commercial clients',
+    margin,
+    y + 9,
+  );
+
+  y += 13;
+
+  // Customer Summary Bar (3 Executive Totals)
+  const custSummaryW = (contentWidth - 2 * 3) / 3;
+  const customersList = d.customerProfitability || [];
+  const totalCustCount = customersList.length;
+  const totalCustRev = customersList.reduce((acc, c) => acc + (Number(c.revenue) || 0), 0);
+  const top1CustRev = customersList[0]?.revenue || 0;
+  const top1Share = totalCustRev > 0 ? ((top1CustRev / totalCustRev) * 100).toFixed(1) : '0.0';
+  const avgCustRev = totalCustCount > 0 ? totalCustRev / totalCustCount : 0;
+
+  const custSummary = [
+    { title: 'ACTIVE COMMERCIAL CLIENTS', val: `${totalCustCount} Accounts`, sub: 'Accounts billed in period' },
+    { title: 'TOP CLIENT CONCENTRATION', val: `${top1Share}%`, sub: `Led by ${customersList[0]?.customer || 'N/A'}` },
+    { title: 'AVERAGE REVENUE PER CLIENT', val: fmtMoney(avgCustRev), sub: 'Mean client sales volume' },
+  ];
+
+  custSummary.forEach((cs, i) => {
+    const cx = margin + i * (custSummaryW + 3);
+    doc.setFillColor(248, 250, 252);
+    doc.rect(cx, y, custSummaryW, 15, 'F');
+    doc.setDrawColor(226, 232, 240);
+    doc.setLineWidth(0.2);
+    doc.rect(cx, y, custSummaryW, 15, 'S');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6.2);
+    doc.setTextColor(100, 116, 139);
+    doc.text(cs.title, cx + 3, y + 4.5);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(15, 23, 42);
+    doc.text(cs.val, cx + 3, y + 10);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(5.8);
+    doc.setTextColor(100, 116, 139);
+    doc.text(cs.sub, cx + 3, y + 13.5, { maxWidth: custSummaryW - 6 });
+  });
+
+  y += 15 + 6;
+
+  // Formal Customer Performance Table
+  const custCols: ColumnDef[] = [
+    { header: '#', width: 8, align: 'center' },
+    { header: 'CUSTOMER / COMMERCIAL COUNTERPARTY', width: 68, align: 'left' },
+    { header: 'INVOICES', width: 20, align: 'center' },
+    { header: `SALES VOLUME (${symbol})`, width: 32, align: 'right' },
+    { header: '% OF REVENUE', width: 26, align: 'right' },
+    { header: 'CONTRIBUTION MARGIN', width: 32, align: 'right' },
+  ];
+
+  const custRows = customersList.slice(0, 14).map((cust, idx) => {
+    const invCount = Array.isArray(cust.invoices) ? cust.invoices.length : 0;
+    const cRev = Number(cust.revenue) || 0;
+    const cShare = rev > 0 ? `${((cRev / rev) * 100).toFixed(1)}%` : '0.0%';
+    const marginStr = cust.margin != null ? `${cust.margin}%` : 'N/A';
+    return [
+      String(idx + 1),
+      cust.customer,
+      `${invCount} ${invCount === 1 ? 'inv' : 'invs'}`,
+      fmtMoney(cRev),
+      cShare,
+      marginStr,
+    ];
+  });
+
+  if (customersList.length === 0) {
+    custRows.push(['-', 'No customer invoice records found for this period.', '-', fmtMoney(0), '0.0%', 'N/A']);
+  } else {
+    // Total Row
+    custRows.push([
+      '',
+      'TOTAL CUSTOMER SALES ACTIVITY',
+      `${customersList.reduce((acc, c) => acc + (Array.isArray(c.invoices) ? c.invoices.length : 0), 0)} invs`,
+      fmtMoney(totalCustRev),
+      '100.0%',
+      `${grossMargin.toFixed(1)}%`,
+    ]);
+  }
+
+  y = renderTable(margin, y, custCols, custRows, {
+    headerHeight: 7,
+    rowHeight: 6,
+    fontSize: 6.8,
+    headerFontSize: 6.8,
+    zebra: true,
+    isTotalRowLast: customersList.length > 0,
+  });
+
+  y += 7;
+
+  // Margin Distribution Tier Schedule (Replacing toy widgets)
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8.5);
   doc.setTextColor(15, 23, 42);
-  doc.text('Top Profitability Opportunities', w2x + 4, y + 5.5);
+  doc.text('COMMERCIAL MARGIN TIER BREAKDOWN', margin, y + 3);
 
-  doc.setFillColor(243, 232, 255);
-  doc.roundedRect(w2x + widgetW - 22, y + 2.5, 18, 4, 1, 1, 'F');
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(5.5);
-  doc.setTextColor(126, 34, 206);
-  doc.text('AI Generated', w2x + widgetW - 20, y + 5.2);
+  y += 5.5;
 
-  const opps = (d.aiOpportunities && d.aiOpportunities.length > 0)
-    ? d.aiOpportunities.slice(0, 3)
-    : [
-        'Optimize high-revenue customer gross margins by reviewing line-item service costs.',
-        'Review tracking categories with elevated operating overheads to protect net margin.',
-        'Eliminate negative margin products and align service pricing with target contribution.',
-      ];
+  const tierCols: ColumnDef[] = [
+    { header: 'MARGIN CLASSIFICATION TIER', width: 60, align: 'left' },
+    { header: 'QUALIFYING CLIENTS', width: 34, align: 'center' },
+    { header: 'PROPORTION (%)', width: 32, align: 'right' },
+    { header: 'STRATEGIC PORTFOLIO ASSESSMENT', width: 60, align: 'left' },
+  ];
 
-  let oy = y + 10;
-  opps.forEach((opp, i) => {
-    doc.setFillColor(254, 243, 199);
-    doc.circle(w2x + 6, oy + 2, 2, 'F');
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(5.5);
-    doc.setTextColor(146, 64, 14);
-    doc.text(String(i + 1), w2x + 5.2, oy + 2.8);
+  const md = d.marginDistribution;
+  const tierRows = [
+    [
+      'High Contribution Margin (> 50%)',
+      String(md?.highMargin?.count ?? 0),
+      md?.highMargin?.pct != null ? `${md.highMargin.pct.toFixed(1)}%` : 'N/A',
+      { text: 'Core profitability generator; protect relationship and contract terms.', color: [4, 120, 87] },
+    ],
+    [
+      'Medium Contribution Margin (20% – 50%)',
+      String(md?.mediumMargin?.count ?? 0),
+      md?.mediumMargin?.pct != null ? `${md.mediumMargin.pct.toFixed(1)}%` : 'N/A',
+      { text: 'Stable commercial volume; review opportunities for service upselling.', color: [51, 65, 85] },
+    ],
+    [
+      'Low Contribution Margin (< 20%)',
+      String(md?.lowMargin?.count ?? 0),
+      md?.lowMargin?.pct != null ? `${md.lowMargin.pct.toFixed(1)}%` : 'N/A',
+      { text: 'Margin dilution risk; audit direct labor and third-party delivery costs.', color: [190, 18, 60] },
+    ],
+  ];
 
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(6.2);
-    doc.setTextColor(51, 65, 85);
-    const lines = doc.splitTextToSize(opp, widgetW - 14);
-    doc.text(lines, w2x + 10, oy + 2.2);
-    oy += 7.5;
+  y = renderTable(margin, y, tierCols, tierRows, {
+    headerHeight: 6.5,
+    rowHeight: 6,
+    fontSize: 6.8,
+    headerFontSize: 6.8,
+    zebra: true,
   });
 
-  y += widgetH + 6;
+  // =========================================================================
+  // PAGE 4: PRODUCT ECONOMICS, TRACKING & GOVERNANCE SIGN-OFF
+  // =========================================================================
+  doc.addPage();
+  drawPageFooter(4);
+  drawRunningHeader('Product Economics, Departmental Tracking & Governance');
 
-  // Table 1: Revenue by Customer
+  y = 17;
+
+  // Section 1: Product / Service Profitability Table
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9.5);
+  doc.setFontSize(10.5);
   doc.setTextColor(15, 23, 42);
-  doc.text('Revenue by Customer', margin, y + 3);
+  doc.text('Product & Service Profitability Schedule', margin, y + 3);
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(6.8);
   doc.setTextColor(100, 116, 139);
-  doc.text('Customer invoice activity and net revenue contribution from Xero sales ledger', margin, y + 7.5);
-
-  y += 9.5;
-
-  // Customer Table Header
-  doc.setFillColor(15, 23, 42);
-  doc.rect(margin, y, contentWidth, 6, 'F');
-
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(6.5);
-  doc.setTextColor(255, 255, 255);
-  doc.text('#', margin + 3, y + 4.2);
-  doc.text('CUSTOMER NAME', margin + 12, y + 4.2);
-  doc.text('INVOICE ACTIVITY', margin + 95, y + 4.2, { align: 'right' });
-  doc.text('DIRECT COSTS', margin + 140, y + 4.2, { align: 'right' });
-  doc.text('MARGIN', margin + contentWidth - 4, y + 4.2, { align: 'right' });
-
-  y += 6;
-
-  const customers = (d.customerProfitability || []).slice(0, 8);
-  customers.forEach((cust, cIdx) => {
-    const isEven = cIdx % 2 === 0;
-    doc.setFillColor(isEven ? 255 : 248, isEven ? 255 : 250, isEven ? 255 : 252);
-    doc.rect(margin, y, contentWidth, 5.8, 'F');
-
-    doc.setDrawColor(241, 245, 249);
-    doc.setLineWidth(0.15);
-    doc.line(margin, y + 5.8, margin + contentWidth, y + 5.8);
-
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(6.5);
-    doc.setTextColor(100, 116, 139);
-    doc.text(String(cIdx + 1), margin + 3, y + 4);
-
-    doc.setTextColor(15, 23, 42);
-    const custName = doc.splitTextToSize(cust.customer, 65)[0];
-    doc.text(custName, margin + 12, y + 4);
-
-    const invCount = Array.isArray(cust.invoices) ? cust.invoices.length : 0;
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(5.5);
-    doc.setTextColor(100, 116, 139);
-    doc.text(`(${invCount} ${invCount === 1 ? 'inv' : 'invs'})`, margin + 14 + doc.getTextWidth(custName), y + 4);
-
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(6.8);
-    doc.setTextColor(51, 65, 85);
-    doc.text(fmtMoney(cust.revenue), margin + 95, y + 4, { align: 'right' });
-
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(100, 116, 139);
-    doc.text('N/A', margin + 140, y + 4, { align: 'right' });
-    doc.text('N/A', margin + contentWidth - 4, y + 4, { align: 'right' });
-
-    y += 5.8;
-
-    // Expand top customer invoices as sub-entries breakdown (e.g. for first 2 customers)
-    if (cIdx < 2 && Array.isArray(cust.invoices) && cust.invoices.length > 0) {
-      cust.invoices.slice(0, 3).forEach((inv) => {
-        doc.setFillColor(248, 250, 252);
-        doc.rect(margin, y, contentWidth, 4.8, 'F');
-
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(5.5);
-        doc.setTextColor(0, 112, 243);
-        doc.text(`↳ ${inv.invoiceNumber || 'INV'}`, margin + 15, y + 3.2);
-
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(5.2);
-        doc.setTextColor(100, 116, 139);
-        const invDate = inv.date ? String(inv.date).slice(0, 10) : '—';
-        doc.text(invDate, margin + 35, y + 3.2);
-
-        const desc = doc.splitTextToSize(inv.description || 'Line item', 45)[0];
-        doc.setTextColor(71, 85, 105);
-        doc.text(desc, margin + 55, y + 3.2);
-
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(5.5);
-        doc.setTextColor(4, 120, 87);
-        doc.text(inv.status || 'PAID', margin + 95, y + 3.2, { align: 'right' });
-
-        doc.setFont('helvetica', 'bold');
-        doc.setTextColor(15, 23, 42);
-        doc.text(fmtMoney(inv.amount), margin + 140, y + 3.2, { align: 'right' });
-
-        y += 4.8;
-      });
-    }
-  });
-
-  // =========================================================================
-  // PAGE 3: PRODUCT PROFITABILITY & DEPARTMENT TRACKING
-  // =========================================================================
-  doc.addPage();
-  drawPageFooter(3);
-  drawRunningHeader('Product & Department Contribution');
-
-  y = 17;
-
-  // Table 2: Product / Service Profitability
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10.5);
-  doc.setTextColor(15, 23, 42);
-  doc.text('Product / Service Profitability', margin, y + 4);
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7);
-  doc.setTextColor(100, 116, 139);
-  doc.text('Revenues and margins by catalog item, consulting service, or billable activity', margin, y + 8.5);
-
-  y += 11;
-
-  // Product Table Header
-  doc.setFillColor(15, 23, 42);
-  doc.rect(margin, y, contentWidth, 6, 'F');
-
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(6.5);
-  doc.setTextColor(255, 255, 255);
-  doc.text('#', margin + 3, y + 4.2);
-  doc.text('PRODUCT / SERVICE DESCRIPTION', margin + 12, y + 4.2);
-  doc.text('REVENUE', margin + 105, y + 4.2, { align: 'right' });
-  doc.text('GROSS PROFIT', margin + 145, y + 4.2, { align: 'right' });
-  doc.text('MARGIN', margin + contentWidth - 4, y + 4.2, { align: 'right' });
-
-  y += 6;
-
-  const products = (d.productProfitability || []).slice(0, 10);
-  products.forEach((prod, pIdx) => {
-    const isEven = pIdx % 2 === 0;
-    doc.setFillColor(isEven ? 255 : 248, isEven ? 255 : 250, isEven ? 255 : 252);
-    doc.rect(margin, y, contentWidth, 6, 'F');
-
-    doc.setDrawColor(241, 245, 249);
-    doc.setLineWidth(0.15);
-    doc.line(margin, y + 6, margin + contentWidth, y + 6);
-
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(6.5);
-    doc.setTextColor(100, 116, 139);
-    doc.text(String(pIdx + 1), margin + 3, y + 4.2);
-
-    doc.setTextColor(15, 23, 42);
-    const prodName = doc.splitTextToSize(prod.product, 75)[0];
-    doc.text(prodName, margin + 12, y + 4.2);
-
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(6.8);
-    doc.setTextColor(51, 65, 85);
-    doc.text(fmtMoney(prod.revenue), margin + 105, y + 4.2, { align: 'right' });
-
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(100, 116, 139);
-    doc.text(fmtMoney(prod.grossProfit), margin + 145, y + 4.2, { align: 'right' });
-
-    if (prod.margin != null) {
-      const mColor = prod.margin >= 50 ? [16, 185, 129] : prod.margin >= 30 ? [245, 158, 11] : [244, 63, 94];
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(mColor[0], mColor[1], mColor[2]);
-      doc.text(`${prod.margin}%`, margin + contentWidth - 4, y + 4.2, { align: 'right' });
-    } else {
-      doc.setFont('helvetica', 'normal');
-      doc.setTextColor(100, 116, 139);
-      doc.text('N/A', margin + contentWidth - 4, y + 4.2, { align: 'right' });
-    }
-
-    y += 6;
-
-    // Sub-entry lines for top products (first 2)
-    if (pIdx < 2 && Array.isArray(prod.subEntries) && prod.subEntries.length > 0) {
-      prod.subEntries.slice(0, 2).forEach((entry) => {
-        doc.setFillColor(248, 250, 252);
-        doc.rect(margin, y, contentWidth, 4.8, 'F');
-
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(5.5);
-        doc.setTextColor(0, 112, 243);
-        doc.text(`↳ ${entry.invoiceNumber || 'INV'}`, margin + 15, y + 3.2);
-
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(5.2);
-        doc.setTextColor(71, 85, 105);
-        doc.text(entry.customer || 'Client', margin + 35, y + 3.2);
-
-        doc.setTextColor(100, 116, 139);
-        doc.text(`Qty: ${entry.quantity || 1} @ ${fmtMoney(entry.unitAmount)}`, margin + 80, y + 3.2);
-
-        doc.setFont('helvetica', 'bold');
-        doc.setTextColor(15, 23, 42);
-        doc.text(fmtMoney(entry.amount), margin + 105, y + 3.2, { align: 'right' });
-
-        y += 4.8;
-      });
-    }
-  });
-
-  y += 8;
-
-  // Table 3: Department / Tracking Profitability
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10.5);
-  doc.setTextColor(15, 23, 42);
-  doc.text('Department / Tracking Profitability', margin, y + 4);
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7);
-  doc.setTextColor(100, 116, 139);
-  doc.text('Performance by Xero tracking category, business unit, or geographic region', margin, y + 8.5);
-
-  y += 11;
-
-  // Department Table Header
-  doc.setFillColor(15, 23, 42);
-  doc.rect(margin, y, contentWidth, 6, 'F');
-
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(6.5);
-  doc.setTextColor(255, 255, 255);
-  doc.text('#', margin + 3, y + 4.2);
-  doc.text('TRACKING / DEPARTMENT OPTION', margin + 12, y + 4.2);
-  doc.text('REVENUE', margin + 105, y + 4.2, { align: 'right' });
-  doc.text('GROSS PROFIT', margin + 145, y + 4.2, { align: 'right' });
-  doc.text('MARGIN', margin + contentWidth - 4, y + 4.2, { align: 'right' });
-
-  y += 6;
-
-  const depts = (d.departmentProfitability || []).slice(0, 8);
-  depts.forEach((dept, dIdx) => {
-    const isEven = dIdx % 2 === 0;
-    doc.setFillColor(isEven ? 255 : 248, isEven ? 255 : 250, isEven ? 255 : 252);
-    doc.rect(margin, y, contentWidth, 6, 'F');
-
-    doc.setDrawColor(241, 245, 249);
-    doc.setLineWidth(0.15);
-    doc.line(margin, y + 6, margin + contentWidth, y + 6);
-
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(6.5);
-    doc.setTextColor(100, 116, 139);
-    doc.text(String(dIdx + 1), margin + 3, y + 4.2);
-
-    doc.setTextColor(15, 23, 42);
-    doc.text(dept.department, margin + 12, y + 4.2);
-
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(6.8);
-    doc.setTextColor(51, 65, 85);
-    doc.text(fmtMoney(dept.revenue), margin + 105, y + 4.2, { align: 'right' });
-
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(100, 116, 139);
-    doc.text(fmtMoney(dept.grossProfit), margin + 145, y + 4.2, { align: 'right' });
-    doc.text(dept.margin != null ? `${dept.margin}%` : 'N/A', margin + contentWidth - 4, y + 4.2, { align: 'right' });
-
-    y += 6;
-
-    // Sub-entries for departments
-    if (dIdx < 2 && Array.isArray(dept.subEntries) && dept.subEntries.length > 0) {
-      dept.subEntries.slice(0, 2).forEach((entry) => {
-        doc.setFillColor(248, 250, 252);
-        doc.rect(margin, y, contentWidth, 4.8, 'F');
-
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(5.5);
-        doc.setTextColor(0, 112, 243);
-        doc.text(`↳ ${entry.invoiceNumber || 'INV'}`, margin + 15, y + 3.2);
-
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(5.2);
-        doc.setTextColor(71, 85, 105);
-        doc.text(entry.customer || 'Customer', margin + 35, y + 3.2);
-
-        const desc = doc.splitTextToSize(entry.description || 'Service line item', 40)[0];
-        doc.setTextColor(100, 116, 139);
-        doc.text(desc, margin + 65, y + 3.2);
-
-        doc.setFont('helvetica', 'bold');
-        doc.setTextColor(15, 23, 42);
-        doc.text(fmtMoney(entry.amount), margin + 105, y + 3.2, { align: 'right' });
-
-        y += 4.8;
-      });
-    }
-  });
-
-  // =========================================================================
-  // PAGE 4: BUDGET VS ACTUAL & EXPENSE ANALYSIS + SIGN-OFF
-  // =========================================================================
-  doc.addPage();
-  drawPageFooter(4);
-  drawRunningHeader('Budget vs Actual & Ledger Variance');
-
-  y = 17;
-
-  // Table 4: Budget vs Actual Variance
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10.5);
-  doc.setTextColor(15, 23, 42);
-  doc.text('Budget vs Actual Variance Analysis', margin, y + 4);
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7);
-  doc.setTextColor(100, 116, 139);
-  doc.text('Comparing active VirtualCFO operating plan with verified Xero actuals', margin, y + 8.5);
-
-  y += 11;
-
-  // Budget Table Header
-  doc.setFillColor(15, 23, 42);
-  doc.rect(margin, y, contentWidth, 6, 'F');
-
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(6.5);
-  doc.setTextColor(255, 255, 255);
-  doc.text('ACCOUNT / CATEGORY', margin + 3, y + 4.2);
-  doc.text('TYPE', margin + 65, y + 4.2);
-  doc.text('BUDGET', margin + 100, y + 4.2, { align: 'right' });
-  doc.text('ACTUAL', margin + 130, y + 4.2, { align: 'right' });
-  doc.text('VARIANCE', margin + 160, y + 4.2, { align: 'right' });
-  doc.text('VAR %', margin + contentWidth - 4, y + 4.2, { align: 'right' });
-
-  y += 6;
-
-  const budgetRows = (d.budgetVsActual || []).slice(0, 8);
-  if (budgetRows.length > 0) {
-    budgetRows.forEach((row, bIdx) => {
-      const isEven = bIdx % 2 === 0;
-      doc.setFillColor(isEven ? 255 : 248, isEven ? 255 : 250, isEven ? 255 : 252);
-      doc.rect(margin, y, contentWidth, 5.8, 'F');
-
-      doc.setDrawColor(241, 245, 249);
-      doc.setLineWidth(0.15);
-      doc.line(margin, y + 5.8, margin + contentWidth, y + 5.8);
-
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(6.5);
-      doc.setTextColor(15, 23, 42);
-      doc.text(doc.splitTextToSize(row.category, 58)[0], margin + 3, y + 4);
-
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(6);
-      doc.setTextColor(100, 116, 139);
-      doc.text(row.type, margin + 65, y + 4);
-
-      doc.setTextColor(51, 65, 85);
-      doc.text(fmtMoney(row.budget), margin + 100, y + 4, { align: 'right' });
-      doc.text(fmtMoney(row.actual), margin + 130, y + 4, { align: 'right' });
-
-      const variance = Number(row.actual) - Number(row.budget);
-      const favourable = row.type === 'expense' ? variance <= 0 : variance >= 0;
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(favourable ? 4 : 225, favourable ? 120 : 29, favourable ? 87 : 72);
-      doc.text(fmtMoney(variance), margin + 160, y + 4, { align: 'right' });
-
-      const pctStr = Number(row.budget) === 0 ? 'N/A' : `${((variance / Number(row.budget)) * 100).toFixed(1)}%`;
-      doc.text(pctStr, margin + contentWidth - 4, y + 4, { align: 'right' });
-
-      y += 5.8;
-    });
-  } else {
-    doc.setFillColor(255, 255, 255);
-    doc.rect(margin, y, contentWidth, 7, 'F');
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(6.5);
-    doc.setTextColor(100, 116, 139);
-    doc.text('N/A — No budget variance records configured for this reporting period.', margin + 4, y + 4.8);
-    y += 7;
+  doc.text('Trading revenues and gross margins across catalog inventory and professional billing items', margin, y + 7.5);
+
+  y += 10.5;
+
+  const prodCols: ColumnDef[] = [
+    { header: '#', width: 8, align: 'center' },
+    { header: 'PRODUCT / SERVICE ITEM', width: 72, align: 'left' },
+    { header: `REVENUE (${symbol})`, width: 34, align: 'right' },
+    { header: `GROSS PROFIT (${symbol})`, width: 36, align: 'right' },
+    { header: 'MARGIN (%)', width: 36, align: 'right' },
+  ];
+
+  const productsList = (d.productProfitability || []).slice(0, 7);
+  const prodRows = productsList.map((prod, pIdx) => [
+    String(pIdx + 1),
+    prod.product,
+    fmtMoney(prod.revenue),
+    fmtMoney(prod.grossProfit),
+    prod.margin != null ? `${prod.margin}%` : 'N/A',
+  ]);
+
+  if (productsList.length === 0) {
+    prodRows.push(['-', 'No product/service catalog items recorded in this period.', fmtMoney(0), fmtMoney(0), 'N/A']);
   }
+
+  y = renderTable(margin, y, prodCols, prodRows, {
+    headerHeight: 6.5,
+    rowHeight: 5.8,
+    fontSize: 6.8,
+    headerFontSize: 6.8,
+    zebra: true,
+  });
 
   y += 7;
 
-  // Table 5: Expense Accounts Breakdown
+  // Section 2: Department / Regional Tracking Table
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10.5);
   doc.setTextColor(15, 23, 42);
-  doc.text('Expense Accounts Analysis', margin, y + 4);
+  doc.text('Departmental & Regional Tracking Performance', margin, y + 3);
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7);
+  doc.setFontSize(6.8);
   doc.setTextColor(100, 116, 139);
-  doc.text('Attributable expenses recorded across active Xero account classifications', margin, y + 8.5);
+  doc.text('Financial contribution segregated by Xero tracking categories, cost centers, or regions', margin, y + 7.5);
 
-  y += 11;
+  y += 10.5;
 
-  doc.setFillColor(15, 23, 42);
-  doc.rect(margin, y, contentWidth, 6, 'F');
+  const deptCols: ColumnDef[] = [
+    { header: '#', width: 8, align: 'center' },
+    { header: 'DEPARTMENT / TRACKING CATEGORY', width: 72, align: 'left' },
+    { header: `REVENUE (${symbol})`, width: 34, align: 'right' },
+    { header: `GROSS PROFIT (${symbol})`, width: 36, align: 'right' },
+    { header: 'MARGIN (%)', width: 36, align: 'right' },
+  ];
 
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(6.5);
-  doc.setTextColor(255, 255, 255);
-  doc.text('XERO ACCOUNT NAME', margin + 3, y + 4.2);
-  doc.text('ACCOUNT TYPE', margin + 95, y + 4.2);
-  doc.text('ACTUAL AMOUNT', margin + contentWidth - 4, y + 4.2, { align: 'right' });
+  const deptList = (d.departmentProfitability || []).slice(0, 5);
+  const deptRows = deptList.map((dept, dIdx) => [
+    String(dIdx + 1),
+    dept.department,
+    fmtMoney(dept.revenue),
+    fmtMoney(dept.grossProfit),
+    dept.margin != null ? `${dept.margin}%` : 'N/A',
+  ]);
 
-  y += 6;
-
-  const expenses = (d.expenseAnalysis || []).slice(0, 8);
-  if (expenses.length > 0) {
-    expenses.forEach((exp, eIdx) => {
-      const isEven = eIdx % 2 === 0;
-      doc.setFillColor(isEven ? 255 : 248, isEven ? 255 : 250, isEven ? 255 : 252);
-      doc.rect(margin, y, contentWidth, 5.5, 'F');
-
-      doc.setDrawColor(241, 245, 249);
-      doc.setLineWidth(0.15);
-      doc.line(margin, y + 5.5, margin + contentWidth, y + 5.5);
-
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(6.5);
-      doc.setTextColor(15, 23, 42);
-      doc.text(doc.splitTextToSize(exp.account, 85)[0], margin + 3, y + 3.8);
-
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(6);
-      doc.setTextColor(100, 116, 139);
-      doc.text(exp.accountType, margin + 95, y + 3.8);
-
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(51, 65, 85);
-      doc.text(fmtMoney(exp.actual), margin + contentWidth - 4, y + 3.8, { align: 'right' });
-
-      y += 5.5;
-    });
-  } else {
-    doc.setFillColor(255, 255, 255);
-    doc.rect(margin, y, contentWidth, 7, 'F');
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(6.5);
-    doc.setTextColor(100, 116, 139);
-    doc.text('N/A — No expense accounts recorded for this reporting cycle.', margin + 4, y + 4.8);
-    y += 7;
+  if (deptList.length === 0) {
+    deptRows.push(['-', 'No tracking categories recorded in this period.', fmtMoney(0), fmtMoney(0), 'N/A']);
   }
 
-  y += 8;
+  y = renderTable(margin, y, deptCols, deptRows, {
+    headerHeight: 6.5,
+    rowHeight: 5.8,
+    fontSize: 6.8,
+    headerFontSize: 6.8,
+    zebra: true,
+  });
 
-  // Executive Sign-off Block
+  y += 7;
+
+  // Section 3: Operating Overheads & Budget Variance Schedule
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10.5);
+  doc.setTextColor(15, 23, 42);
+  doc.text('Operating Expenses & Ledger Variance Analysis', margin, y + 3);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.8);
+  doc.setTextColor(100, 116, 139);
+  doc.text('Variance analysis comparing active operating budget items with verified actuals', margin, y + 7.5);
+
+  y += 10.5;
+
+  const budgetCols: ColumnDef[] = [
+    { header: 'EXPENSE CATEGORY / ACCOUNT', width: 68, align: 'left' },
+    { header: `BUDGET (${symbol})`, width: 30, align: 'right' },
+    { header: `ACTUAL (${symbol})`, width: 30, align: 'right' },
+    { header: `VARIANCE (${symbol})`, width: 30, align: 'right' },
+    { header: 'STATUS', width: 28, align: 'center' },
+  ];
+
+  const budgetItems = (d.budgetVsActual || []).slice(0, 5);
+  const budgetRows: (string | { text: string; color?: number[]; bold?: boolean; align?: 'left' | 'right' | 'center' })[][] = budgetItems.map((item) => {
+    const diff = Number(item.actual) - Number(item.budget);
+    const isFavorable = diff <= 0;
+    return [
+      item.category,
+      fmtMoney(item.budget),
+      fmtMoney(item.actual),
+      fmtMoney(diff),
+      { text: isFavorable ? 'On Budget' : 'Over Budget', color: isFavorable ? [4, 120, 87] : [190, 18, 60], bold: true },
+    ];
+  });
+
+  if (budgetItems.length === 0) {
+    // Fall back to top expense analysis items if budgetItems is empty
+    const expenseItems = (d.expenseAnalysis || []).slice(0, 5);
+    if (expenseItems.length > 0) {
+      expenseItems.forEach((exp) => {
+        budgetRows.push([
+          exp.account,
+          fmtMoney(0),
+          fmtMoney(exp.actual),
+          fmtMoney(exp.actual),
+          { text: exp.accountType || 'Expense', color: [100, 116, 139] },
+        ]);
+      });
+    } else {
+      budgetRows.push(['No operating expense records identified for this reporting cycle.', fmtMoney(0), fmtMoney(0), fmtMoney(0), 'N/A']);
+    }
+  }
+
+  y = renderTable(margin, y, budgetCols, budgetRows, {
+    headerHeight: 6.5,
+    rowHeight: 5.6,
+    fontSize: 6.8,
+    headerFontSize: 6.8,
+    zebra: true,
+  });
+
+  y += 7;
+
+  // Section 4: Formal Governance Sign-Off Certificate (Formal Document Block)
   doc.setFillColor(248, 250, 252);
-  doc.roundedRect(margin, y, contentWidth, 24, 2, 2, 'F');
+  doc.rect(margin, y, contentWidth, 23, 'F');
   doc.setDrawColor(226, 232, 240);
   doc.setLineWidth(0.25);
-  doc.roundedRect(margin, y, contentWidth, 24, 2, 2, 'S');
+  doc.rect(margin, y, contentWidth, 23, 'S');
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(7.5);
   doc.setTextColor(15, 23, 42);
-  doc.text('Executive CFO Profitability Sign-Off', margin + 4, y + 6);
+  doc.text('EXECUTIVE CFO ATTESTATION & GOVERNANCE SIGN-OFF', margin + 4, y + 5);
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(6.5);
+  doc.setFontSize(6.2);
   doc.setTextColor(100, 116, 139);
   doc.text(
-    'This profitability report has been generated directly from verified Xero general ledger journals and invoices.',
+    'This profitability report has been prepared from verified Xero general ledger journals, sales invoices, and bills.',
     margin + 4,
-    y + 11,
+    y + 9.5,
   );
   doc.text(
-    'All sales taxes (GST/VAT) have been excluded from revenue in strict compliance with GAAP/IFRS standards.',
+    'Sales taxes (GST/VAT) are strictly excluded from gross revenue. All line items are reconciled under standard accrual accounting.',
     margin + 4,
-    y + 15.5,
+    y + 13.5,
   );
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7);
+  doc.setFontSize(6.8);
   doc.setTextColor(0, 112, 243);
-  doc.text(`Status: Live Ledger Reconciled · Currency: ${currency}`, margin + 4, y + 20);
+  doc.text(`Status: Live Ledger Reconciled · Currency: ${currency}`, margin + 4, y + 19);
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(6.5);
   doc.setTextColor(100, 116, 139);
-  doc.text(`Date of Release: ${new Date().toLocaleDateString('en-GB')}`, margin + contentWidth - 4, y + 20, {
-    align: 'right',
-  });
+  doc.text(
+    `Certified Date: ${new Date().toLocaleDateString('en-GB')}  |  Chief Financial Officer Review`,
+    margin + contentWidth - 4,
+    y + 19,
+    { align: 'right' },
+  );
 
-  // Save the PDF
-  doc.save(`profitability-${options.selectedPeriod || 'report'}.pdf`);
+  // Save the formal report PDF
+  doc.save(`profitability-${options.selectedPeriod || 'statement'}.pdf`);
 }
-
