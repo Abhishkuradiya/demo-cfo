@@ -1868,9 +1868,9 @@ export default function BudgetingPage() {
                   >
                     <MetricCard
                       title="Revenue"
-                      value={formatMoney.format(actualRev)}
+                      value={actualRev != null && Number.isFinite(Number(actualRev)) ? formatMoney.format(actualRev) : 'N/A'}
                       badge={
-                        revVariance !== 0
+                        revVariance !== 0 && Number.isFinite(Number(revVariancePct))
                           ? `${revVariance >= 0 ? '+' : ''}${revVariancePct.toFixed(2)}% vs Budget`
                           : undefined
                       }
@@ -1880,25 +1880,25 @@ export default function BudgetingPage() {
                     />
                     <MetricCard
                       title="Gross margin"
-                      value={`${actualGrossMargin.toFixed(2)}%`}
-                      badge={`${formatMoney.format(actualGrossProfit)} GP`}
+                      value={actualGrossMargin != null && Number.isFinite(Number(actualGrossMargin)) ? `${actualGrossMargin.toFixed(2)}%` : 'N/A'}
+                      badge={actualGrossProfit != null && Number.isFinite(Number(actualGrossProfit)) ? `${formatMoney.format(actualGrossProfit)} GP` : undefined}
                       badgeType="favorable"
-                      detail={`${formatMoney.format(actualGrossProfit)} gross profit`}
+                      detail={actualGrossProfit != null && Number.isFinite(Number(actualGrossProfit)) ? `${formatMoney.format(actualGrossProfit)} gross profit` : 'Gross profit unavailable'}
                       accent="border-l-emerald-600"
                     />
                     <MetricCard
                       title="Operating expenses"
-                      value={formatMoney.format(rawOpex)}
+                      value={rawOpex != null && Number.isFinite(Number(rawOpex)) ? formatMoney.format(rawOpex) : 'N/A'}
                       detail={`Operating costs · ${data.periodInfo?.label ?? 'selected period'}`}
                       accent="border-l-amber-600"
                     />
                     <MetricCard
                       title="EBITDA"
-                      value={formatMoney.format(actualEbitda)}
-                      badge={`${actualEbitdaMargin.toFixed(2)}% margin`}
-                      badgeType={actualEbitda >= 0 ? 'favorable' : 'unfavorable'}
-                      detail={`${actualEbitdaMargin.toFixed(2)}% EBITDA margin`}
-                      accent={actualEbitda >= 0 ? 'border-l-emerald-600' : 'border-l-rose-600'}
+                      value={actualEbitda != null && Number.isFinite(Number(actualEbitda)) ? formatMoney.format(actualEbitda) : 'N/A'}
+                      badge={actualEbitdaMargin != null && Number.isFinite(Number(actualEbitdaMargin)) ? `${actualEbitdaMargin.toFixed(2)}% margin` : undefined}
+                      badgeType={actualEbitda != null && actualEbitda >= 0 ? 'favorable' : 'unfavorable'}
+                      detail={actualEbitdaMargin != null && Number.isFinite(Number(actualEbitdaMargin)) ? `${actualEbitdaMargin.toFixed(2)}% EBITDA margin` : 'EBITDA margin unavailable'}
+                      accent={actualEbitda != null && actualEbitda >= 0 ? 'border-l-emerald-600' : 'border-l-slate-400'}
                     />
                     <MetricCard
                       title="Cash position"
