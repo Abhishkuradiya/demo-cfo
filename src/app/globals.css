@@ -271,26 +271,69 @@
   scrollbar-color: #cbd5e1 transparent;
 }
 
-/* Clearly Visible Prominent Scrollbar for Finance Tables */
+/* Sleek, Professional Finance Table Scrollbar: Hidden Vertical, Elegant Horizontal */
 .custom-table-scrollbar::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 0px !important;
+  height: 6px !important;
 }
+
+.custom-table-scrollbar::-webkit-scrollbar:vertical {
+  width: 0px !important;
+  max-width: 0px !important;
+  height: 0px !important;
+  display: none !important;
+  background: transparent !important;
+}
+
+.custom-table-scrollbar::-webkit-scrollbar-thumb:vertical {
+  width: 0px !important;
+  max-width: 0px !important;
+  height: 0px !important;
+  display: none !important;
+  background: transparent !important;
+}
+
+.custom-table-scrollbar::-webkit-scrollbar-track:vertical {
+  width: 0px !important;
+  max-width: 0px !important;
+  height: 0px !important;
+  display: none !important;
+  background: transparent !important;
+}
+
+.custom-table-scrollbar::-webkit-scrollbar:horizontal {
+  height: 6px !important;
+  display: block !important;
+}
+
+.custom-table-scrollbar::-webkit-scrollbar-button {
+  display: none !important;
+  width: 0px !important;
+  height: 0px !important;
+}
+
+.custom-table-scrollbar::-webkit-scrollbar-track:horizontal,
 .custom-table-scrollbar::-webkit-scrollbar-track {
   background: #f1f5f9;
-  border-radius: 6px;
+  border-radius: 9999px;
 }
+
+.custom-table-scrollbar::-webkit-scrollbar-thumb:horizontal,
 .custom-table-scrollbar::-webkit-scrollbar-thumb {
-  background: #94a3b8;
-  border-radius: 6px;
-  border: 2px solid #f1f5f9;
+  background: #cbd5e1;
+  border-radius: 9999px;
+  border: 1px solid #f1f5f9;
+  transition: background-color 0.2s ease;
 }
+
+.custom-table-scrollbar::-webkit-scrollbar-thumb:horizontal:hover,
 .custom-table-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: #475569;
+  background: #94a3b8;
 }
-.custom-table-scrollbar {
-  scrollbar-width: auto;
-  scrollbar-color: #94a3b8 #f1f5f9;
+
+.custom-table-scrollbar::-webkit-scrollbar-corner {
+  background: transparent;
+  display: none !important;
 }
 
 @keyframes shimmer {

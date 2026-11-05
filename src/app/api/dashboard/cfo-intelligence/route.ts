@@ -479,11 +479,11 @@ export async function GET(req: NextRequest) {
     }
 
     let grossProfit = totalRevenue - cogs;
-    let grossMarginPct = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
+    let grossMarginPct = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : null;
     let opexFixed: number | null = null;
     let opexVariable: number | null = null;
     let netProfit = grossProfit - totalExpenses;
-    let netMarginPct = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
+    let netMarginPct = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : null;
     let ebitda: number | null = null;
     let ebitdaMarginPct: number | null = ebitda !== null && totalRevenue > 0 ? (ebitda / totalRevenue) * 100 : null;
 
@@ -822,11 +822,11 @@ export async function GET(req: NextRequest) {
         }
 
         grossProfit = parseFloat((totalRevenue - cogs).toFixed(2));
-        grossMarginPct = totalRevenue > 0 ? parseFloat(((grossProfit / totalRevenue) * 100).toFixed(2)) : 0;
+        grossMarginPct = totalRevenue > 0 ? parseFloat(((grossProfit / totalRevenue) * 100).toFixed(2)) : null;
         opexFixed = null;
         opexVariable = null;
         netProfit = parseFloat((grossProfit - totalExpenses).toFixed(2));
-        netMarginPct = totalRevenue > 0 ? parseFloat(((netProfit / totalRevenue) * 100).toFixed(2)) : 0;
+        netMarginPct = totalRevenue > 0 ? parseFloat(((netProfit / totalRevenue) * 100).toFixed(2)) : null;
         ebitda = null;
         ebitdaMarginPct = null;
       } catch (err) {
@@ -1002,7 +1002,7 @@ export async function GET(req: NextRequest) {
     // ----------------------------------------------------
 
     // 1. Customer Profitability Breakdown from DB Invoices (filtered to active period)
-    const customerMap: Record<string, { revenue: number }> = {};
+    const customerMap: Record<string, { revenue: number; invoices: any[] }> = {};
     for (const inv of invoices) {
       const invType = inv.Type || inv.type;
       const invStatus = (inv.Status || inv.status || '').toUpperCase();
@@ -1021,9 +1021,28 @@ export async function GET(req: NextRequest) {
           ? subtotal
           : lineItems.reduce((sum: number, item: any) => sum + (Number(item.LineAmount ?? item.line_amount) || 0), 0);
         if (!customerMap[cName]) {
-          customerMap[cName] = { revenue: 0 };
+          customerMap[cName] = { revenue: 0, invoices: [] };
         }
         customerMap[cName].revenue += total;
+
+        const mainDesc = lineItems.map((li: any) => li.Description || li.description).filter(Boolean).join('; ') || 'Invoice Billing Activity';
+        customerMap[cName].invoices.push({
+          id: inv.InvoiceID || inv.external_id || inv.id || `${cName}-${customerMap[cName].invoices.length + 1}`,
+          invoiceNumber: inv.InvoiceNumber || inv.invoice_number || `INV-${String(customerMap[cName].invoices.length + 1).padStart(4, '0')}`,
+          reference: inv.Reference || inv.reference || '',
+          date: inv.Date || inv.invoice_date || '',
+          dueDate: inv.DueDate || inv.due_date || '',
+          status: invStatus || 'PAID',
+          amount: parseFloat(total.toFixed(2)),
+          description: mainDesc,
+          lineItems: lineItems.map((li: any) => ({
+            description: li.Description || li.description || 'Service',
+            quantity: Number(li.Quantity ?? li.quantity ?? 1),
+            unitAmount: Number(li.UnitAmount ?? li.unit_amount ?? 0),
+            lineAmount: Number(li.LineAmount ?? li.line_amount ?? 0),
+            itemCode: li.ItemCode || li.item_code || ''
+          }))
+        });
       }
     }
 
@@ -1033,48 +1052,95 @@ export async function GET(req: NextRequest) {
         revenue: parseFloat(val.revenue.toFixed(2)),
         grossProfit: null,
         margin: null,
-        profitabilityAvailable: false
+        profitabilityAvailable: false,
+        invoices: val.invoices.sort((a, b) => b.amount - a.amount)
       };
     }).sort((a, b) => b.revenue - a.revenue);
 
     // 2. Product / Service Profitability Breakdown
-    const productRevenueMap = new Map<string, number>();
+    const productRevenueMap = new Map<string, { revenue: number; subEntries: any[] }>();
     for (const inv of invoices) {
       const invType = inv.Type || inv.type;
       const invStatus = String(inv.Status || inv.status || '').toUpperCase();
       const invDate = inv.invoice_date || inv.Date || inv.date;
       if (invType !== 'ACCREC' || !['PAID', 'AUTHORISED'].includes(invStatus) || !filterByPeriod(invDate)) continue;
       const lineItems = Array.isArray(inv.LineItems) ? inv.LineItems : Array.isArray(inv.line_items) ? inv.line_items : [];
+      const customer = inv.Contact?.Name || inv.ContactName || 'Customer';
+      const invNum = inv.InvoiceNumber || inv.invoice_number || 'INV';
       for (const item of lineItems) {
         const name = String(item.ItemCode || item.Description || '').trim();
         const amount = Number(item.LineAmount ?? item.line_amount);
         if (!name || !Number.isFinite(amount)) continue;
-        productRevenueMap.set(name, (productRevenueMap.get(name) || 0) + amount);
+        if (!productRevenueMap.has(name)) {
+          productRevenueMap.set(name, { revenue: 0, subEntries: [] });
+        }
+        const entry = productRevenueMap.get(name)!;
+        entry.revenue += amount;
+        entry.subEntries.push({
+          id: `${invNum}-${entry.subEntries.length + 1}`,
+          invoiceNumber: invNum,
+          customer: customer,
+          date: invDate || '',
+          quantity: Number(item.Quantity ?? item.quantity ?? 1),
+          unitAmount: Number(item.UnitAmount ?? item.unit_amount ?? amount),
+          amount: parseFloat(amount.toFixed(2)),
+          description: item.Description || item.description || name,
+          accountCode: item.AccountCode || item.account_code || ''
+        });
       }
     }
     const productProfitability = [...productRevenueMap.entries()]
-      .map(([product, revenue]) => ({ product, revenue: parseFloat(revenue.toFixed(2)), grossProfit: null, margin: null }))
+      .map(([product, val]) => ({
+        product,
+        revenue: parseFloat(val.revenue.toFixed(2)),
+        grossProfit: null,
+        margin: null,
+        subEntries: val.subEntries.sort((a, b) => b.amount - a.amount)
+      }))
       .sort((a, b) => b.revenue - a.revenue);
 
     // 3. Department / Tracking Category Breakdown
-    const trackingRevenueMap = new Map<string, number>();
+    const trackingRevenueMap = new Map<string, { revenue: number; subEntries: any[] }>();
     for (const inv of invoices) {
       const invType = inv.Type || inv.type;
       const invStatus = String(inv.Status || inv.status || '').toUpperCase();
       const invDate = inv.invoice_date || inv.Date || inv.date;
       if (invType !== 'ACCREC' || !['PAID', 'AUTHORISED'].includes(invStatus) || !filterByPeriod(invDate)) continue;
       const lineItems = Array.isArray(inv.LineItems) ? inv.LineItems : Array.isArray(inv.line_items) ? inv.line_items : [];
+      const customer = inv.Contact?.Name || inv.ContactName || 'Customer';
+      const invNum = inv.InvoiceNumber || inv.invoice_number || 'INV';
       for (const item of lineItems) {
         const amount = Number(item.LineAmount ?? item.line_amount);
         if (!Number.isFinite(amount)) continue;
         for (const tracking of item.Tracking || item.tracking || []) {
           const name = String(tracking.Option || tracking.option || '').trim();
-          if (name) trackingRevenueMap.set(name, (trackingRevenueMap.get(name) || 0) + amount);
+          if (!name) continue;
+          if (!trackingRevenueMap.has(name)) {
+            trackingRevenueMap.set(name, { revenue: 0, subEntries: [] });
+          }
+          const deptEntry = trackingRevenueMap.get(name)!;
+          deptEntry.revenue += amount;
+          deptEntry.subEntries.push({
+            id: `${invNum}-${deptEntry.subEntries.length + 1}`,
+            invoiceNumber: invNum,
+            customer: customer,
+            date: invDate || '',
+            description: item.Description || item.description || String(item.ItemCode || 'Service Activity'),
+            quantity: Number(item.Quantity ?? item.quantity ?? 1),
+            amount: parseFloat(amount.toFixed(2)),
+            category: tracking.Name || tracking.name || 'Department'
+          });
         }
       }
     }
     const departmentProfitability = [...trackingRevenueMap.entries()]
-      .map(([department, revenue]) => ({ department, revenue: parseFloat(revenue.toFixed(2)), grossProfit: null, margin: null }))
+      .map(([department, val]) => ({
+        department,
+        revenue: parseFloat(val.revenue.toFixed(2)),
+        grossProfit: null,
+        margin: null,
+        subEntries: val.subEntries.sort((a, b) => b.amount - a.amount)
+      }))
       .sort((a, b) => b.revenue - a.revenue);
 
     const MONTH_LABELS_12 = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];

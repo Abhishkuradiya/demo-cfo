@@ -366,80 +366,80 @@ export function BreakevenAnalysis({ data, fmt }: BreakevenProps) {
           </div>
 
           {/* Right Summary Sidebar matching reference screenshot */}
-          <div className="w-full lg:w-80 shrink-0 space-y-6 pt-1">
-            <h2 id="profitability-breakeven-title" className="text-2xl font-bold tracking-tight text-slate-800">
+          <div className="w-full lg:w-72 shrink-0 space-y-4 pt-1">
+            <h2 id="profitability-breakeven-title" className="text-xl font-bold tracking-tight text-slate-800">
               Breakeven
             </h2>
 
             {/* REVENUE */}
-            <div className="space-y-1">
+            <div className="space-y-0.5">
               <div className="flex items-center gap-2">
-                <span className="flex h-4 w-4 items-center justify-center rounded-full border-2 border-[#84cc16]">
-                  <span className="h-1.5 w-1.5 rounded-full bg-[#84cc16]" />
+                <span className="flex h-3.5 w-3.5 items-center justify-center rounded-full border-2 border-[#84cc16]">
+                  <span className="h-1 w-1 rounded-full bg-[#84cc16]" />
                 </span>
-                <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
                   Revenue
                 </span>
               </div>
-              <p className="text-3xl font-bold tabular-nums text-slate-900 tracking-tight">
+              <p className="text-[22px] font-bold tabular-nums text-slate-900 tracking-tight leading-tight">
                 {fmt(beRevenue)}
               </p>
               <button
                 type="button"
                 onClick={() => setShowRevenueModal(true)}
-                className="text-xs font-medium text-emerald-600 underline decoration-dotted underline-offset-2 hover:text-emerald-700 cursor-pointer transition block"
+                className="text-[11px] font-medium text-emerald-600 underline decoration-dotted underline-offset-2 hover:text-emerald-700 cursor-pointer transition block"
               >
                 Top ten Revenue accounts
               </button>
             </div>
 
             {/* TOTAL COSTS */}
-            <div className="space-y-1">
+            <div className="space-y-0.5">
               <div className="flex items-center gap-2">
-                <span className="flex h-4 w-4 items-center justify-center rounded-full border-2 border-rose-500">
-                  <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
+                <span className="flex h-3.5 w-3.5 items-center justify-center rounded-full border-2 border-rose-500">
+                  <span className="h-1 w-1 rounded-full bg-rose-500" />
                 </span>
-                <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
                   Total Costs
                 </span>
               </div>
-              <p className="text-3xl font-bold tabular-nums text-slate-900 tracking-tight">
+              <p className="text-[22px] font-bold tabular-nums text-slate-900 tracking-tight leading-tight">
                 {fmt(beTotalCosts)}
               </p>
               <button
                 type="button"
                 onClick={() => setShowCostModal(true)}
-                className="text-xs font-medium text-emerald-600 underline decoration-dotted underline-offset-2 hover:text-emerald-700 cursor-pointer transition block"
+                className="text-[11px] font-medium text-emerald-600 underline decoration-dotted underline-offset-2 hover:text-emerald-700 cursor-pointer transition block"
               >
                 Top ten Expense and COS accounts
               </button>
             </div>
 
             {/* BREAKEVEN POINT */}
-            <div className="space-y-1">
+            <div className="space-y-0.5">
               <div className="flex items-center gap-2">
-                <span className="flex h-4 w-4 items-center justify-center rounded-full border-2 border-slate-700">
-                  <span className="h-1.5 w-1.5 rounded-full bg-slate-700" />
+                <span className="flex h-3.5 w-3.5 items-center justify-center rounded-full border-2 border-slate-700">
+                  <span className="h-1 w-1 rounded-full bg-slate-700" />
                 </span>
-                <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
                   Breakeven Point
                 </span>
               </div>
-              <p className="text-3xl font-bold tabular-nums text-slate-900 tracking-tight">
-                {beBreakEvenSales != null ? fmt(beBreakEvenSales) : 'Not Available'}
+              <p className="text-[22px] font-bold tabular-nums text-slate-900 tracking-tight leading-tight">
+                {beBreakEvenSales != null ? fmt(beBreakEvenSales) : 'N/A'}
               </p>
             </div>
 
             {/* MARGIN OF SAFETY */}
-            <div className="space-y-1">
-              <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+            <div className="space-y-0.5">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
                 Margin of Safety
               </p>
-              <p className="text-3xl font-bold tabular-nums text-slate-900 tracking-tight">
-                {beMarginOfSafety != null ? fmt(beMarginOfSafety) : 'Not Available'}
+              <p className="text-[22px] font-bold tabular-nums text-slate-900 tracking-tight leading-tight">
+                {beMarginOfSafety != null ? fmt(beMarginOfSafety) : 'N/A'}
               </p>
               {beMarginOfSafetyPct != null && (
-                <p className="text-xs text-slate-400 font-medium">
+                <p className="text-[11px] text-slate-400 font-medium">
                   {beMarginOfSafetyPct >= 0 ? '+' : ''}
                   {beMarginOfSafetyPct.toFixed(1)}% of Revenue
                 </p>
@@ -447,35 +447,35 @@ export function BreakevenAnalysis({ data, fmt }: BreakevenProps) {
             </div>
 
             {/* VARIABLE COSTS */}
-            <div className="space-y-1 pt-1">
+            <div className="space-y-0.5 pt-0.5">
               <div className="flex items-center gap-2">
                 <div className="flex items-center gap-0.5">
-                  <span className="h-0.5 w-2.5 bg-rose-500" />
-                  <span className="h-2 w-2 rounded-full bg-rose-500" />
-                  <span className="h-0.5 w-2.5 bg-rose-500" />
+                  <span className="h-0.5 w-2 bg-rose-500" />
+                  <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
+                  <span className="h-0.5 w-2 bg-rose-500" />
                 </div>
-                <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
                   Variable Costs
                 </span>
               </div>
-              <p className="text-sm font-bold text-slate-800">
+              <p className="text-xs font-semibold text-slate-800">
                 {fmt(beVariableCostRatio)} per {currencySymbol}1 of Revenue
               </p>
             </div>
 
             {/* FIXED COSTS */}
-            <div className="space-y-1">
+            <div className="space-y-0.5">
               <div className="flex items-center gap-2">
                 <div className="flex items-center gap-0.5">
-                  <span className="h-0.5 w-2.5 bg-slate-700" />
-                  <span className="h-2 w-2 rounded-full bg-slate-700" />
-                  <span className="h-0.5 w-2.5 bg-slate-700" />
+                  <span className="h-0.5 w-2 bg-slate-700" />
+                  <span className="h-1.5 w-1.5 rounded-full bg-slate-700" />
+                  <span className="h-0.5 w-2 bg-slate-700" />
                 </div>
-                <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
                   Fixed Costs
                 </span>
               </div>
-              <p className="text-lg font-bold text-slate-900 tabular-nums">
+              <p className="text-sm font-semibold text-slate-900 tabular-nums">
                 {fmt(beFixedCosts)}
               </p>
             </div>
@@ -628,3 +628,4 @@ export function BreakevenAnalysis({ data, fmt }: BreakevenProps) {
     </>
   );
 }
+

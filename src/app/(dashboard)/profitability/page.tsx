@@ -15,6 +15,7 @@ import {
   FileSpreadsheet,
   Sparkles,
   ChevronRight,
+  ChevronDown,
   Percent,
   Coins,
   Activity,
@@ -37,6 +38,30 @@ export default function ProfitabilityAnalysisPage() {
   const [aiAnswers, setAiAnswers] = useState<string[]>([]);
   const [copilotChatId, setCopilotChatId] = useState<string | null>(null);
   const [exporting, setExporting] = useState<'xlsx' | 'pdf' | null>(null);
+  const [expandedCustomers, setExpandedCustomers] = useState<Record<string, boolean>>({});
+  const [expandedProducts, setExpandedProducts] = useState<Record<string, boolean>>({});
+  const [expandedDepartments, setExpandedDepartments] = useState<Record<string, boolean>>({});
+
+  const toggleDepartment = (deptName: string) => {
+    setExpandedDepartments((prev) => ({
+      ...prev,
+      [deptName]: !prev[deptName],
+    }));
+  };
+
+  const toggleProduct = (productName: string) => {
+    setExpandedProducts((prev) => ({
+      ...prev,
+      [productName]: !prev[productName],
+    }));
+  };
+
+  const toggleCustomer = (customerName: string) => {
+    setExpandedCustomers((prev) => ({
+      ...prev,
+      [customerName]: !prev[customerName],
+    }));
+  };
 
   const [periodInfo, setPeriodInfo] = useState<any>(null);
   const [data, setData] = useState<any>({});
@@ -297,7 +322,7 @@ export default function ProfitabilityAnalysisPage() {
           params.forEach((p: any) => {
             const valStr =
               p.value == null
-                ? 'Not Available'
+                ? 'N/A'
                 : p.seriesName.includes('%')
                   ? `${Number(p.value).toFixed(2)}%`
                   : `${sym}${Number(p.value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -425,7 +450,7 @@ export default function ProfitabilityAnalysisPage() {
   }, [data, trendTimeframe]);
 
   const fmt = (val: number | null | undefined) => {
-    if (val == null || !Number.isFinite(Number(val))) return 'Not Available';
+    if (val == null || !Number.isFinite(Number(val))) return 'N/A';
     if (!data?.currency)
       return Number(val).toLocaleString(undefined, {
         minimumFractionDigits: 2,
@@ -456,12 +481,12 @@ export default function ProfitabilityAnalysisPage() {
     const current = data[metric];
     const previous = comparisonData?.[metric];
     if (current == null || previous == null) {
-      return <p className="mt-1 text-[10px] font-normal text-slate-400">Comparison unavailable</p>;
+      return <p className="mt-1 text-[11px] font-normal text-slate-400">N/A</p>;
     }
     const currentNum = Number(current);
     const previousNum = Number(previous);
     if (!Number.isFinite(currentNum) || !Number.isFinite(previousNum)) {
-      return <p className="mt-1 text-[10px] font-normal text-slate-400">Comparison unavailable</p>;
+      return <p className="mt-1 text-[11px] font-normal text-slate-400">N/A</p>;
     }
 
     if (percentagePoints) {
@@ -469,7 +494,7 @@ export default function ProfitabilityAnalysisPage() {
       const diffPp = currentNum - previousNum;
       if (Math.abs(diffPp) < 0.05) {
         return (
-          <p className="mt-1 flex items-center gap-1 text-[10px] font-medium text-slate-400">
+          <p className="mt-1 flex items-center gap-1 text-[11px] font-medium text-slate-400">
             <span>0.0pp</span>
             <span className="font-normal text-slate-400">{comparisonLabel}</span>
           </p>
@@ -479,8 +504,8 @@ export default function ProfitabilityAnalysisPage() {
       const Icon = diffPp > 0 ? ArrowUpRight : ArrowDownRight;
       const amount = `${Math.abs(diffPp).toFixed(1)}pp`;
       return (
-        <p className={cn('mt-1 flex items-center gap-1 text-[10px] font-medium leading-none', favorable ? 'text-emerald-600' : 'text-rose-600')}>
-          <Icon className="h-3 w-3 shrink-0 stroke-[2.5]" aria-hidden="true" />
+        <p className={cn('mt-1 flex items-center gap-1 text-[11px] font-medium leading-none', favorable ? 'text-emerald-600' : 'text-rose-600')}>
+          <Icon className="h-3.5 w-3.5 shrink-0 stroke-[2.5]" aria-hidden="true" />
           <span>{amount}</span>
           <span className="font-normal text-slate-400">{comparisonLabel}</span>
         </p>
@@ -489,13 +514,13 @@ export default function ProfitabilityAnalysisPage() {
 
     // Amount-based KPI calculations: ((Current - Previous) / ABS(Previous)) * 100
     if (previousNum === 0) {
-      return <p className="mt-1 text-[10px] font-normal text-slate-400">Comparison unavailable</p>;
+      return <p className="mt-1 text-[11px] font-normal text-slate-400">N/A</p>;
     }
 
     const difference = currentNum - previousNum;
     if (Math.abs(difference) < 0.005) {
       return (
-        <p className="mt-1 flex items-center gap-1 text-[10px] font-medium text-slate-400">
+        <p className="mt-1 flex items-center gap-1 text-[11px] font-medium text-slate-400">
           <span>0.0%</span>
           <span className="font-normal text-slate-400">{comparisonLabel}</span>
         </p>
@@ -507,8 +532,8 @@ export default function ProfitabilityAnalysisPage() {
     const Icon = difference > 0 ? ArrowUpRight : ArrowDownRight;
     const amount = `${Math.abs(pctChange).toFixed(1)}%`;
     return (
-      <p className={cn('mt-1 flex items-center gap-1 text-[10px] font-medium leading-none', favorable ? 'text-emerald-600' : 'text-rose-600')}>
-        <Icon className="h-3 w-3 shrink-0 stroke-[2.5]" aria-hidden="true" />
+      <p className={cn('mt-1 flex items-center gap-1 text-[11px] font-medium leading-none', favorable ? 'text-emerald-600' : 'text-rose-600')}>
+        <Icon className="h-3.5 w-3.5 shrink-0 stroke-[2.5]" aria-hidden="true" />
         <span>{amount}</span>
         <span className="font-normal text-slate-400">{comparisonLabel}</span>
       </p>
@@ -523,11 +548,9 @@ export default function ProfitabilityAnalysisPage() {
     { title: 'Gross Margin', metric: 'grossMarginPct', icon: Percent, iconClass: 'bg-purple-100 text-purple-700', percentage: true, percentagePoints: true },
     { title: 'Operating Margin', metric: 'operatingMarginPct', icon: TrendingUp, iconClass: 'bg-teal-100 text-teal-700', percentage: true, percentagePoints: true },
     { title: 'EBITDA', metric: 'ebitda', icon: Layers, iconClass: 'bg-indigo-100 text-indigo-700' },
-    { title: 'EBITDA Margin', metric: 'ebitdaMarginPct', icon: Percent, iconClass: 'bg-violet-100 text-violet-700', percentage: true, percentagePoints: true },
     { title: 'Operating Profit', metric: 'operatingProfit', icon: Sliders, iconClass: 'bg-orange-100 text-orange-700' },
     { title: 'Profit Before Tax', metric: 'profitBeforeTax', icon: DollarSign, iconClass: 'bg-sky-100 text-sky-700' },
     { title: 'Net Profit', metric: 'netProfit', icon: Activity, iconClass: 'bg-green-100 text-green-700' },
-    { title: 'Net Margin', metric: 'netMarginPct', icon: Percent, iconClass: 'bg-pink-100 text-pink-700', percentage: true, percentagePoints: true },
   ];
 
   const exportReport = async (format: 'xlsx' | 'pdf') => {
@@ -538,7 +561,7 @@ export default function ProfitabilityAnalysisPage() {
     setExporting(format);
     try {
       const rows: Array<[string, string | number | null]> = [
-        ['Organisation currency', data.currency || 'Not Available'],
+        ['Organisation currency', data.currency || 'N/A'],
         ['Reporting period', periodInfo?.label || selectedPeriod],
         ['Last data source', periodInfo?.dataSource || 'Xero PostgreSQL report cache'],
         ['Net Revenue', data.revenue],
@@ -575,7 +598,7 @@ export default function ProfitabilityAnalysisPage() {
             row.customer,
             row.revenue,
             null,
-            'Not Available: attributable direct costs missing',
+            'N/A: attributable direct costs missing',
           ]),
         ]);
         const productRevenue = workbook.addWorksheet('Product Revenue');
@@ -645,48 +668,15 @@ export default function ProfitabilityAnalysisPage() {
         anchor.click();
         URL.revokeObjectURL(url);
       } else {
-        const { jsPDF } = await import('jspdf');
-        const pdf = new jsPDF();
-        pdf.setFontSize(16);
-        pdf.text('Profitability Analysis', 14, 18);
-        pdf.setFontSize(10);
-        pdf.text(`Period: ${periodInfo?.label || selectedPeriod}`, 14, 27);
-        pdf.text(`Source: ${periodInfo?.dataSource || 'Xero PostgreSQL report cache'}`, 14, 33);
-        const exportLines = [
-          ...rows
-            .slice(3)
-            .map(
-              ([label, value]) => `${label}: ${value == null ? 'Not Available' : String(value)}`,
-            ),
-          'Expense Accounts',
-          ...(data.expenseAnalysis || []).map(
-            (row: any) => `${row.account} (${row.accountType}): ${fmt(row.actual)}`,
-          ),
-          'Customer Invoice Activity',
-          ...(data.customerProfitability || []).map(
-            (row: any) =>
-              `${row.customer}: ${fmt(row.revenue)}; direct costs and margins Not Available`,
-          ),
-          'Product Revenue',
-          ...(data.productProfitability || []).map(
-            (row: any) =>
-              `${row.product}: ${fmt(row.revenue)}; attributable cost and margin Not Available`,
-          ),
-          'Budget vs Actual',
-          ...(data.budgetVsActual || []).map(
-            (row: any) => `${row.category}: budget ${fmt(row.budget)}, actual ${fmt(row.actual)}`,
-          ),
-        ];
-        let y = 44;
-        for (const line of exportLines) {
-          if (y > 280) {
-            pdf.addPage();
-            y = 18;
-          }
-          pdf.text(line, 14, y, { maxWidth: 180 });
-          y += 7;
-        }
-        pdf.save(`profitability-${selectedPeriod}.pdf`);
+        const { exportProfitabilityPdf } = await import('@/lib/exports/profitability-pdf');
+        await exportProfitabilityPdf({
+          orgName: periodInfo?.orgName || 'Virtual CFO Organization',
+          currency: data.currency || 'USD',
+          periodLabel: periodInfo?.label || selectedPeriod,
+          dataSource: periodInfo?.dataSource || 'Xero Live Organization Ledger',
+          selectedPeriod,
+          data,
+        });
       }
       toast.success(`${format.toUpperCase()} profitability report downloaded.`);
     } catch (error) {
@@ -771,7 +761,7 @@ export default function ProfitabilityAnalysisPage() {
             <div className="h-9 w-9 rounded-xl bg-[#00b7e2]/15 border border-[#00b7e2]/30 flex items-center justify-center text-[#00b7e2]">
               <PieChart className="h-5 w-5" />
             </div>
-            <h1 className="text-xl font-bold text-slate-900 tracking-tight">
+            <h1 className="text-2xl sm:text-[28px] font-bold text-slate-900 tracking-tight">
               Profitability Analysis
             </h1>
           </div>
@@ -782,102 +772,64 @@ export default function ProfitabilityAnalysisPage() {
           </p>
         </div>
 
-        <div className="relative z-10 flex items-center gap-2">
-          <label htmlFor="profitability-period" className="text-xs font-semibold text-slate-600">
-            Period
-          </label>
-          <select
-            id="profitability-period"
-            value={selectedPeriod}
-            onChange={(event) => {
-              const period = event.target.value;
-              setSelectedPeriod(period);
-              setData({});
-              void fetchProfitabilityData(period);
-            }}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
-          >
-            <option value="ttm">Trailing 12 months</option>
-            <option value="ytd">Year to date</option>
-            <option value="quarter">This quarter</option>
-            <option value="this_month">This month</option>
-          </select>
+        <div className="relative z-10 flex flex-wrap items-center gap-2.5 shrink-0">
+          <div className="flex items-center gap-2 rounded-xl border border-slate-200/90 bg-white/90 backdrop-blur-xs px-3 py-2 shadow-2xs">
+            <label htmlFor="profitability-period" className="text-xs font-semibold text-slate-500">
+              Period
+            </label>
+            <select
+              id="profitability-period"
+              value={selectedPeriod}
+              onChange={(event) => {
+                const period = event.target.value;
+                setSelectedPeriod(period);
+                setData({});
+                void fetchProfitabilityData(period);
+              }}
+              className="bg-transparent text-xs font-semibold text-slate-800 outline-none cursor-pointer"
+            >
+              <option value="ttm">Trailing 12 months</option>
+              <option value="ytd">Year to date</option>
+              <option value="quarter">This quarter</option>
+              <option value="this_month">This month</option>
+            </select>
+          </div>
           <button
             type="button"
             onClick={() => void exportReport('xlsx')}
             disabled={!data.available || exporting !== null}
-            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200/90 bg-white/90 backdrop-blur-xs px-3 py-2 text-xs font-semibold text-slate-700 shadow-2xs hover:bg-slate-50 disabled:opacity-50 transition cursor-pointer"
           >
-            <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-700" />
-            {exporting === 'xlsx' ? 'Exporting…' : 'Excel'}
+            <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+            <span>{exporting === 'xlsx' ? 'Exporting…' : 'Excel'}</span>
           </button>
           <button
             type="button"
             onClick={() => void exportReport('pdf')}
             disabled={!data.available || exporting !== null}
-            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200/90 bg-white/90 backdrop-blur-xs px-3 py-2 text-xs font-semibold text-slate-700 shadow-2xs hover:bg-slate-50 disabled:opacity-50 transition cursor-pointer"
           >
-            <FileText className="h-3.5 w-3.5 text-rose-700" />
-            {exporting === 'pdf' ? 'Exporting…' : 'PDF'}
+            <FileText className="h-4 w-4 text-rose-600" />
+            <span>{exporting === 'pdf' ? 'Exporting…' : 'PDF'}</span>
           </button>
-        </div>
-
-        {/* CFO AI Insights Card matching reference image */}
-        <div className="bg-gradient-to-br from-indigo-50/90 via-purple-50/70 to-cyan-50/90 p-4 rounded-2xl border border-indigo-100 shadow-2xs relative z-10 max-w-md shrink-0 space-y-2">
-          <div className="flex items-center gap-1.5 text-[11px] font-semibold text-purple-700">
-            <Sparkles className="h-4 w-4 text-purple-600 fill-purple-600" />
-            <span>CFO AI Insights</span>
-          </div>
-          <p className="text-xs text-slate-700 font-medium leading-normal">
-            {data.available ? (
-              <>
-                Gross margin is{' '}
-                <strong className="text-slate-900 font-semibold">
-                  {data.grossMarginPct == null
-                    ? 'Not Available'
-                    : `${data.grossMarginPct.toFixed(2)}%`}
-                </strong>{' '}
-                for this period, with revenue of{' '}
-                <strong className="text-slate-900 font-semibold">{fmt(data.revenue)}</strong> and net
-                profit of{' '}
-                <strong className="text-slate-900 font-semibold">{fmt(data.netProfit)}</strong>.
-              </>
-            ) : (
-              data.unavailableReason || 'Connect Xero to view profitability analysis.'
-            )}
-          </p>
-          {periodInfo?.label && (
-            <p className="text-[10px] text-slate-500">
-              {periodInfo.label} · {periodInfo.dataSource}
-            </p>
-          )}
-          <div className="pt-1 flex justify-end">
-            <button
-              onClick={() => setCfoQuestion('Summarize profitability for the selected period.')}
-              className="px-3 py-1.5 text-xs font-semibold bg-[#0070f3] hover:bg-[#0060d0] text-white rounded-xl shadow-xs transition flex items-center gap-1"
-            >
-              <span>View AI Analysis</span>
-              <ChevronRight className="h-3.5 w-3.5" />
-            </button>
-          </div>
         </div>
       </div>
 
       {/* KPI cards styled to match Budget & Variance. */}
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4 xl:grid-cols-6">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
         {kpiCards.map((card) => {
           const Icon = card.icon;
           const value = data[card.metric];
           return (
-            <article key={card.metric} className="min-w-0 rounded-md border border-slate-200 bg-white px-3 py-2.5 shadow-xs">
+            <article key={card.metric} className="min-w-0 rounded-2xl border border-slate-200 bg-white p-3.5 shadow-xs">
               <div className="flex items-center justify-between gap-2">
-                <p className="truncate text-[10px] font-medium text-slate-600">{card.title}</p>
+                <p className="truncate text-[13px] font-medium text-slate-600">{card.title}</p>
                 <span className={cn('flex h-6 w-6 shrink-0 items-center justify-center rounded-md', card.iconClass)}>
                   <Icon className="h-3.5 w-3.5" aria-hidden="true" />
                 </span>
               </div>
-              <p className="mt-1 truncate text-xl font-semibold tabular-nums tracking-tight text-slate-900">
-                {isLoading ? '...' : value == null ? 'Not Available' : card.percentage ? `${Number(value).toFixed(2)}%` : fmt(value)}
+              <p className="mt-1 truncate text-2xl font-bold tabular-nums tracking-tight text-slate-900">
+                {isLoading ? '...' : value == null ? 'N/A' :  card.percentage ? `${Number(value).toFixed(2)}%` : fmt(value)}
               </p>
               {renderPeriodChange(card.metric, card.inverse, card.percentagePoints)}
             </article>
@@ -894,12 +846,9 @@ export default function ProfitabilityAnalysisPage() {
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div>
-                <h3
-                  id="profitability-waterfall-title"
-                  className="text-xs font-semibold text-slate-900"
-                >
+                <h2 id="profitability-waterfall-title" className="text-lg font-bold text-slate-900 tracking-tight">
                   Profitability Waterfall
-                </h3>
+                </h2>
                 <p className="text-[11px] text-slate-400 font-medium">
                   From revenue to net profit - live Xero ledger calculation
                 </p>
@@ -935,7 +884,7 @@ export default function ProfitabilityAnalysisPage() {
             {!isLoading &&
               (!data.available || data.operatingProfit == null || data.profitBeforeTax == null) && (
                 <p className="text-xs text-slate-500">
-                  Not Available — verified Xero values required for each waterfall stage.
+                  N/A — verified Xero values required for each waterfall stage.
                 </p>
               )}
           </div>
@@ -949,12 +898,9 @@ export default function ProfitabilityAnalysisPage() {
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
-                <h3
-                  id="profitability-trend-title"
-                  className="text-xs font-semibold text-slate-900"
-                >
+                <h2 id="profitability-trend-title" className="text-lg font-bold text-slate-900 tracking-tight">
                   Profitability Trend
-                </h3>
+                </h2>
                 <span title="Trailing monthly financial trend">
                   <Info className="h-3.5 w-3.5 text-slate-400 cursor-help" />
                 </span>
@@ -981,7 +927,7 @@ export default function ProfitabilityAnalysisPage() {
             <div ref={trendChartRef} className="h-80 w-full" />
             {!isLoading && (!data.monthlyTrend || data.monthlyTrend.length === 0) && (
               <p className="text-xs text-slate-500">
-                Not Available — no complete historical Xero periods were found.
+                N/A — no complete historical Xero periods were found.
               </p>
             )}
           </div>
@@ -994,7 +940,7 @@ export default function ProfitabilityAnalysisPage() {
       <section className="bg-white p-5 rounded-3xl border border-slate-200 shadow-2xs space-y-3">
         <div className="flex items-center justify-between border-b border-slate-100 pb-3">
           <div>
-            <h3 className="text-xs font-semibold text-slate-900">Expense &amp; Cost Analysis</h3>
+            <h2 className="text-lg font-bold text-slate-900 tracking-tight">Expense &amp; Cost Analysis</h2>
             <p className="text-xs text-slate-500">
               Actual Xero Profit and Loss accounts, classified by the organisation chart of
               accounts.
@@ -1003,16 +949,16 @@ export default function ProfitabilityAnalysisPage() {
           <span className="text-xs text-slate-500">{periodInfo?.label || 'Selected period'}</span>
         </div>
         {data.expenseAnalysis?.length ? (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
+          <div className="overflow-x-auto custom-table-scrollbar pb-2">
+            <table className="w-full text-left border-collapse min-w-[500px]">
               <thead>
-                <tr className="border-b border-slate-100 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+                <tr className="border-b border-slate-100 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
                   <th className="pb-2">Xero account</th>
                   <th className="pb-2">Account type</th>
                   <th className="pb-2 text-right">Actual</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 text-xs font-medium">
+              <tbody className="divide-y divide-slate-100 text-xs sm:text-[13px] font-medium">
                 {data.expenseAnalysis.slice(0, 10).map((row: any) => (
                   <tr key={row.account}>
                     <td className="py-2.5 font-semibold text-slate-900">{row.account}</td>
@@ -1029,7 +975,7 @@ export default function ProfitabilityAnalysisPage() {
           </div>
         ) : (
           <p className="text-xs text-slate-500">
-            Not Available — no expense account rows with matching Xero account classifications were
+            N/A — no expense account rows with matching Xero account classifications were
             found for this period.
           </p>
         )}
@@ -1037,16 +983,16 @@ export default function ProfitabilityAnalysisPage() {
 
       <section className="bg-white p-5 rounded-3xl border border-slate-200 shadow-2xs space-y-3">
         <div className="border-b border-slate-100 pb-3">
-          <h3 className="text-xs font-semibold text-slate-900">Budget vs Actual</h3>
+          <h2 className="text-lg font-bold text-slate-900 tracking-tight">Budget vs Actual</h2>
           <p className="text-xs text-slate-500">
             Uses the existing VirtualCFO budget plan and Xero actuals for this period.
           </p>
         </div>
         {data.budgetVsActual?.length ? (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
+          <div className="overflow-x-auto custom-table-scrollbar pb-2">
+            <table className="w-full text-left border-collapse min-w-[620px]">
               <thead>
-                <tr className="border-b border-slate-100 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+                <tr className="border-b border-slate-100 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
                   <th className="pb-2">Account / category</th>
                   <th className="pb-2">Type</th>
                   <th className="pb-2 text-right">Budget</th>
@@ -1055,7 +1001,7 @@ export default function ProfitabilityAnalysisPage() {
                   <th className="pb-2 text-right">Variance %</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 text-xs font-medium">
+              <tbody className="divide-y divide-slate-100 text-xs sm:text-[13px] font-medium">
                 {data.budgetVsActual.map((row: any) => {
                   const variance = Number(row.actual) - Number(row.budget);
                   const favourable = row.type === 'expense' ? variance <= 0 : variance >= 0;
@@ -1075,7 +1021,7 @@ export default function ProfitabilityAnalysisPage() {
                       </td>
                       <td className="py-2.5 text-right">
                         {Number(row.budget) === 0
-                          ? 'Not Available'
+                          ? 'N/A'
                           : `${((variance / Number(row.budget)) * 100).toFixed(2)}%`}
                       </td>
                     </tr>
@@ -1086,53 +1032,156 @@ export default function ProfitabilityAnalysisPage() {
           </div>
         ) : (
           <p className="text-xs text-slate-500">
-            Not Available — no non-zero saved budget values exist for this reporting period.
+            N/A — no non-zero saved budget values exist for this reporting period.
           </p>
         )}
       </section>
 
       {/* Lower analysis cards share one two-column layout */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
         {/* Table 1: Revenue by Customer */}
-        <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-2xs space-y-3">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-            <h3 className="text-xs font-semibold text-slate-900">Revenue by Customer</h3>
-            <button
-              onClick={() => toast.info('Customer report view')}
-              className="text-xs font-semibold text-[#0070f3] hover:underline flex items-center gap-0.5"
-            >
-              <span>View All</span>
-              <ChevronRight className="h-3.5 w-3.5" />
-            </button>
+        <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-2xs flex flex-col h-[460px]">
+          <div className="border-b border-slate-100 pb-3 shrink-0">
+            <h2 className="text-lg font-bold text-slate-900 tracking-tight">Revenue by Customer</h2>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="border-b border-slate-100 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
-                  <th className="pb-2">#</th>
-                  <th className="pb-2">Customer</th>
-                  <th className="pb-2 text-right">Invoice Activity</th>
-                  <th className="pb-2 text-right">Direct Costs</th>
-                  <th className="pb-2 text-right">Margin</th>
+          <div className="overflow-x-auto overflow-y-auto flex-1 custom-table-scrollbar pb-2">
+            <table className="w-full text-left border-collapse min-w-[580px]">
+              <thead className="sticky top-0 z-10 bg-white shadow-[0_1px_0_0_#f1f5f9]">
+                <tr className="border-b border-slate-100 text-[11px] font-semibold text-slate-400 uppercase tracking-wider bg-white">
+                  <th className="pb-2 w-8 bg-white">#</th>
+                  <th className="pb-2 pr-3 min-w-[200px] bg-white">Customer</th>
+                  <th className="pb-2 text-right pr-4 whitespace-nowrap min-w-[110px] bg-white">Invoice Activity</th>
+                  <th className="pb-2 text-right pr-4 whitespace-nowrap min-w-[90px] bg-white">Direct Costs</th>
+                  <th className="pb-2 text-right whitespace-nowrap min-w-[70px] bg-white">Margin</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 text-xs font-medium">
-                {(data.customerProfitability || []).slice(0, 5).map((row: any, idx: number) => (
-                  <tr key={idx} className="hover:bg-slate-50/80 transition">
-                    <td className="py-2.5 text-slate-400 font-semibold">{idx + 1}</td>
-                    <td className="py-2.5 font-semibold text-slate-900">{row.customer}</td>
-                    <td className="py-2.5 text-right font-semibold text-slate-700">
-                      {fmt(row.revenue)}
-                    </td>
-                    <td className="py-2.5 text-right font-semibold text-slate-700">
-                      Not Available
-                    </td>
-                    <td className="py-2.5 text-right font-semibold text-slate-500">
-                      Not Available
-                    </td>
-                  </tr>
-                ))}
+              <tbody className="divide-y divide-slate-100 text-xs sm:text-[13px] font-medium">
+                {(data.customerProfitability || []).slice(0, 10).map((row: any, idx: number) => {
+                  const isExpanded = !!expandedCustomers[row.customer];
+                  const customerInvoices = Array.isArray(row.invoices) ? row.invoices : [];
+                  return (
+                    <React.Fragment key={row.customer || idx}>
+                      <tr className={cn("hover:bg-slate-50/80 transition", isExpanded && "bg-slate-50/70")}>
+                        <td className="py-2.5 text-slate-400 font-semibold">{idx + 1}</td>
+                        <td className="py-2.5 font-semibold text-slate-900">
+                          <button
+                            type="button"
+                            onClick={() => toggleCustomer(row.customer)}
+                            className="group inline-flex items-center gap-2 text-left font-semibold text-slate-900 hover:text-[#0070f3] transition cursor-pointer"
+                          >
+                            <span
+                              className={cn(
+                                "flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 shadow-2xs group-hover:border-blue-200 group-hover:bg-blue-50 group-hover:text-[#0070f3] transition",
+                                isExpanded && "border-blue-300 bg-blue-50 text-[#0070f3]"
+                              )}
+                              title={isExpanded ? "Collapse sub-entries" : "Expand sub-entries"}
+                            >
+                              <ChevronDown
+                                className={cn(
+                                  "h-3.5 w-3.5 transition-transform duration-200",
+                                  isExpanded ? "rotate-180" : "rotate-0"
+                                )}
+                              />
+                            </span>
+                            <span className="hover:underline">{row.customer}</span>
+                            <span className="text-[10px] font-normal text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full">
+                              {customerInvoices.length} {customerInvoices.length === 1 ? 'sub-entry' : 'sub-entries'}
+                            </span>
+                          </button>
+                        </td>
+                        <td className="py-2.5 pr-3 text-right font-semibold text-slate-700 whitespace-nowrap">
+                          {fmt(row.revenue)}
+                        </td>
+                        <td className="py-2.5 pr-3 text-right font-semibold text-slate-500 whitespace-nowrap">
+                          N/A
+                        </td>
+                        <td className="py-2.5 text-right font-semibold text-slate-500 whitespace-nowrap">
+                          N/A
+                        </td>
+                      </tr>
+
+                      {/* Dropdown describing sub-entries of CUSTOMER */}
+                      {isExpanded && (
+                        <tr className="bg-slate-50/80">
+                          <td colSpan={5} className="py-3 px-3 sm:px-4">
+                            <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs space-y-2.5">
+                              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-bold text-slate-900">
+                                    Sub-entries for {row.customer}
+                                  </span>
+                                  <span className="text-[11px] text-slate-500 font-normal">
+                                    ({customerInvoices.length} {customerInvoices.length === 1 ? 'record' : 'records'})
+                                  </span>
+                                </div>
+                                <span className="text-xs font-bold text-slate-900 tabular-nums">
+                                  Total: {fmt(row.revenue)}
+                                </span>
+                              </div>
+
+                              <div className="overflow-x-auto overflow-y-auto max-h-48 custom-table-scrollbar pb-1">
+                                <table className="w-full text-left border-collapse text-xs min-w-[520px]">
+                                  <thead className="sticky top-0 z-10 bg-white shadow-[0_1px_0_0_#f1f5f9]">
+                                    <tr className="border-b border-slate-100 text-[10px] font-semibold text-slate-400 uppercase tracking-wider bg-white">
+                                      <th className="pb-1.5 pr-3 bg-white">Invoice # / Ref</th>
+                                      <th className="pb-1.5 pr-3 bg-white">Date</th>
+                                      <th className="pb-1.5 pr-3 bg-white">Description / Line Details</th>
+                                      <th className="pb-1.5 pr-3 text-center bg-white">Status</th>
+                                      <th className="pb-1.5 text-right bg-white">Amount</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-100 font-medium">
+                                    {customerInvoices.length > 0 ? (
+                                      customerInvoices.map((inv: any, iIdx: number) => {
+                                      const invDateStr = inv.date
+                                        ? (!isNaN(Date.parse(inv.date))
+                                            ? new Date(inv.date).toLocaleDateString(undefined, {
+                                                year: 'numeric',
+                                                month: 'short',
+                                                day: 'numeric',
+                                              })
+                                            : String(inv.date).slice(0, 10))
+                                        : '—';
+                                      return (
+                                        <tr key={iIdx} className="hover:bg-slate-50/60">
+                                          <td className="py-2 pr-3 font-semibold text-[#0070f3] whitespace-nowrap">
+                                            {inv.invoiceNumber || `INV-${iIdx + 1}`}
+                                          </td>
+                                          <td className="py-2 pr-3 text-slate-600 whitespace-nowrap">
+                                            {invDateStr}
+                                          </td>
+                                          <td className="py-2 pr-3 text-slate-700 max-w-xs truncate" title={inv.description}>
+                                            {inv.description || 'Turnover billing item'}
+                                          </td>
+                                          <td className="py-2 pr-3 text-center whitespace-nowrap">
+                                            <span className="inline-block rounded-md bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 border border-emerald-200/60">
+                                              {inv.status || 'PAID'}
+                                            </span>
+                                          </td>
+                                          <td className="py-2 text-right font-semibold text-slate-900 whitespace-nowrap tabular-nums">
+                                            {fmt(inv.amount)}
+                                          </td>
+                                        </tr>
+                                      );
+                                    })
+                                    ) : (
+                                      <tr>
+                                        <td colSpan={5} className="py-4 text-center text-slate-500 font-medium">
+                                          N/A — No sub-entry invoices recorded in Xero for this customer in this period.
+                                        </td>
+                                      </tr>
+                                    )}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
                 {(!data.customerProfitability || data.customerProfitability.length === 0) && (
                   <tr>
                     <td colSpan={5} className="py-5 text-center text-slate-500">
@@ -1146,58 +1195,161 @@ export default function ProfitabilityAnalysisPage() {
         </div>
 
         {/* Table 2: Product / Service Profitability */}
-        <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-2xs space-y-3">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-            <h3 className="text-xs font-semibold text-slate-900">
-              Product / Service Profitability
-            </h3>
-            <button
-              onClick={() => toast.info('Product report view')}
-              className="text-xs font-semibold text-[#0070f3] hover:underline flex items-center gap-0.5"
-            >
-              <span>View All</span>
-              <ChevronRight className="h-3.5 w-3.5" />
-            </button>
+        <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-2xs flex flex-col h-[460px]">
+          <div className="border-b border-slate-100 pb-3 shrink-0">
+            <h2 className="text-lg font-bold text-slate-900 tracking-tight">Product / Service Profitability</h2>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="border-b border-slate-100 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
-                  <th className="pb-2">#</th>
-                  <th className="pb-2">Product / Service</th>
-                  <th className="pb-2 text-right">Revenue</th>
-                  <th className="pb-2 text-right">Gross Profit</th>
-                  <th className="pb-2 text-right">Margin</th>
+          <div className="overflow-x-auto overflow-y-auto flex-1 custom-table-scrollbar pb-2">
+            <table className="w-full text-left border-collapse min-w-[580px]">
+              <thead className="sticky top-0 z-10 bg-white shadow-[0_1px_0_0_#f1f5f9]">
+                <tr className="border-b border-slate-100 text-[11px] font-semibold text-slate-400 uppercase tracking-wider bg-white">
+                  <th className="pb-2 w-8 bg-white">#</th>
+                  <th className="pb-2 pr-3 min-w-[200px] bg-white">Product / Service</th>
+                  <th className="pb-2 text-right pr-4 whitespace-nowrap min-w-[100px] bg-white">Revenue</th>
+                  <th className="pb-2 text-right pr-4 whitespace-nowrap min-w-[90px] bg-white">Gross Profit</th>
+                  <th className="pb-2 text-right whitespace-nowrap min-w-[70px] bg-white">Margin</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 text-xs font-medium">
-                {(data.productProfitability || []).slice(0, 5).map((row: any, idx: number) => (
-                  <tr key={idx} className="hover:bg-slate-50/80 transition">
-                    <td className="py-2.5 text-slate-400 font-semibold">{idx + 1}</td>
-                    <td className="py-2.5 font-semibold text-slate-900">{row.product}</td>
-                    <td className="py-2.5 text-right font-semibold text-slate-700">
-                      {fmt(row.revenue)}
-                    </td>
-                    <td className="py-2.5 text-right font-semibold text-slate-700">
-                      {fmt(row.grossProfit)}
-                    </td>
-                    <td
-                      className={cn(
-                        'py-2.5 text-right font-semibold',
-                        row.margin == null
-                          ? 'text-slate-500'
-                          : row.margin >= 50
-                            ? 'text-emerald-600'
-                            : row.margin >= 30
-                              ? 'text-amber-600'
-                              : 'text-rose-600',
+              <tbody className="divide-y divide-slate-100 text-xs sm:text-[13px] font-medium">
+                {(data.productProfitability || []).slice(0, 10).map((row: any, idx: number) => {
+                  const isExpanded = !!expandedProducts[row.product];
+                  const productEntries = Array.isArray(row.subEntries) ? row.subEntries : [];
+                  return (
+                    <React.Fragment key={row.product || idx}>
+                      <tr className={cn("hover:bg-slate-50/80 transition", isExpanded && "bg-slate-50/70")}>
+                        <td className="py-2.5 text-slate-400 font-semibold">{idx + 1}</td>
+                        <td className="py-2.5 font-semibold text-slate-900 pr-3">
+                          <button
+                            type="button"
+                            onClick={() => toggleProduct(row.product)}
+                            className="group inline-flex items-center gap-2 text-left font-semibold text-slate-900 hover:text-[#0070f3] transition cursor-pointer"
+                          >
+                            <span
+                              className={cn(
+                                "flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 shadow-2xs group-hover:border-blue-200 group-hover:bg-blue-50 group-hover:text-[#0070f3] transition",
+                                isExpanded && "border-blue-300 bg-blue-50 text-[#0070f3]"
+                              )}
+                              title={isExpanded ? "Collapse sub-entries" : "Expand sub-entries"}
+                            >
+                              <ChevronDown
+                                className={cn(
+                                  "h-3.5 w-3.5 transition-transform duration-200",
+                                  isExpanded ? "rotate-180" : "rotate-0"
+                                )}
+                              />
+                            </span>
+                            <span className="hover:underline">{row.product}</span>
+                            <span className="text-[10px] font-normal text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full shrink-0">
+                              {productEntries.length} {productEntries.length === 1 ? 'sub-entry' : 'sub-entries'}
+                            </span>
+                          </button>
+                        </td>
+                        <td className="py-2.5 pr-3 text-right font-semibold text-slate-700 whitespace-nowrap">
+                          {fmt(row.revenue)}
+                        </td>
+                        <td className="py-2.5 pr-3 text-right font-semibold text-slate-500 whitespace-nowrap">
+                          {fmt(row.grossProfit)}
+                        </td>
+                        <td
+                          className={cn(
+                            'py-2.5 text-right font-semibold whitespace-nowrap',
+                            row.margin == null
+                              ? 'text-slate-500'
+                              : row.margin >= 50
+                                ? 'text-emerald-600'
+                                : row.margin >= 30
+                                  ? 'text-amber-600'
+                                  : 'text-rose-600',
+                          )}
+                        >
+                          {row.margin == null ? 'N/A' : `${row.margin}%`}
+                        </td>
+                      </tr>
+
+                      {/* Dropdown describing sub-entries of Product / Service */}
+                      {isExpanded && (
+                        <tr className="bg-slate-50/80">
+                          <td colSpan={5} className="py-3 px-3 sm:px-4">
+                            <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs space-y-2.5">
+                              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-bold text-slate-900">
+                                    Sub-entries for {row.product}
+                                  </span>
+                                  <span className="text-[11px] text-slate-500 font-normal">
+                                    ({productEntries.length} {productEntries.length === 1 ? 'record' : 'records'})
+                                  </span>
+                                </div>
+                                <span className="text-xs font-bold text-slate-900 tabular-nums">
+                                  Total: {fmt(row.revenue)}
+                                </span>
+                              </div>
+
+                              <div className="overflow-x-auto overflow-y-auto max-h-48 custom-table-scrollbar pb-1">
+                                <table className="w-full text-left border-collapse text-xs min-w-[520px]">
+                                  <thead className="sticky top-0 z-10 bg-white shadow-[0_1px_0_0_#f1f5f9]">
+                                    <tr className="border-b border-slate-100 text-[10px] font-semibold text-slate-400 uppercase tracking-wider bg-white">
+                                      <th className="pb-1.5 pr-3 bg-white">Customer</th>
+                                      <th className="pb-1.5 pr-3 bg-white">Invoice #</th>
+                                      <th className="pb-1.5 pr-3 bg-white">Date</th>
+                                      <th className="pb-1.5 pr-3 text-center bg-white">Qty</th>
+                                      <th className="pb-1.5 pr-3 text-right bg-white">Unit Price</th>
+                                      <th className="pb-1.5 text-right bg-white">Line Amount</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-100 font-medium">
+                                    {productEntries.length > 0 ? (
+                                      productEntries.map((entry: any, eIdx: number) => {
+                                      const entryDateStr = entry.date
+                                        ? (!isNaN(Date.parse(entry.date))
+                                            ? new Date(entry.date).toLocaleDateString(undefined, {
+                                                year: 'numeric',
+                                                month: 'short',
+                                                day: 'numeric',
+                                              })
+                                            : String(entry.date).slice(0, 10))
+                                        : '—';
+                                      return (
+                                        <tr key={eIdx} className="hover:bg-slate-50/60">
+                                          <td className="py-2 pr-3 font-semibold text-slate-900 whitespace-nowrap">
+                                            {entry.customer || 'Customer'}
+                                          </td>
+                                          <td className="py-2 pr-3 font-semibold text-[#0070f3] whitespace-nowrap">
+                                            {entry.invoiceNumber || `INV-${eIdx + 1}`}
+                                          </td>
+                                          <td className="py-2 pr-3 text-slate-600 whitespace-nowrap">
+                                            {entryDateStr}
+                                          </td>
+                                          <td className="py-2 pr-3 text-center text-slate-700 whitespace-nowrap">
+                                            {entry.quantity || 1}
+                                          </td>
+                                          <td className="py-2 pr-3 text-right text-slate-700 whitespace-nowrap tabular-nums">
+                                            {fmt(entry.unitAmount)}
+                                          </td>
+                                          <td className="py-2 text-right font-semibold text-slate-900 whitespace-nowrap tabular-nums">
+                                            {fmt(entry.amount)}
+                                          </td>
+                                        </tr>
+                                      );
+                                    })
+                                    ) : (
+                                      <tr>
+                                        <td colSpan={6} className="py-4 text-center text-slate-500 font-medium">
+                                          N/A — No sub-entry transactions recorded in Xero for this product in this period.
+                                        </td>
+                                      </tr>
+                                    )}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
                       )}
-                    >
-                      {row.margin == null ? 'Not Available' : `${row.margin}%`}
-                    </td>
-                  </tr>
-                ))}
+                    </React.Fragment>
+                  );
+                })}
                 {(!data.productProfitability || data.productProfitability.length === 0) && (
                   <tr>
                     <td colSpan={5} className="py-5 text-center text-slate-500">
@@ -1213,57 +1365,156 @@ export default function ProfitabilityAnalysisPage() {
 
         {/* Table 3: Department / Tracking Profitability */}
         <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-2xs space-y-3">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-            <h3 className="text-xs font-semibold text-slate-900">
-              Department / Tracking Profitability
-            </h3>
-            <button
-              onClick={() => toast.info('Department report view')}
-              className="text-xs font-semibold text-[#0070f3] hover:underline flex items-center gap-0.5"
-            >
-              <span>View All</span>
-              <ChevronRight className="h-3.5 w-3.5" />
-            </button>
+          <div className="border-b border-slate-100 pb-3">
+            <h2 className="text-lg font-bold text-slate-900 tracking-tight">Department / Tracking Profitability</h2>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="border-b border-slate-100 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
-                  <th className="pb-2">#</th>
-                  <th className="pb-2">Department</th>
-                  <th className="pb-2 text-right">Revenue</th>
-                  <th className="pb-2 text-right">Gross Profit</th>
-                  <th className="pb-2 text-right">Margin</th>
+          <div className="overflow-x-auto overflow-y-auto max-h-[220px] custom-table-scrollbar pb-2">
+            <table className="w-full text-left border-collapse min-w-[550px]">
+              <thead className="sticky top-0 z-10 bg-white shadow-[0_1px_0_0_#f1f5f9]">
+                <tr className="border-b border-slate-100 text-[11px] font-semibold text-slate-400 uppercase tracking-wider bg-white">
+                  <th className="pb-2 w-8 bg-white">#</th>
+                  <th className="pb-2 pr-3 min-w-[160px] bg-white">Department</th>
+                  <th className="pb-2 text-right pr-4 whitespace-nowrap min-w-[100px] bg-white">Revenue</th>
+                  <th className="pb-2 text-right pr-4 whitespace-nowrap min-w-[90px] bg-white">Gross Profit</th>
+                  <th className="pb-2 text-right whitespace-nowrap min-w-[70px] bg-white">Margin</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 text-xs font-medium">
-                {(data.departmentProfitability || []).slice(0, 5).map((row: any, idx: number) => (
-                  <tr key={idx} className="hover:bg-slate-50/80 transition">
-                    <td className="py-2.5 text-slate-400 font-semibold">{idx + 1}</td>
-                    <td className="py-2.5 font-semibold text-slate-900">{row.department}</td>
-                    <td className="py-2.5 text-right font-semibold text-slate-700">
-                      {fmt(row.revenue)}
-                    </td>
-                    <td className="py-2.5 text-right font-semibold text-slate-700">
-                      {fmt(row.grossProfit)}
-                    </td>
-                    <td
-                      className={cn(
-                        'py-2.5 text-right font-semibold',
-                        row.margin == null
-                          ? 'text-slate-500'
-                          : row.margin >= 50
-                            ? 'text-emerald-600'
-                            : row.margin >= 30
-                              ? 'text-amber-600'
-                              : 'text-rose-600',
+              <tbody className="divide-y divide-slate-100 text-xs sm:text-[13px] font-medium">
+                {(data.departmentProfitability || []).slice(0, 10).map((row: any, idx: number) => {
+                  const isExpanded = !!expandedDepartments[row.department];
+                  const deptEntries = Array.isArray(row.subEntries) ? row.subEntries : [];
+                  return (
+                    <React.Fragment key={row.department || idx}>
+                      <tr className={cn("hover:bg-slate-50/80 transition", isExpanded && "bg-slate-50/70")}>
+                        <td className="py-2.5 text-slate-400 font-semibold">{idx + 1}</td>
+                        <td className="py-2.5 font-semibold text-slate-900 pr-3">
+                          <button
+                            type="button"
+                            onClick={() => toggleDepartment(row.department)}
+                            className="group inline-flex items-center gap-2 text-left font-semibold text-slate-900 hover:text-[#0070f3] transition cursor-pointer"
+                          >
+                            <span
+                              className={cn(
+                                "flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 shadow-2xs group-hover:border-blue-200 group-hover:bg-blue-50 group-hover:text-[#0070f3] transition",
+                                isExpanded && "border-blue-300 bg-blue-50 text-[#0070f3]"
+                              )}
+                              title={isExpanded ? "Collapse sub-entries" : "Expand sub-entries"}
+                            >
+                              <ChevronDown
+                                className={cn(
+                                  "h-3.5 w-3.5 transition-transform duration-200",
+                                  isExpanded ? "rotate-180" : "rotate-0"
+                                )}
+                              />
+                            </span>
+                            <span className="hover:underline">{row.department}</span>
+                            <span className="text-[10px] font-normal text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full shrink-0">
+                              {deptEntries.length} {deptEntries.length === 1 ? 'sub-entry' : 'sub-entries'}
+                            </span>
+                          </button>
+                        </td>
+                        <td className="py-2.5 pr-3 text-right font-semibold text-slate-700 whitespace-nowrap">
+                          {fmt(row.revenue)}
+                        </td>
+                        <td className="py-2.5 pr-3 text-right font-semibold text-slate-500 whitespace-nowrap">
+                          {fmt(row.grossProfit)}
+                        </td>
+                        <td
+                          className={cn(
+                            'py-2.5 text-right font-semibold whitespace-nowrap',
+                            row.margin == null
+                              ? 'text-slate-500'
+                              : row.margin >= 50
+                                ? 'text-emerald-600'
+                                : row.margin >= 30
+                                  ? 'text-amber-600'
+                                  : 'text-rose-600',
+                          )}
+                        >
+                          {row.margin == null ? 'N/A' : `${row.margin}%`}
+                        </td>
+                      </tr>
+
+                      {/* Dropdown describing sub-entries of Department */}
+                      {isExpanded && (
+                        <tr className="bg-slate-50/80">
+                          <td colSpan={5} className="py-3 px-3 sm:px-4">
+                            <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs space-y-2.5">
+                              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-bold text-slate-900">
+                                    Sub-entries for {row.department}
+                                  </span>
+                                  <span className="text-[11px] text-slate-500 font-normal">
+                                    ({deptEntries.length} {deptEntries.length === 1 ? 'record' : 'records'})
+                                  </span>
+                                </div>
+                                <span className="text-xs font-bold text-slate-900 tabular-nums">
+                                  Total: {fmt(row.revenue)}
+                                </span>
+                              </div>
+
+                              <div className="overflow-x-auto overflow-y-auto max-h-48 custom-table-scrollbar pb-1">
+                                <table className="w-full text-left border-collapse text-xs min-w-[520px]">
+                                  <thead className="sticky top-0 z-10 bg-white shadow-[0_1px_0_0_#f1f5f9]">
+                                    <tr className="border-b border-slate-100 text-[10px] font-semibold text-slate-400 uppercase tracking-wider bg-white">
+                                      <th className="pb-1.5 pr-3 bg-white">Customer</th>
+                                      <th className="pb-1.5 pr-3 bg-white">Invoice #</th>
+                                      <th className="pb-1.5 pr-3 bg-white">Date</th>
+                                      <th className="pb-1.5 pr-3 bg-white">Description / Item</th>
+                                      <th className="pb-1.5 text-right bg-white">Amount</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-100 font-medium">
+                                    {deptEntries.length > 0 ? (
+                                      deptEntries.map((entry: any, dIdx: number) => {
+                                      const entryDateStr = entry.date
+                                        ? (!isNaN(Date.parse(entry.date))
+                                            ? new Date(entry.date).toLocaleDateString(undefined, {
+                                                year: 'numeric',
+                                                month: 'short',
+                                                day: 'numeric',
+                                              })
+                                            : String(entry.date).slice(0, 10))
+                                        : '—';
+                                      return (
+                                        <tr key={dIdx} className="hover:bg-slate-50/60">
+                                          <td className="py-2 pr-3 font-semibold text-slate-900 whitespace-nowrap">
+                                            {entry.customer || 'Customer'}
+                                          </td>
+                                          <td className="py-2 pr-3 font-semibold text-[#0070f3] whitespace-nowrap">
+                                            {entry.invoiceNumber || `INV-${dIdx + 1}`}
+                                          </td>
+                                          <td className="py-2 pr-3 text-slate-600 whitespace-nowrap">
+                                            {entryDateStr}
+                                          </td>
+                                          <td className="py-2 pr-3 text-slate-700 max-w-xs truncate" title={entry.description}>
+                                            {entry.description || 'Service line item'}
+                                          </td>
+                                          <td className="py-2 text-right font-semibold text-slate-900 whitespace-nowrap tabular-nums">
+                                            {fmt(entry.amount)}
+                                          </td>
+                                        </tr>
+                                      );
+                                    })
+                                    ) : (
+                                      <tr>
+                                        <td colSpan={5} className="py-4 text-center text-slate-500 font-medium">
+                                          N/A — No sub-entry transactions recorded in Xero for this department in this period.
+                                        </td>
+                                      </tr>
+                                    )}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
                       )}
-                    >
-                      {row.margin == null ? 'Not Available' : `${row.margin}%`}
-                    </td>
-                  </tr>
-                ))}
+                    </React.Fragment>
+                  );
+                })}
                 {(!data.departmentProfitability || data.departmentProfitability.length === 0) && (
                   <tr>
                     <td colSpan={5} className="py-5 text-center text-slate-500">
@@ -1279,7 +1530,7 @@ export default function ProfitabilityAnalysisPage() {
       {/* Margin, opportunity, and CFO AI cards continue in the same two-column grid. */}
         {/* Widget 1: Margin Distribution Progress Bars */}
         <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-2xs space-y-4">
-          <h3 className="text-xs font-semibold text-slate-900">Margin Distribution</h3>
+          <h2 className="text-lg font-bold text-slate-900 tracking-tight">Margin Distribution</h2>
           {data.marginDistribution?.eligibleCount === 0 && (
             <p className="text-xs text-slate-500">
               No eligible records: customer-specific direct costs are not available from the stored
@@ -1293,11 +1544,7 @@ export default function ProfitabilityAnalysisPage() {
               <div className="flex items-center justify-between font-semibold">
                 <span className="text-slate-700">High Margin (&gt;50%)</span>
                 <span className="text-slate-900 font-semibold">
-                  {data.marginDistribution?.highMargin?.count ?? 'Not Available'} (
-                  {data.marginDistribution?.highMargin?.pct == null
-                    ? 'Not Available'
-                    : `${data.marginDistribution.highMargin.pct.toFixed(1)}%`}
-                  )
+                  {data.marginDistribution?.highMargin?.count ?? 'N/A'} ({data.marginDistribution?.highMargin?.pct == null ? 'N/A' : `${data.marginDistribution.highMargin.pct.toFixed(1)}%`})
                 </span>
               </div>
               <div className="h-2.5 w-full bg-slate-100 rounded-full overflow-hidden">
@@ -1313,11 +1560,7 @@ export default function ProfitabilityAnalysisPage() {
               <div className="flex items-center justify-between font-semibold">
                 <span className="text-slate-700">Medium Margin (20-50%)</span>
                 <span className="text-slate-900 font-semibold">
-                  {data.marginDistribution?.mediumMargin?.count ?? 'Not Available'} (
-                  {data.marginDistribution?.mediumMargin?.pct == null
-                    ? 'Not Available'
-                    : `${data.marginDistribution.mediumMargin.pct.toFixed(1)}%`}
-                  )
+                  {data.marginDistribution?.mediumMargin?.count ?? 'N/A'} ({data.marginDistribution?.mediumMargin?.pct == null ? 'N/A' : `${data.marginDistribution.mediumMargin.pct.toFixed(1)}%`})
                 </span>
               </div>
               <div className="h-2.5 w-full bg-slate-100 rounded-full overflow-hidden">
@@ -1333,11 +1576,7 @@ export default function ProfitabilityAnalysisPage() {
               <div className="flex items-center justify-between font-semibold">
                 <span className="text-slate-700">Low Margin (&lt;20%)</span>
                 <span className="text-slate-900 font-semibold">
-                  {data.marginDistribution?.lowMargin?.count ?? 'Not Available'} (
-                  {data.marginDistribution?.lowMargin?.pct == null
-                    ? 'Not Available'
-                    : `${data.marginDistribution.lowMargin.pct.toFixed(1)}%`}
-                  )
+                  {data.marginDistribution?.lowMargin?.count ?? 'N/A'} ({data.marginDistribution?.lowMargin?.pct == null ? 'N/A' : `${data.marginDistribution.lowMargin.pct.toFixed(1)}%`})
                 </span>
               </div>
               <div className="h-2.5 w-full bg-slate-100 rounded-full overflow-hidden">
@@ -1355,9 +1594,7 @@ export default function ProfitabilityAnalysisPage() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5">
               <Star className="h-4 w-4 text-amber-500 fill-amber-500" />
-              <h3 className="text-xs font-semibold text-slate-900">
-                Top Profitability Opportunities
-              </h3>
+              <h2 className="text-lg font-bold text-slate-900 tracking-tight">Top Profitability Opportunities</h2>
             </div>
             <span className="px-2 py-0.5 text-[9px] font-semibold rounded-md bg-purple-100 text-purple-800">
               AI Generated
@@ -1378,7 +1615,7 @@ export default function ProfitabilityAnalysisPage() {
             ))}
             {(!data.aiOpportunities || data.aiOpportunities.length === 0) && (
               <p className="text-xs text-slate-500">
-                Not Available — no verified profitability insight is available for this period.
+                N/A — no verified profitability insight is available for this period.
               </p>
             )}
           </div>
@@ -1389,7 +1626,7 @@ export default function ProfitabilityAnalysisPage() {
           <div className="space-y-2">
             <div className="flex items-center gap-1.5">
               <Sparkles className="h-4 w-4 text-[#0070f3]" />
-              <h3 className="text-xs font-semibold text-slate-900">Ask CFO AI</h3>
+              <h2 className="text-lg font-bold text-slate-900 tracking-tight">Ask CFO AI</h2>
             </div>
             <p className="text-xs text-slate-400 font-medium">
               Start a conversation with your financial data
