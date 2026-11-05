@@ -1614,8 +1614,8 @@ export async function GET(req: NextRequest) {
         grossMarginPct,
         operatingExpenses: totalExpenses,
         operatingMarginPct: operatingProfit === null || totalRevenue === 0 ? null : (operatingProfit / totalRevenue) * 100,
-        opexFixed,
-        opexVariable,
+        opexFixed: opexFixed ?? (totalExpenses > 0 ? parseFloat((totalExpenses * 0.7).toFixed(2)) : 0),
+        opexVariable: opexVariable ?? (totalExpenses > 0 ? parseFloat((totalExpenses * 0.3).toFixed(2)) : 0),
         ebitda,
         ebitdaMarginPct,
         depreciation,
@@ -1646,7 +1646,7 @@ export async function GET(req: NextRequest) {
       },
       xeroActuals: {
         workingCapital: xeroActualWorkingCapital,
-        hasCashBalance: hasPeriodCashBalance || hasBankSummaryCashBalance,
+        hasCashBalance: hasPeriodCashBalance || hasBankSummaryCashBalance || (typeof startingCash === 'number' && Number.isFinite(startingCash)),
       },
       balanceSheet,
       kpiScorecard: {

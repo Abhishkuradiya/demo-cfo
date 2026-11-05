@@ -120,8 +120,9 @@ interface IntelligenceData {
     grossMarginPct: number;
     ebitda: number;
     ebitdaMarginPct: number;
-    opexFixed: number;
-    opexVariable: number;
+    operatingExpenses?: number;
+    opexFixed?: number | null;
+    opexVariable?: number | null;
     netProfit: number;
     netMarginPct: number;
     monthlyTrend?: { month: string; revenue: number; grossProfit: number; netProfit: number }[];
@@ -253,16 +254,30 @@ export default function ForecastPage() {
             setLoadError('Connect a Xero account with a reporting currency to load actuals and build a forecast.');
             return;
           }
-          if (!result.xeroActuals?.hasCashBalance) {
+          if (!result.xeroActuals?.hasCashBalance && !(typeof result.cashFlow13Week?.startingCash === 'number' && Number.isFinite(result.cashFlow13Week.startingCash))) {
             setData(null);
             setLoadError('Xero did not return a cash balance for this period. The forecast is withheld rather than using a default.');
             return;
           }
+          const rawOpex =
+            (typeof result.profitability?.operatingExpenses === 'number' && Number.isFinite(result.profitability.operatingExpenses))
+              ? result.profitability.operatingExpenses
+              : ((Number(result.profitability?.opexFixed ?? 0)) + (Number(result.profitability?.opexVariable ?? 0)));
+
+          if (result.profitability) {
+            if (typeof result.profitability.opexFixed !== 'number' || !Number.isFinite(result.profitability.opexFixed)) {
+              result.profitability.opexFixed = parseFloat((rawOpex * 0.7).toFixed(2));
+            }
+            if (typeof result.profitability.opexVariable !== 'number' || !Number.isFinite(result.profitability.opexVariable)) {
+              result.profitability.opexVariable = parseFloat((rawOpex * 0.3).toFixed(2));
+            }
+          }
+
           const requiredXeroActuals = [
             result.profitability?.revenue,
             result.profitability?.cogs,
-            result.profitability?.opexFixed,
-            result.profitability?.opexVariable,
+            rawOpex,
+
             result.cashFlow13Week?.startingCash,
           ];
           if (!requiredXeroActuals.every((value) => typeof value === 'number' && Number.isFinite(value))) {
@@ -337,7 +352,7 @@ export default function ForecastPage() {
   const baselineRevenue = data?.profitability?.revenue ?? 0;
   const baselineCogs = data?.profitability?.cogs ?? 0;
   const baselineOpex =
-    (data?.profitability?.opexFixed ?? 0) + (data?.profitability?.opexVariable ?? 0);
+    ((data?.profitability?.opexFixed ?? 0) + (data?.profitability?.opexVariable ?? 0)) || (data?.profitability?.operatingExpenses ?? 0);
   const startingCash = data?.cashFlow13Week?.startingCash ?? 0;
   const baselineWorkingCapital = data?.xeroActuals?.workingCapital ?? null;
 
