@@ -341,7 +341,7 @@ export async function exportProfitabilityPdf(options: ProfitabilityPdfOptions): 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(22);
   doc.setTextColor(255, 255, 255);
-  doc.text('Profitability & Margin Statement', margin + 8, 69);
+  doc.text('Profitability Statement', margin + 8, 69);
 
   // Subtitle
   doc.setFont('helvetica', 'normal');
