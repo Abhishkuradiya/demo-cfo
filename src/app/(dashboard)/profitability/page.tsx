@@ -27,9 +27,32 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { BreakevenAnalysis } from '@/components/dashboard/BreakevenAnalysis';
 
+type Period = 'ttm' | 'ytd' | 'quarter' | 'this_month' | 'custom';
+
+const periods: { code: Period; label: string }[] = [
+  { code: 'ttm', label: 'Trailing 12M' },
+  { code: 'ytd', label: 'Year to date' },
+  { code: 'quarter', label: 'This quarter' },
+  { code: 'this_month', label: 'This month' },
+  { code: 'custom', label: 'Custom' },
+];
+
+const toDateInputValue = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+
 export default function ProfitabilityAnalysisPage() {
   const [isLoading, setIsLoading] = useState(true);
-  const [selectedPeriod, setSelectedPeriod] = useState('ttm');
+  const [selectedPeriod, setSelectedPeriod] = useState<Period>('ttm');
+  const [customStartDate, setCustomStartDate] = useState(() => {
+    const now = new Date();
+    return toDateInputValue(new Date(now.getFullYear(), now.getMonth(), 1));
+  });
+  const [customEndDate, setCustomEndDate] = useState(() => toDateInputValue(new Date()));
+  const [appliedCustomStartDate, setAppliedCustomStartDate] = useState(() => {
+    const now = new Date();
+    return toDateInputValue(new Date(now.getFullYear(), now.getMonth(), 1));
+  });
+  const [appliedCustomEndDate, setAppliedCustomEndDate] = useState(() => toDateInputValue(new Date()));
   const [waterfallUnit, setWaterfallUnit] = useState<'amount' | 'pct'>('amount');
   const [trendTimeframe, setTrendTimeframe] = useState<'monthly' | 'quarterly' | 'yearly'>(
     'monthly',
@@ -70,11 +93,16 @@ export default function ProfitabilityAnalysisPage() {
   const waterfallChartRef = useRef<HTMLDivElement>(null);
   const trendChartRef = useRef<HTMLDivElement>(null);
 
-  const fetchProfitabilityData = useCallback(async (periodCode: string) => {
+  const fetchProfitabilityData = useCallback(async (periodCode: string, fromDate?: string, toDate?: string) => {
     setIsLoading(true);
     setComparisonData(null);
     try {
-      const res = await fetch(`/api/dashboard/cfo-intelligence?period=${periodCode}`);
+      const params = new URLSearchParams({ period: periodCode });
+      if (periodCode === 'custom') {
+        if (fromDate) params.set('from', fromDate);
+        if (toDate) params.set('to', toDate);
+      }
+      const res = await fetch(`/api/dashboard/cfo-intelligence?${params.toString()}`);
       if (res.ok) {
         const result = await res.json();
         if (result.profitability?.available && result.connected) {
@@ -117,6 +145,33 @@ export default function ProfitabilityAnalysisPage() {
     const timer = window.setTimeout(() => void fetchProfitabilityData('ttm'), 0);
     return () => window.clearTimeout(timer);
   }, [fetchProfitabilityData]);
+
+  const todayInputValue = toDateInputValue(new Date());
+  const customDateRangeError =
+    customStartDate > customEndDate
+      ? 'Start date must be on or before the end date.'
+      : customEndDate > todayInputValue
+        ? 'End date cannot be in the future.'
+        : '';
+
+  const handlePeriodChange = (newPeriod: Period) => {
+    if (newPeriod === selectedPeriod && newPeriod !== 'custom') return;
+    setSelectedPeriod(newPeriod);
+    if (newPeriod === 'custom') {
+      return;
+    }
+    setData({});
+    void fetchProfitabilityData(newPeriod);
+  };
+
+  const applyCustomDateRange = () => {
+    if (!customStartDate || !customEndDate || Boolean(customDateRangeError)) return;
+    setData({});
+    setAppliedCustomStartDate(customStartDate);
+    setAppliedCustomEndDate(customEndDate);
+    setSelectedPeriod('custom');
+    void fetchProfitabilityData('custom', customStartDate, customEndDate);
+  };
 
   // 1. ECharts Waterfall Chart
   useEffect(() => {
@@ -471,6 +526,8 @@ export default function ProfitabilityAnalysisPage() {
         ? 'vs last quarter'
         : selectedPeriod === 'ytd'
           ? 'vs prior year to date'
+          : selectedPeriod === 'custom'
+            ? 'vs previous period'
           : 'vs previous 12 months'
   );
 
@@ -773,27 +830,6 @@ export default function ProfitabilityAnalysisPage() {
         </div>
 
         <div className="relative z-10 flex flex-wrap items-center gap-2.5 shrink-0">
-          <div className="flex items-center gap-2 rounded-xl border border-slate-200/90 bg-white/90 backdrop-blur-xs px-3 py-2 shadow-2xs">
-            <label htmlFor="profitability-period" className="text-xs font-semibold text-slate-500">
-              Period
-            </label>
-            <select
-              id="profitability-period"
-              value={selectedPeriod}
-              onChange={(event) => {
-                const period = event.target.value;
-                setSelectedPeriod(period);
-                setData({});
-                void fetchProfitabilityData(period);
-              }}
-              className="bg-transparent text-xs font-semibold text-slate-800 outline-none cursor-pointer"
-            >
-              <option value="ttm">Trailing 12 months</option>
-              <option value="ytd">Year to date</option>
-              <option value="quarter">This quarter</option>
-              <option value="this_month">This month</option>
-            </select>
-          </div>
           <button
             type="button"
             onClick={() => void exportReport('xlsx')}
@@ -814,6 +850,87 @@ export default function ProfitabilityAnalysisPage() {
           </button>
         </div>
       </div>
+
+      {/* Period Selection & Custom Date Range Bar */}
+      <section
+        aria-label="Profitability period controls"
+        className="rounded-xl border border-slate-200/80 bg-white p-2.5 sm:p-3 shadow-xs"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          {/* Period selector */}
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+            <span className="text-xs sm:text-[13px] font-semibold text-slate-600">Period:</span>
+            <div className="inline-flex items-center gap-1 rounded-xl border border-slate-200/90 bg-slate-100/90 p-1">
+              {periods.map((option) => {
+                const isActive = selectedPeriod === option.code;
+                return (
+                  <button
+                    key={option.code}
+                    type="button"
+                    onClick={() => handlePeriodChange(option.code)}
+                    aria-pressed={isActive}
+                    className={cn(
+                      'rounded-lg px-3.5 py-1.5 text-xs font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900 cursor-pointer',
+                      isActive
+                        ? 'bg-[#0B1527] text-white shadow-xs'
+                        : 'text-slate-600 hover:bg-white hover:text-slate-900',
+                    )}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+            {periodInfo?.startDate && periodInfo?.endDate && (
+              <span className="text-[11px] text-slate-400 font-sans hidden md:inline-block">
+                [{periodInfo.startDate} &rarr; {periodInfo.endDate}]
+              </span>
+            )}
+          </div>
+
+          {/* Custom Date Range Selector */}
+          {selectedPeriod === 'custom' && (
+            <div className="flex flex-wrap items-end gap-2" aria-label="Custom date range">
+              <label className="grid gap-1 text-[10px] font-semibold text-slate-600">
+                Start date
+                <input
+                  type="date"
+                  aria-label="Custom range start date"
+                  value={customStartDate}
+                  max={customEndDate || todayInputValue}
+                  onChange={(event) => setCustomStartDate(event.target.value)}
+                  className="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-800 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500 shadow-2xs"
+                />
+              </label>
+              <label className="grid gap-1 text-[10px] font-semibold text-slate-600">
+                End date
+                <input
+                  type="date"
+                  aria-label="Custom range end date"
+                  value={customEndDate}
+                  min={customStartDate || undefined}
+                  max={todayInputValue}
+                  onChange={(event) => setCustomEndDate(event.target.value)}
+                  className="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-800 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500 shadow-2xs"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={applyCustomDateRange}
+                disabled={!customStartDate || !customEndDate || Boolean(customDateRangeError) || isLoading}
+                className="h-8 rounded-lg bg-[#0B1527] px-4 text-xs font-semibold text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer shadow-2xs"
+              >
+                Apply
+              </button>
+              {customDateRangeError && (
+                <span role="alert" className="basis-full text-[11px] text-rose-600 font-medium">
+                  {customDateRangeError}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      </section>
 
       {/* KPI cards styled to match Budget & Variance. */}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
