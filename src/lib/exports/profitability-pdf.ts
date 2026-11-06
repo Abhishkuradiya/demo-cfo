@@ -103,7 +103,7 @@ export async function exportProfitabilityPdf(options: ProfitabilityPdfOptions): 
   const left = 15.35; // Consistent 15.35mm margin matching Management Accounts
   const right = pageWidth - 15.35;
   const tableWidth = right - left; // 179.3mm
-  const totalPages = 4;
+  const totalPages = 5;
 
   // Management Accounts Color Palette
   const navy: [number, number, number] = [15, 23, 42]; // Slate 900
@@ -165,26 +165,40 @@ export async function exportProfitabilityPdf(options: ProfitabilityPdfOptions): 
     });
   };
 
-  // Management Accounts Top Header Banner
+  // Management Accounts Top Header Banner (3-Row collision-free layout)
   const drawPageHeaderBanner = (chapterTag: string, pageTitle: string) => {
     doc.setFillColor(...navy);
-    doc.rect(0, 0, pageWidth, 34, 'F');
+    doc.rect(0, 0, pageWidth, 35, 'F');
     doc.setFillColor(...teal);
-    doc.rect(0, 0, 5, 34, 'F');
+    doc.rect(0, 0, 5, 35, 'F');
 
+    // Bottom accent border line
+    doc.setDrawColor(...teal);
+    doc.setLineWidth(0.35);
+    doc.line(0, 35, pageWidth, 35);
+
+    // Row 1 (y = 11.5): System Tag & Currency Indicator
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7.5);
+    doc.setFontSize(7.2);
     doc.setTextColor(145, 211, 224); // Cyan tint
-    doc.text(`VIRTUAL CFO INTELLIGENCE  /  ${chapterTag.toUpperCase()}`, left, 12);
-
-    doc.setFontSize(17);
-    doc.setTextColor(255, 255, 255);
-    doc.text(pageTitle, left, 26);
+    doc.text(`VIRTUAL CFO INTELLIGENCE  /  ${chapterTag.toUpperCase()}`, left, 11.5);
 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7.2);
     doc.setTextColor(186, 205, 224);
-    doc.text(`Period: ${options.periodLabel}  |  Currency: ${currency}`, right, 26, { align: 'right' });
+    doc.text(`Currency: ${currency} (${symbol})  |  Accrual P&L`, right, 11.5, { align: 'right' });
+
+    // Row 2 (y = 21): Page Title (Full horizontal width - zero collision)
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(15.5);
+    doc.setTextColor(255, 255, 255);
+    doc.text(pageTitle, left, 21);
+
+    // Row 3 (y = 28): Reporting Cycle & Ledger Source
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.2);
+    doc.setTextColor(203, 213, 225);
+    doc.text(`Reporting Period: ${options.periodLabel}  |  Ledger Source: ${options.dataSource || 'Xero Live Organization Ledger'}`, left, 28);
   };
 
   // Table Renderer with Light Theme Support
@@ -425,10 +439,202 @@ export async function exportProfitabilityPdf(options: ProfitabilityPdfOptions): 
   );
 
   // =========================================================================
-  // PAGE 2: CHAPTER 1 — EXECUTIVE PROFITABILITY OVERVIEW & PROFIT BRIDGE
+  // PAGE 2: REPORT GUIDE & TABLE OF CONTENTS (INDEXING)
   // =========================================================================
   doc.addPage();
   drawPageFooter(2);
+  drawPageHeaderBanner('Report Navigation Guide', 'Table of Contents');
+
+  // Subheader: SECTION / CHAPTER and PAGE
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.setTextColor(...muted);
+  doc.text('SECTION / CHAPTER', left, 46);
+  doc.text('PAGE', right, 46, { align: 'right' });
+  doc.setDrawColor(220, 228, 235);
+  doc.setLineWidth(0.3);
+  doc.line(left, 49, right, 49);
+
+  const indexEntries = [
+    {
+      num: '01',
+      chapter: 'CHAPTER 01',
+      title: 'Executive Profitability Overview & Profit Waterfall',
+      description: 'P&L Trading statement, gross and net margin KPIs, revenue conversion tracks, and break-even sales diagnostics.',
+      page: '03',
+    },
+    {
+      num: '02',
+      chapter: 'CHAPTER 02',
+      title: 'Commercial Analysis: Customer Revenue & Concentration',
+      description: 'Client billing ledger, customer concentration risk metrics, average revenue per client, and margin distribution tiers.',
+      page: '04',
+    },
+    {
+      num: '03',
+      chapter: 'CHAPTER 03',
+      title: 'Catalog Economics: Product & Service Profitability',
+      description: 'Itemized revenue and gross margin contribution breakdown for catalog offerings and invoiced services.',
+      page: '05',
+    },
+    {
+      num: '04',
+      chapter: 'CHAPTER 03',
+      title: 'Departmental Tracking & Regional Performance',
+      description: 'Tracking category analytics across departments, cost centers, and regional operational branches.',
+      page: '05',
+    },
+    {
+      num: '05',
+      chapter: 'CHAPTER 03',
+      title: 'Operating Expense Analysis & CFO Governance Sign-Off',
+      description: 'Overhead budget vs actual variance tracking, ledger reconciliation status, and formal executive sign-off certificate.',
+      page: '05',
+    },
+  ];
+
+  let indexY = 59;
+  indexEntries.forEach((entry) => {
+    // Number pill badge
+    doc.setFillColor(241, 245, 249);
+    doc.roundedRect(left, indexY - 4, 8.5, 7.5, 1.2, 1.2, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(...navy);
+    doc.text(entry.num, left + 4.25, indexY + 1, { align: 'center' });
+
+    // Chapter badge label
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6.5);
+    doc.setTextColor(...teal);
+    doc.text(entry.chapter, left + 13, indexY - 1);
+
+    // Section Title
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9.2);
+    doc.setTextColor(...navy);
+    doc.text(entry.title, left + 13, indexY + 3.8);
+
+    // Dotted Leader Line to Page Number
+    const titleWidth = doc.getTextWidth(entry.title);
+    const leaderStart = Math.min(right - 22, left + 15 + titleWidth);
+    doc.setDrawColor(204, 216, 225);
+    doc.setLineWidth(0.25);
+    doc.line(leaderStart, indexY + 3, right - 16, indexY + 3);
+
+    // Page number
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9.5);
+    doc.setTextColor(...teal);
+    doc.text(entry.page, right, indexY + 3.8, { align: 'right' });
+
+    // Description text
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.2);
+    doc.setTextColor(...muted);
+    doc.text(entry.description, left + 13, indexY + 8.5, { maxWidth: tableWidth - 30 });
+
+    // Subtle divider line
+    doc.setDrawColor(238, 242, 246);
+    doc.setLineWidth(0.2);
+    doc.line(left, indexY + 13.5, right, indexY + 13.5);
+
+    indexY += 19.5;
+  });
+
+  // Scope & Methodology Card
+  const methY = indexY + 4;
+  doc.setFillColor(...cardBg);
+  doc.setDrawColor(...border);
+  doc.roundedRect(left, methY, tableWidth, 36, 1.8, 1.8, 'FD');
+  doc.setFillColor(...teal);
+  doc.roundedRect(left, methY, 1.5, 36, 0.6, 0.6, 'F');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(6.8);
+  doc.setTextColor(...teal);
+  doc.text('REPORTING METHODOLOGY & ACCRUAL ACCOUNTING FRAMEWORK', left + 4.5, methY + 5.5);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(...navy);
+  doc.text('Standardized Financial Measurement & Ledger Reconciliation', left + 4.5, methY + 11);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.8);
+  doc.setTextColor(51, 65, 85);
+  doc.text(
+    'This executive profitability report is synthesized directly from verified general ledger transactions recorded in Xero. Trading income reflects net sales turnover excluding sales taxes (GST/VAT) on a strict accrual basis.',
+    left + 4.5,
+    methY + 16.5,
+    { maxWidth: tableWidth - 10 },
+  );
+  doc.text(
+    'Cost of Sales includes direct materials, contractor fees, and merchant fulfillment costs. Operating expenses are classified per standard management accounting rules to isolate true commercial contribution from corporate overheads.',
+    left + 4.5,
+    methY + 23.5,
+    { maxWidth: tableWidth - 10 },
+  );
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(6.5);
+  doc.setTextColor(...teal);
+  doc.text('✓ Accrual Basis Reconciled      ✓ Tax-Exclusive Net Revenue      ✓ Standardized Expense Mapping      ✓ Verified General Ledger', left + 4.5, methY + 31.5);
+
+  // Financial Highlights Bar at Bottom of Index Page
+  const snapY = methY + 41;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.setTextColor(...teal);
+  doc.text('FINANCIAL HIGHLIGHTS & TRADING SNAPSHOT', left, snapY + 3);
+
+  const snapCardW = (tableWidth - 6) / 3;
+  const snapCards = [
+    { label: 'NET TRADING REVENUE', val: fmtMoney(rev), sub: 'Total reported turnover', color: navy },
+    { label: 'GROSS PROFIT POOL', val: fmtMoney(grossProfit), sub: `${grossMargin.toFixed(1)}% Gross Margin`, color: grossMargin >= 40 ? emerald : amber },
+    { label: 'NET BOTTOM LINE', val: fmtMoney(netProfit), sub: `${netMargin.toFixed(1)}% Net Margin`, color: netProfit >= 0 ? emerald : rose },
+  ];
+
+  snapCards.forEach((sc, i) => {
+    const scX = left + i * (snapCardW + 3);
+    const scY = snapY + 6;
+    doc.setFillColor(...cardBg);
+    doc.setDrawColor(...border);
+    doc.roundedRect(scX, scY, snapCardW, 18, 1.6, 1.6, 'FD');
+    doc.setFillColor(...sc.color);
+    doc.roundedRect(scX, scY, 1.4, 18, 0.6, 0.6, 'F');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6.2);
+    doc.setTextColor(...muted);
+    doc.text(sc.label, scX + 4.5, scY + 5.2);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(...sc.color);
+    doc.text(sc.val, scX + 4.5, scY + 11.8);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6);
+    doc.setTextColor(...muted);
+    doc.text(sc.sub, scX + 4.5, scY + 15.5);
+  });
+
+  // Short provenance note below highlights
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.5);
+  doc.setTextColor(...muted);
+  doc.text(
+    `Prepared for ${options.orgName || 'Financial Reporting'}  ·  Reporting Period: ${options.periodLabel}  ·  Accrual P&L Accounting Standards`,
+    left + 2,
+    snapY + 29,
+  );
+
+  // =========================================================================
+  // PAGE 3: CHAPTER 1 — EXECUTIVE PROFITABILITY OVERVIEW & PROFIT BRIDGE
+  // =========================================================================
+  doc.addPage();
+  drawPageFooter(3);
   drawPageHeaderBanner('Management Reporting', 'Executive Profitability Overview');
 
   let y = 41;
@@ -700,10 +906,10 @@ export async function exportProfitabilityPdf(options: ProfitabilityPdfOptions): 
   doc.text('Operating buffer before encountering an accounting deficit.', diagX, y + 42, { maxWidth: tableWidth - 120 });
 
   // =========================================================================
-  // PAGE 3: CHAPTER 2 — CUSTOMER REVENUE & COMMERCIAL CONCENTRATION
+  // PAGE 4: CHAPTER 2 — CUSTOMER REVENUE & COMMERCIAL CONCENTRATION
   // =========================================================================
   doc.addPage();
-  drawPageFooter(3);
+  drawPageFooter(4);
   drawPageHeaderBanner('Commercial Analysis', 'Customer Revenue & Concentration');
 
   y = 41;
@@ -875,10 +1081,10 @@ export async function exportProfitabilityPdf(options: ProfitabilityPdfOptions): 
   doc.text(custNarrative, left + 4.5, y + 10.5, { maxWidth: tableWidth - 10 });
 
   // =========================================================================
-  // PAGE 4: CHAPTER 3 — PRODUCT ECONOMICS, TRACKING & GOVERNANCE SIGN-OFF
+  // PAGE 5: CHAPTER 3 — PRODUCT ECONOMICS, TRACKING & GOVERNANCE SIGN-OFF
   // =========================================================================
   doc.addPage();
-  drawPageFooter(4);
+  drawPageFooter(5);
   drawPageHeaderBanner('Unit Economics & Governance', 'Catalog Economics & Governance');
 
   y = 41;
