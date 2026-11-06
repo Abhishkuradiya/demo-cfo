@@ -98,11 +98,25 @@ export async function exportProfitabilityPdf(options: ProfitabilityPdfOptions): 
   const { default: JsPdf } = await import('jspdf');
   const doc = new JsPdf({ orientation: 'portrait', unit: 'mm', format: 'a4' });
 
-  const pageWidth = 210;
-  const pageHeight = 297;
-  const margin = 12;
-  const contentWidth = pageWidth - margin * 2; // 186mm
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const left = 15.35; // Consistent 15.35mm margin matching Management Accounts
+  const right = pageWidth - 15.35;
+  const tableWidth = right - left; // 179.3mm
   const totalPages = 4;
+
+  // Management Accounts Color Palette
+  const navy: [number, number, number] = [15, 23, 42]; // Slate 900
+  const teal: [number, number, number] = [2, 132, 199]; // Sky 600
+  const cyanAccent: [number, number, number] = [14, 116, 144]; // Cyan 700
+  const muted: [number, number, number] = [100, 116, 139]; // Slate 500
+  const border: [number, number, number] = [226, 232, 238];
+  const cardBg: [number, number, number] = [250, 251, 252];
+  const tableHeaderBg: [number, number, number] = [241, 245, 248]; // Light table header style
+  const zebraBg: [number, number, number] = [248, 250, 252];
+  const emerald: [number, number, number] = [5, 125, 91];
+  const rose: [number, number, number] = [190, 24, 93];
+  const amber: [number, number, number] = [217, 119, 6];
 
   const currency = options.currency || options.data?.currency || 'USD';
   const symbol =
@@ -129,47 +143,51 @@ export async function exportProfitabilityPdf(options: ProfitabilityPdfOptions): 
 
   const fmtPct = (val: number | null | undefined): string => {
     if (val == null || !Number.isFinite(Number(val))) return 'N/A';
-    return `${Number(val).toFixed(2)}%`;
+    return `${Number(val).toFixed(1)}%`;
   };
 
   const drawPageFooter = (pageNum: number) => {
-    doc.setDrawColor(226, 232, 240);
+    doc.setDrawColor(220, 228, 235);
     doc.setLineWidth(0.25);
-    doc.line(margin, pageHeight - 9, pageWidth - margin, pageHeight - 9);
+    doc.line(left, pageHeight - 11, right, pageHeight - 11);
 
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(6.8);
-    doc.setTextColor(100, 116, 139);
+    doc.setFontSize(7.2);
+    doc.setTextColor(...muted);
     doc.text(
-      `Virtual CFO Intelligence · ${options.orgName || 'Financial Reporting'} · Reporting Window: ${options.periodLabel} · Currency: ${currency}`,
-      margin,
-      pageHeight - 5,
+      `Virtual CFO Intelligence  |  Profitability Storybook  |  ${options.orgName || 'Financial Reporting'}  |  ${currency}`,
+      left,
+      pageHeight - 6,
     );
     doc.setFont('helvetica', 'bold');
-    doc.text(`Page ${pageNum} of ${totalPages}`, pageWidth - margin, pageHeight - 5, {
+    doc.text(`Page ${pageNum} of ${totalPages}`, right, pageHeight - 6, {
       align: 'right',
     });
   };
 
-  const drawRunningHeader = (sectionTitle: string) => {
-    doc.setDrawColor(226, 232, 240);
-    doc.setLineWidth(0.25);
-    doc.line(margin, 12, pageWidth - margin, 12);
+  // Management Accounts Top Header Banner
+  const drawPageHeaderBanner = (chapterTag: string, pageTitle: string) => {
+    doc.setFillColor(...navy);
+    doc.rect(0, 0, pageWidth, 34, 'F');
+    doc.setFillColor(...teal);
+    doc.rect(0, 0, 5, 34, 'F');
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(7.5);
-    doc.setTextColor(15, 23, 42);
-    doc.text('VIRTUAL CFO PLATFORM · FINANCIAL PERFORMANCE REPORT', margin, 9.5);
+    doc.setTextColor(145, 211, 224); // Cyan tint
+    doc.text(`VIRTUAL CFO INTELLIGENCE  /  ${chapterTag.toUpperCase()}`, left, 12);
+
+    doc.setFontSize(17);
+    doc.setTextColor(255, 255, 255);
+    doc.text(pageTitle, left, 26);
 
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(7);
-    doc.setTextColor(100, 116, 139);
-    doc.text(`${sectionTitle} · Period: ${options.periodLabel}`, pageWidth - margin, 9.5, {
-      align: 'right',
-    });
+    doc.setFontSize(7.2);
+    doc.setTextColor(186, 205, 224);
+    doc.text(`Period: ${options.periodLabel}  |  Currency: ${currency}`, right, 26, { align: 'right' });
   };
 
-  // Helper: Formal Financial Table Renderer
+  // Table Renderer with Light Theme Support
   interface ColumnDef {
     header: string;
     width: number;
@@ -180,45 +198,52 @@ export async function exportProfitabilityPdf(options: ProfitabilityPdfOptions): 
     startX: number,
     startY: number,
     columns: ColumnDef[],
-    rows: (string | { text: string; color?: number[]; bold?: boolean; align?: 'left' | 'right' | 'center' })[][],
+    rows: (string | { text: string; color?: [number, number, number]; bold?: boolean; align?: 'left' | 'right' | 'center' })[][],
     tableOptions?: {
       headerHeight?: number;
       rowHeight?: number;
       fontSize?: number;
       headerFontSize?: number;
       zebra?: boolean;
-      headerBg?: number[];
-      borderColor?: number[];
+      headerBg?: [number, number, number];
+      headerTextColor?: [number, number, number];
+      borderColor?: [number, number, number];
       isTotalRowLast?: boolean;
     },
   ): number => {
-    const headerHeight = tableOptions?.headerHeight ?? 6.8;
-    const rowHeight = tableOptions?.rowHeight ?? 5.6;
-    const fontSize = tableOptions?.fontSize ?? 7;
+    const headerHeight = tableOptions?.headerHeight ?? 7.2;
+    const rowHeight = tableOptions?.rowHeight ?? 5.8;
+    const fontSize = tableOptions?.fontSize ?? 7.2;
     const headerFontSize = tableOptions?.headerFontSize ?? 6.8;
-    const headerBg = tableOptions?.headerBg ?? [15, 23, 42]; // Slate 900
-    const borderColor = tableOptions?.borderColor ?? [226, 232, 240];
+    const headerBg = tableOptions?.headerBg ?? tableHeaderBg;
+    const headerTextColor = tableOptions?.headerTextColor ?? navy;
+    const borderColor = tableOptions?.borderColor ?? border;
 
     let currentY = startY;
     const totalTableWidth = columns.reduce((sum, col) => sum + col.width, 0);
 
-    // Draw Header
-    let currentX = startX;
-    doc.setFillColor(headerBg[0], headerBg[1], headerBg[2]);
+    // Header Background
+    doc.setFillColor(...headerBg);
     doc.rect(startX, currentY, totalTableWidth, headerHeight, 'F');
 
+    // Header Bottom Line
+    doc.setDrawColor(...(headerBg === navy ? navy : border));
+    doc.setLineWidth(0.35);
+    doc.line(startX, currentY + headerHeight, startX + totalTableWidth, currentY + headerHeight);
+
+    let currentX = startX;
     columns.forEach((col) => {
-      doc.setTextColor(255, 255, 255);
+      doc.setTextColor(...headerTextColor);
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(headerFontSize);
 
       const headerLines = col.header.split('\n');
       const lineH = 2.8;
-      const textStartY = currentY + headerHeight / 2 - ((headerLines.length - 1) * lineH) / 2 + 0.8;
+      const textStartY = currentY + headerHeight / 2 - ((headerLines.length - 1) * lineH) / 2 + 0.9;
 
       headerLines.forEach((hLine, hIdx) => {
-        let textX = currentX + 2.5;
-        if (col.align === 'right') textX = currentX + col.width - 2.5;
+        let textX = currentX + 3;
+        if (col.align === 'right') textX = currentX + col.width - 3;
         else if (col.align === 'center') textX = currentX + col.width / 2;
         doc.text(hLine, textX, textStartY + hIdx * lineH, { align: col.align || 'left' });
       });
@@ -228,7 +253,7 @@ export async function exportProfitabilityPdf(options: ProfitabilityPdfOptions): 
 
     currentY += headerHeight;
 
-    // Draw Rows
+    // Table Rows
     rows.forEach((row, rowIdx) => {
       const isTotalRow = tableOptions?.isTotalRowLast && rowIdx === rows.length - 1;
 
@@ -236,32 +261,31 @@ export async function exportProfitabilityPdf(options: ProfitabilityPdfOptions): 
       row.forEach((cell, colIdx) => {
         const col = columns[colIdx];
         const cellText = typeof cell === 'object' ? cell.text : cell;
-        const lines = doc.splitTextToSize(cellText, col.width - 4);
+        const lines = doc.splitTextToSize(cellText, col.width - 6);
         if (lines.length > maxLinesInRow) maxLinesInRow = lines.length;
       });
 
-      const actualRowHeight = Math.max(rowHeight, maxLinesInRow * 3.2 + 2.4);
+      const actualRowHeight = Math.max(rowHeight, maxLinesInRow * 3.4 + 2.4);
 
       currentX = startX;
       const isZebra = tableOptions?.zebra && rowIdx % 2 === 1 && !isTotalRow;
 
       if (isTotalRow) {
-        doc.setFillColor(241, 245, 249); // Slate 100
+        doc.setFillColor(241, 245, 249);
         doc.rect(startX, currentY, totalTableWidth, actualRowHeight, 'F');
       } else if (isZebra) {
-        doc.setFillColor(248, 250, 252); // Slate 50
+        doc.setFillColor(...zebraBg);
         doc.rect(startX, currentY, totalTableWidth, actualRowHeight, 'F');
       }
 
-      doc.setDrawColor(borderColor[0], borderColor[1], borderColor[2]);
+      doc.setDrawColor(...borderColor);
       doc.setLineWidth(0.15);
       doc.line(startX, currentY + actualRowHeight, startX + totalTableWidth, currentY + actualRowHeight);
 
       if (isTotalRow) {
         doc.setLineWidth(0.35);
         doc.line(startX, currentY, startX + totalTableWidth, currentY);
-        // Double underline bottom for total row
-        doc.line(startX, currentY + actualRowHeight - 0.5, startX + totalTableWidth, currentY + actualRowHeight - 0.5);
+        doc.line(startX, currentY + actualRowHeight - 0.4, startX + totalTableWidth, currentY + actualRowHeight - 0.4);
       }
 
       row.forEach((cell, colIdx) => {
@@ -275,19 +299,19 @@ export async function exportProfitabilityPdf(options: ProfitabilityPdfOptions): 
         doc.setFontSize(fontSize);
 
         if (cellObj.color) {
-          doc.setTextColor(cellObj.color[0], cellObj.color[1], cellObj.color[2]);
+          doc.setTextColor(...cellObj.color);
         } else if (isTotalRow) {
-          doc.setTextColor(15, 23, 42);
+          doc.setTextColor(...navy);
         } else {
-          doc.setTextColor(51, 65, 85);
+          doc.setTextColor(30, 41, 59);
         }
 
-        let cellTextX = currentX + 2.5;
-        if (align === 'right') cellTextX = currentX + col.width - 2.5;
+        let cellTextX = currentX + 3;
+        if (align === 'right') cellTextX = currentX + col.width - 3;
         else if (align === 'center') cellTextX = currentX + col.width / 2;
 
-        const lines = doc.splitTextToSize(text, col.width - 4);
-        const textStartY = currentY + actualRowHeight / 2 - ((lines.length - 1) * 3) / 2 + 0.8;
+        const lines = doc.splitTextToSize(text, col.width - 6);
+        const textStartY = currentY + actualRowHeight / 2 - ((lines.length - 1) * 3) / 2 + 0.9;
         doc.text(lines, cellTextX, textStartY, { align });
 
         currentX += col.width;
@@ -312,199 +336,194 @@ export async function exportProfitabilityPdf(options: ProfitabilityPdfOptions): 
   const netMargin = rev > 0 ? (netProfit / rev) * 100 : (Number(d.netMarginPct) || 0);
 
   // =========================================================================
-  // PAGE 1: EXECUTIVE COVER PAGE
+  // PAGE 1: EXECUTIVE STORYBOOK COVER PAGE
   // =========================================================================
   try {
     doc.addImage(FORECAST_COVER_BASE64, 'JPEG', 0, 0, pageWidth, pageHeight, undefined, 'FAST');
   } catch (err) {
     console.error('Failed to render profitability cover image:', err);
-    doc.setFillColor(15, 23, 42);
+    doc.setFillColor(...navy);
     doc.rect(0, 0, pageWidth, pageHeight, 'F');
   }
 
-  // Cover Title Block
-  doc.setFillColor(15, 23, 42);
-  doc.roundedRect(margin, 45, contentWidth, 54, 3, 3, 'F');
+  // Cover Title Block (Management Accounts style)
+  doc.setFillColor(...navy);
+  doc.roundedRect(left, 44, tableWidth, 54, 2.5, 2.5, 'F');
   doc.setDrawColor(30, 41, 59);
-  doc.setLineWidth(0.5);
-  doc.roundedRect(margin, 45, contentWidth, 54, 3, 3, 'S');
+  doc.setLineWidth(0.4);
+  doc.roundedRect(left, 44, tableWidth, 54, 2.5, 2.5, 'S');
 
-  // Blue Accent Pill
-  doc.setFillColor(0, 112, 243);
-  doc.roundedRect(margin + 8, 54, 52, 5.5, 1.5, 1.5, 'F');
+  // Cyan Pill Badge
+  doc.setFillColor(...teal);
+  doc.roundedRect(left + 8, 52, 48, 5.5, 1.2, 1.2, 'F');
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(6.8);
   doc.setTextColor(255, 255, 255);
-  doc.text('EXECUTIVE FINANCIAL STATEMENT', margin + 11, 57.8);
+  doc.text('EXECUTIVE FINANCIAL STORYBOOK', left + 10.5, 55.8);
 
   // Main Title
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(22);
   doc.setTextColor(255, 255, 255);
-  doc.text('Profitability Statement', margin + 8, 69);
+  doc.text('Profitability Statement', left + 8, 67);
 
   // Subtitle
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
   doc.setTextColor(203, 213, 225);
   doc.text(
-    'Formal commercial performance assessment reconciled with Xero General Ledger.',
-    margin + 8,
-    76,
+    'Commercial performance, contribution margins, and unit economics storybook.',
+    left + 8,
+    74.5,
   );
-  doc.setFontSize(7.5);
+  doc.setFontSize(7.2);
   doc.setTextColor(148, 163, 184);
   doc.text(
     `Reconciled accounting report for trading period: ${options.periodLabel}.`,
-    margin + 8,
-    82,
+    left + 8,
+    80.5,
   );
 
-  // Executive Metadata Card at bottom of cover
+  // Cover Metadata Card at Bottom
   doc.setFillColor(255, 255, 255);
-  doc.roundedRect(margin, pageHeight - 26, contentWidth, 16, 2.5, 2.5, 'F');
+  doc.roundedRect(left, pageHeight - 26, tableWidth, 16, 2, 2, 'F');
   doc.setDrawColor(226, 232, 240);
   doc.setLineWidth(0.3);
-  doc.roundedRect(margin, pageHeight - 26, contentWidth, 16, 2.5, 2.5, 'S');
+  doc.roundedRect(left, pageHeight - 26, tableWidth, 16, 2, 2, 'S');
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
-  doc.setTextColor(15, 23, 42);
-  doc.text(options.orgName || 'Virtual CFO Client Organization', margin + 5, pageHeight - 17);
+  doc.setTextColor(...navy);
+  doc.text(options.orgName || 'Virtual CFO Client Organization', left + 5, pageHeight - 17);
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7);
-  doc.setTextColor(100, 116, 139);
+  doc.setTextColor(...muted);
   doc.text(
     `Ledger Source: ${options.dataSource || 'Xero Live Organization Ledger'}`,
-    margin + 5,
+    left + 5,
     pageHeight - 12.5,
   );
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(7.5);
-  doc.setTextColor(0, 112, 243);
+  doc.setTextColor(...teal);
   doc.text(
     `Reporting Window: ${options.periodLabel}`,
-    margin + contentWidth - 5,
+    right - 5,
     pageHeight - 17,
     { align: 'right' },
   );
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7);
-  doc.setTextColor(100, 116, 139);
+  doc.setTextColor(...muted);
   doc.text(
     `Currency: ${currency} (${symbol}) · Generated: ${new Date().toLocaleDateString('en-GB')}`,
-    margin + contentWidth - 5,
+    right - 5,
     pageHeight - 12.5,
     { align: 'right' },
   );
 
   // =========================================================================
-  // PAGE 2: STATEMENT OF PROFITABILITY & OPERATING MARGINS (FORMAL PDF FORM)
+  // PAGE 2: CHAPTER 1 — EXECUTIVE PROFITABILITY OVERVIEW & PROFIT BRIDGE
   // =========================================================================
   doc.addPage();
   drawPageFooter(2);
-  drawRunningHeader('Statement of Profitability & Operating Margins');
+  drawPageHeaderBanner('Management Reporting', 'Executive Profitability Overview');
 
-  let y = 17;
+  let y = 41;
 
-  // Formal Statement Header
+  // Reporting Scope Card with left teal accent (Management Accounts Style)
+  doc.setFillColor(...cardBg);
+  doc.setDrawColor(...border);
+  doc.roundedRect(left, y, tableWidth, 17, 1.8, 1.8, 'FD');
+  doc.setFillColor(...teal);
+  doc.roundedRect(left, y, 1.5, 17, 0.6, 0.6, 'F');
+
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(13);
-  doc.setTextColor(15, 23, 42);
-  doc.text('STATEMENT OF PROFITABILITY & OPERATING MARGINS', margin, y + 4);
+  doc.setFontSize(6.8);
+  doc.setTextColor(...teal);
+  doc.text('REPORTING SCOPE & ACCOUNTING BASIS', left + 4.5, y + 5.5);
 
-  // Audit Subtitle
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10.5);
+  doc.setTextColor(...navy);
+  doc.text(`${options.periodLabel}`, left + 4.5, y + 13);
+
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7.2);
-  doc.setTextColor(100, 116, 139);
-  doc.text(
-    `Accounting Basis: Accrual P&L · Reconciled to Xero General Ledger · Reporting Window: ${options.periodLabel}`,
-    margin,
-    y + 9,
-  );
+  doc.setTextColor(...muted);
+  doc.text(`Accounting basis: Accrual P&L`, right - 4, y + 6, { align: 'right' });
+  doc.text(`Ledger status: Reconciled with Xero`, right - 4, y + 13, { align: 'right' });
 
-  y += 13;
+  y += 22;
 
-  // 4 Primary Executive Performance Stat Boxes (Formal Document Layout)
-  const statBoxW = (contentWidth - 3 * 3) / 4; // ~44.25mm
-  const statBoxH = 17;
-  const headlineStats = [
-    {
-      title: 'NET REVENUE',
-      value: fmtMoney(rev),
-      sub: '100.0% Trading Turnover',
-      color: [15, 23, 42],
-    },
-    {
-      title: 'GROSS PROFIT',
-      value: fmtMoney(grossProfit),
-      sub: `${grossMargin.toFixed(1)}% Gross Margin`,
-      color: grossMargin >= 40 ? [4, 120, 87] : [180, 83, 9],
-    },
-    {
-      title: 'OPERATING PROFIT (EBIT)',
-      value: fmtMoney(operatingProfit),
-      sub: `${operatingMargin.toFixed(1)}% Operating Margin`,
-      color: operatingProfit >= 0 ? [4, 120, 87] : [190, 18, 60],
-    },
-    {
-      title: 'NET PROFIT (BOTTOM LINE)',
-      value: fmtMoney(netProfit),
-      sub: `${netMargin.toFixed(1)}% Net Margin`,
-      color: netProfit >= 0 ? [4, 120, 87] : [190, 18, 60],
-    },
+  // 4 Executive Figure Cards with colored left accent strip (Management Accounts Style)
+  const cardW = (tableWidth - 9) / 4; // ~44mm
+  const cardH = 19;
+  const figures: { title: string; val: string; sub: string; color: [number, number, number] }[] = [
+    { title: 'NET REVENUE', val: fmtMoney(rev), sub: 'Trading Turnover', color: navy },
+    { title: 'GROSS PROFIT', val: fmtMoney(grossProfit), sub: `${grossMargin.toFixed(1)}% Gross Margin`, color: grossMargin >= 40 ? emerald : amber },
+    { title: 'OPERATING PROFIT', val: fmtMoney(operatingProfit), sub: `${operatingMargin.toFixed(1)}% Operating Margin`, color: operatingProfit >= 0 ? emerald : rose },
+    { title: 'NET PROFIT', val: fmtMoney(netProfit), sub: `${netMargin.toFixed(1)}% Net Margin`, color: netProfit >= 0 ? emerald : rose },
   ];
 
-  headlineStats.forEach((stat, idx) => {
-    const sx = margin + idx * (statBoxW + 3);
-    doc.setFillColor(248, 250, 252);
-    doc.rect(sx, y, statBoxW, statBoxH, 'F');
-    doc.setDrawColor(226, 232, 240);
-    doc.setLineWidth(0.2);
-    doc.rect(sx, y, statBoxW, statBoxH, 'S');
+  figures.forEach((fig, idx) => {
+    const cx = left + idx * (cardW + 3);
+    doc.setFillColor(...cardBg);
+    doc.setDrawColor(...border);
+    doc.roundedRect(cx, y, cardW, cardH, 1.6, 1.6, 'FD');
+    doc.setFillColor(...fig.color);
+    doc.roundedRect(cx, y, 1.4, cardH, 0.6, 0.6, 'F');
 
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(6.2);
-    doc.setTextColor(100, 116, 139);
-    doc.text(stat.title, sx + 3, y + 4.8);
+    doc.setFontSize(6.5);
+    doc.setTextColor(...muted);
+    doc.text(fig.title, cx + 4.5, y + 5.5);
 
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9.5);
-    doc.setTextColor(stat.color[0], stat.color[1], stat.color[2]);
-    doc.text(stat.value, sx + 3, y + 10.8);
+    doc.setFontSize(10.5);
+    doc.setTextColor(...fig.color);
+    doc.text(fig.val, cx + 4.5, y + 12.5);
 
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(5.8);
-    doc.setTextColor(100, 116, 139);
-    doc.text(stat.sub, sx + 3, y + 14.8);
+    doc.setFontSize(6);
+    doc.setTextColor(...muted);
+    doc.text(fig.sub, cx + 4.5, y + 16.5);
   });
 
-  y += statBoxH + 6;
+  y += cardH + 6;
 
-  // Formal P&L Statement Table (Financial Statement Form)
+  // Section Header: Statement of Profitability
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.setTextColor(...teal);
+  doc.text('STATEMENT OF PROFITABILITY & MARGINS', left, y + 3.5);
+
+  y += 5.5;
+
+  // Core Financial Table (Light Table Header as requested by user)
   const statementCols: ColumnDef[] = [
-    { header: 'FINANCIAL STATEMENT LINE ITEM', width: 62, align: 'left' },
+    { header: 'ACCOUNT / COMMERCIAL LINE', width: 63, align: 'left' },
     { header: 'CLASSIFICATION', width: 28, align: 'left' },
-    { header: `REPORTED ACTUAL (${symbol})`, width: 32, align: 'right' },
-    { header: '% OF REVENUE', width: 20, align: 'right' },
-    { header: 'PRIOR PERIOD', width: 22, align: 'right' },
-    { header: 'ASSESSMENT', width: 22, align: 'center' },
+    { header: `REPORTED (${symbol})`, width: 30, align: 'right' },
+    { header: '% REVENUE', width: 19, align: 'right' },
+    { header: 'PRIOR PERIOD', width: 21, align: 'right' },
+    { header: 'ASSESSMENT', width: 18.3, align: 'center' },
   ];
 
   const prior = d.priorPeriod;
   const pctOfRev = (val: number | null | undefined) =>
     rev > 0 && val != null ? `${((Number(val) / rev) * 100).toFixed(1)}%` : '0.0%';
 
-  const statementRows = [
+  const statementRows: (string | { text: string; color?: [number, number, number]; bold?: boolean; align?: 'left' | 'right' | 'center' })[][] = [
     [
       'Net Trading Revenue (Turnover)',
       'Operating Sales',
       fmtMoney(rev),
       '100.0%',
       fmtMoney(prior?.revenue),
-      { text: 'Base Income', color: [4, 120, 87], bold: true },
+      { text: 'Base Income', color: emerald, bold: true },
     ],
     [
       'Cost of Goods Sold (COGS)',
@@ -512,39 +531,39 @@ export async function exportProfitabilityPdf(options: ProfitabilityPdfOptions): 
       fmtMoney(cogs),
       pctOfRev(cogs),
       fmtMoney(prior?.cogs),
-      { text: cogs <= rev * 0.4 ? 'Disciplined' : 'Elevated', color: cogs <= rev * 0.4 ? [4, 120, 87] : [180, 83, 9] },
+      { text: cogs <= rev * 0.4 ? 'Disciplined' : 'Elevated', color: cogs <= rev * 0.4 ? emerald : amber },
     ],
     [
-      'GROSS PROFIT',
+      'Gross Profit',
       'Contribution Margin',
       fmtMoney(grossProfit),
       `${grossMargin.toFixed(1)}%`,
       fmtMoney(prior?.grossProfit),
-      { text: grossMargin >= 50 ? 'Strong Contribution' : 'Standard', color: [4, 120, 87], bold: true },
+      { text: grossMargin >= 50 ? 'Strong' : 'Standard', color: emerald, bold: true },
     ],
     [
-      'Operating Expenses (OPEX Overheads)',
-      'Indirect Admin & Opex',
+      'Operating Expenses (OPEX)',
+      'Indirect Overheads',
       fmtMoney(opex),
       pctOfRev(opex),
       fmtMoney(prior?.operatingExpenses),
-      { text: opex < grossProfit ? 'Controlled' : 'Overhead Load', color: opex < grossProfit ? [51, 65, 85] : [190, 18, 60] },
+      { text: opex < grossProfit ? 'Controlled' : 'Overhead Load', color: opex < grossProfit ? navy : rose },
     ],
     [
-      'OPERATING PROFIT (EBIT)',
+      'Operating Profit (EBIT)',
       'Core Trading Surplus',
       fmtMoney(operatingProfit),
       `${operatingMargin.toFixed(1)}%`,
       fmtMoney(prior?.operatingProfit),
-      { text: operatingProfit >= 0 ? 'Profitable' : 'Operating Deficit', color: operatingProfit >= 0 ? [4, 120, 87] : [190, 18, 60], bold: true },
+      { text: operatingProfit >= 0 ? 'Profitable' : 'Deficit', color: operatingProfit >= 0 ? emerald : rose, bold: true },
     ],
     [
-      'EBITDA (Operating Cash Flow proxy)',
-      'Operating Cash Generation',
+      'EBITDA (Operating Cash proxy)',
+      'Cash Generation',
       fmtMoney(ebitda),
       pctOfRev(ebitda),
       'N/A',
-      { text: ebitda >= 0 ? 'Cash Positive' : 'Cash Burn', color: ebitda >= 0 ? [4, 120, 87] : [190, 18, 60] },
+      { text: ebitda >= 0 ? 'Cash Positive' : 'Cash Burn', color: ebitda >= 0 ? emerald : rose },
     ],
     [
       'Depreciation & Amortization',
@@ -552,15 +571,15 @@ export async function exportProfitabilityPdf(options: ProfitabilityPdfOptions): 
       fmtMoney(d.depreciation ?? 0),
       pctOfRev(d.depreciation ?? 0),
       'N/A',
-      { text: 'Non-Cash', color: [100, 116, 139] },
+      { text: 'Non-Cash', color: muted },
     ],
     [
-      'Interest & Financing Expenses',
+      'Interest & Financing Costs',
       'Financing Overheads',
       fmtMoney(d.interestExpenses ?? 0),
       pctOfRev(d.interestExpenses ?? 0),
       'N/A',
-      { text: 'Debt Service', color: [100, 116, 139] },
+      { text: 'Financing', color: muted },
     ],
     [
       'Profit Before Tax (EBT)',
@@ -568,7 +587,7 @@ export async function exportProfitabilityPdf(options: ProfitabilityPdfOptions): 
       fmtMoney(d.profitBeforeTax ?? operatingProfit),
       pctOfRev(d.profitBeforeTax ?? operatingProfit),
       'N/A',
-      { text: 'Taxable Base', color: [51, 65, 85] },
+      { text: 'Taxable Base', color: navy },
     ],
     [
       'Corporation Tax Provision',
@@ -576,114 +595,121 @@ export async function exportProfitabilityPdf(options: ProfitabilityPdfOptions): 
       fmtMoney(d.taxProvision ?? 0),
       pctOfRev(d.taxProvision ?? 0),
       'N/A',
-      { text: 'Tax Liability', color: [100, 116, 139] },
+      { text: 'Tax Accrual', color: muted },
     ],
     [
-      'NET PROFIT (BOTTOM LINE SURPLUS)',
-      'Net Retained Earnings',
+      'Net Profit (Bottom Line)',
+      'Net Retained Surplus',
       fmtMoney(netProfit),
       `${netMargin.toFixed(1)}%`,
       fmtMoney(prior?.netProfit),
-      { text: netProfit >= 0 ? 'Net Surplus' : 'Net Loss', color: netProfit >= 0 ? [4, 120, 87] : [190, 18, 60], bold: true },
+      { text: netProfit >= 0 ? 'Net Surplus' : 'Net Deficit', color: netProfit >= 0 ? emerald : rose, bold: true },
     ],
   ];
 
-  y = renderTable(margin, y, statementCols, statementRows, {
-    headerHeight: 7,
-    rowHeight: 6.2,
+  y = renderTable(left, y, statementCols, statementRows, {
+    headerHeight: 6.8,
+    rowHeight: 5.6,
     fontSize: 6.8,
-    headerFontSize: 6.8,
+    headerFontSize: 6.6,
     zebra: true,
     isTotalRowLast: true,
   });
 
-  y += 7;
+  y += 6;
 
-  // Commercial Diagnostics & Break-Even Form Box
-  doc.setFillColor(248, 250, 252);
-  doc.roundedRect(margin, y, contentWidth, 38, 2, 2, 'F');
-  doc.setDrawColor(226, 232, 240);
-  doc.setLineWidth(0.25);
-  doc.roundedRect(margin, y, contentWidth, 38, 2, 2, 'S');
+  // Visual Profit Bridge & Financial Profile (Management Accounts style — Fills page comfortably)
+  doc.setFillColor(...cardBg);
+  doc.setDrawColor(...border);
+  doc.roundedRect(left, y, tableWidth, 48, 1.8, 1.8, 'FD');
+  doc.setFillColor(...teal);
+  doc.roundedRect(left, y, 1.5, 48, 0.6, 0.6, 'F');
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7.8);
-  doc.setTextColor(15, 23, 42);
-  doc.text('EXECUTIVE COMMERCIAL DIAGNOSTICS & BREAK-EVEN ANALYSIS', margin + 5, y + 6);
+  doc.setFontSize(7.5);
+  doc.setTextColor(...teal);
+  doc.text('PROFIT CONVERSION PROFILE & BREAK-EVEN ANALYSIS', left + 4.5, y + 6);
 
-  // Three column indicators inside the box
-  const diagColW = (contentWidth - 10) / 3;
-  const breakEvenVal = d.breakEvenSales != null ? fmtMoney(d.breakEvenSales) : (grossMargin > 0 ? fmtMoney((opex / (grossMargin / 100))) : 'N/A');
-  const safetyVal = d.marginOfSafetyPct != null ? `${d.marginOfSafetyPct.toFixed(1)}%` : (rev > 0 && opex > 0 && grossMargin > 0 ? `${Math.max(0, ((rev - (opex / (grossMargin / 100))) / rev) * 100).toFixed(1)}%` : 'N/A');
-  const opexAbsorption = rev > 0 ? `${((opex / rev) * 100).toFixed(1)}%` : 'N/A';
-
-  const diagnostics = [
-    { label: 'BREAK-EVEN SALES VOLUME', val: breakEvenVal, desc: 'Sales required to cover all fixed and variable overheads.' },
-    { label: 'MARGIN OF SAFETY', val: safetyVal, desc: 'Buffer before trading operations cross into an operating loss.' },
-    { label: 'OPEX ABSORPTION RATE', val: opexAbsorption, desc: 'Proportion of gross trading revenue absorbed by overheads.' },
+  // Left side: Progress Bars showing profit progression
+  const profileItems = [
+    { label: 'Trading Revenue', value: rev, color: navy },
+    { label: 'Gross Profit', value: grossProfit, color: teal },
+    { label: 'Operating Overheads', value: opex, color: amber },
+    { label: 'Net Profit', value: netProfit, color: netProfit >= 0 ? emerald : rose },
   ];
 
-  diagnostics.forEach((diag, i) => {
-    const dx = margin + 5 + i * diagColW;
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(6.2);
-    doc.setTextColor(100, 116, 139);
-    doc.text(diag.label, dx, y + 13);
+  const maxVal = Math.max(1, rev, grossProfit, opex, Math.abs(netProfit));
+  const trackX = left + 35;
+  const trackW = 55;
 
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9.5);
-    doc.setTextColor(0, 112, 243);
-    doc.text(diag.val, dx, y + 20);
-
+  profileItems.forEach((item, idx) => {
+    const py = y + 14 + idx * 8;
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(5.8);
-    doc.setTextColor(100, 116, 139);
-    doc.text(doc.splitTextToSize(diag.desc, diagColW - 6), dx, y + 25);
+    doc.setFontSize(6.5);
+    doc.setTextColor(...muted);
+    doc.text(item.label, left + 4.5, py + 1.8);
+
+    doc.setFillColor(241, 245, 248);
+    doc.roundedRect(trackX, py - 1, trackW, 3, 1, 1, 'F');
+
+    const fillW = Math.max(2, (Math.abs(item.value) / maxVal) * trackW);
+    doc.setFillColor(...item.color);
+    doc.roundedRect(trackX, py - 1, fillW, 3, 1, 1, 'F');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6.8);
+    doc.setTextColor(...navy);
+    doc.text(fmtMoney(item.value), trackX + trackW + 15, py + 1.8, { align: 'right' });
   });
 
-  // Brief narrative conclusion line
-  doc.setDrawColor(226, 232, 240);
-  doc.setLineWidth(0.15);
-  doc.line(margin + 5, y + 31, margin + contentWidth - 5, y + 31);
+  // Divider inside box
+  doc.setDrawColor(...border);
+  doc.line(left + 112, y + 10, left + 112, y + 44);
 
+  // Right side: Commercial Diagnostics
+  const breakEvenVal = d.breakEvenSales != null ? fmtMoney(d.breakEvenSales) : (grossMargin > 0 ? fmtMoney((opex / (grossMargin / 100))) : 'N/A');
+  const safetyVal = d.marginOfSafetyPct != null ? `${d.marginOfSafetyPct.toFixed(1)}%` : (rev > 0 && opex > 0 && grossMargin > 0 ? `${Math.max(0, ((rev - (opex / (grossMargin / 100))) / rev) * 100).toFixed(1)}%` : 'N/A');
+  const absorptionVal = rev > 0 ? `${((opex / rev) * 100).toFixed(1)}%` : 'N/A';
+
+  const diagX = left + 118;
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(6.2);
-  doc.setTextColor(15, 23, 42);
-  doc.text('Key Observation:', margin + 5, y + 35);
+  doc.setFontSize(6.5);
+  doc.setTextColor(...muted);
+  doc.text('BREAK-EVEN SALES VOLUME', diagX, y + 15);
+  doc.setFontSize(9.5);
+  doc.setTextColor(...teal);
+  doc.text(breakEvenVal, right - 4, y + 15, { align: 'right' });
+
+  doc.setFontSize(6.5);
+  doc.setTextColor(...muted);
+  doc.text('MARGIN OF SAFETY', diagX, y + 25);
+  doc.setFontSize(9.5);
+  doc.setTextColor(...emerald);
+  doc.text(safetyVal, right - 4, y + 25, { align: 'right' });
+
+  doc.setFontSize(6.5);
+  doc.setTextColor(...muted);
+  doc.text('OVERHEAD ABSORPTION RATE', diagX, y + 35);
+  doc.setFontSize(9.5);
+  doc.setTextColor(...navy);
+  doc.text(absorptionVal, right - 4, y + 35, { align: 'right' });
+
   doc.setFont('helvetica', 'normal');
-  doc.setTextColor(71, 85, 105);
-  const narrative = rev > 0 && netProfit >= 0
-    ? `The organization generated ${fmtMoney(rev)} in trading revenue with an operating margin of ${operatingMargin.toFixed(1)}%, converting ${fmtMoney(netProfit)} to bottom-line net profit after absorbing all overheads.`
-    : `Trading volume totaled ${fmtMoney(rev)} with overhead costs absorbing ${fmtMoney(opex)}. Implement cost-rationalization and margin optimization across core customer lines.`;
-  doc.text(narrative, margin + 28, y + 35, { maxWidth: contentWidth - 34 });
+  doc.setFontSize(6);
+  doc.setTextColor(...muted);
+  doc.text('Operating buffer before encountering an accounting deficit.', diagX, y + 42, { maxWidth: tableWidth - 120 });
 
   // =========================================================================
-  // PAGE 3: CUSTOMER REVENUE & COMMERCIAL CONCENTRATION SCHEDULE
+  // PAGE 3: CHAPTER 2 — CUSTOMER REVENUE & COMMERCIAL CONCENTRATION
   // =========================================================================
   doc.addPage();
   drawPageFooter(3);
-  drawRunningHeader('Customer Revenue & Commercial Concentration');
+  drawPageHeaderBanner('Commercial Analysis', 'Customer Revenue & Concentration');
 
-  y = 17;
+  y = 41;
 
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(13);
-  doc.setTextColor(15, 23, 42);
-  doc.text('CUSTOMER REVENUE & MARGIN CONTRIBUTION SCHEDULE', margin, y + 4);
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7.2);
-  doc.setTextColor(100, 116, 139);
-  doc.text(
-    'Detailed invoice activity, revenue volume, and gross profit contribution across commercial clients',
-    margin,
-    y + 9,
-  );
-
-  y += 13;
-
-  // Customer Summary Bar (3 Executive Totals)
-  const custSummaryW = (contentWidth - 2 * 3) / 3;
+  // Customer Summary Bar (3 Executive Cards from Management Accounts Style)
+  const custW = (tableWidth - 6) / 3;
   const customersList = d.customerProfitability || [];
   const totalCustCount = customersList.length;
   const totalCustRev = customersList.reduce((acc, c) => acc + (Number(c.revenue) || 0), 0);
@@ -692,48 +718,57 @@ export async function exportProfitabilityPdf(options: ProfitabilityPdfOptions): 
   const avgCustRev = totalCustCount > 0 ? totalCustRev / totalCustCount : 0;
 
   const custSummary = [
-    { title: 'ACTIVE COMMERCIAL CLIENTS', val: `${totalCustCount} Accounts`, sub: 'Accounts billed in period' },
-    { title: 'TOP CLIENT CONCENTRATION', val: `${top1Share}%`, sub: `Led by ${customersList[0]?.customer || 'N/A'}` },
-    { title: 'AVERAGE REVENUE PER CLIENT', val: fmtMoney(avgCustRev), sub: 'Mean client sales volume' },
+    { title: 'ACTIVE COMMERCIAL CLIENTS', val: `${totalCustCount} Accounts`, sub: 'Billed in current cycle', color: navy },
+    { title: 'TOP CLIENT CONCENTRATION', val: `${top1Share}%`, sub: `Led by ${customersList[0]?.customer || 'N/A'}`, color: top1Share > '40' ? amber : emerald },
+    { title: 'AVERAGE REVENUE PER CLIENT', val: fmtMoney(avgCustRev), sub: 'Mean client sales turnover', color: teal },
   ];
 
   custSummary.forEach((cs, i) => {
-    const cx = margin + i * (custSummaryW + 3);
-    doc.setFillColor(248, 250, 252);
-    doc.rect(cx, y, custSummaryW, 15, 'F');
-    doc.setDrawColor(226, 232, 240);
-    doc.setLineWidth(0.2);
-    doc.rect(cx, y, custSummaryW, 15, 'S');
+    const cx = left + i * (custW + 3);
+    doc.setFillColor(...cardBg);
+    doc.setDrawColor(...border);
+    doc.roundedRect(cx, y, custW, 17, 1.6, 1.6, 'FD');
+    doc.setFillColor(...cs.color);
+    doc.roundedRect(cx, y, 1.4, 17, 0.6, 0.6, 'F');
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(6.2);
-    doc.setTextColor(100, 116, 139);
-    doc.text(cs.title, cx + 3, y + 4.5);
+    doc.setTextColor(...muted);
+    doc.text(cs.title, cx + 4.5, y + 5.2);
 
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
-    doc.setTextColor(15, 23, 42);
-    doc.text(cs.val, cx + 3, y + 10);
+    doc.setFontSize(10);
+    doc.setTextColor(...cs.color);
+    doc.text(cs.val, cx + 4.5, y + 11.5);
 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(5.8);
-    doc.setTextColor(100, 116, 139);
-    doc.text(cs.sub, cx + 3, y + 13.5, { maxWidth: custSummaryW - 6 });
+    doc.setTextColor(...muted);
+    doc.text(cs.sub, cx + 4.5, y + 15);
   });
 
-  y += 15 + 6;
+  y += 22;
 
-  // Formal Customer Performance Table
+  // Section Header
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.setTextColor(...teal);
+  doc.text('CUSTOMER REVENUE & MARGIN CONTRIBUTION SCHEDULE', left, y + 3.5);
+
+  y += 5.5;
+
+  // Full Customer Performance Table (Light Table Header)
   const custCols: ColumnDef[] = [
     { header: '#', width: 8, align: 'center' },
     { header: 'CUSTOMER / COMMERCIAL COUNTERPARTY', width: 68, align: 'left' },
-    { header: 'INVOICES', width: 20, align: 'center' },
-    { header: `SALES VOLUME (${symbol})`, width: 32, align: 'right' },
-    { header: '% OF REVENUE', width: 26, align: 'right' },
-    { header: 'CONTRIBUTION MARGIN', width: 32, align: 'right' },
+    { header: 'INVOICES', width: 22, align: 'center' },
+    { header: `SALES VOLUME (${symbol})`, width: 30, align: 'right' },
+    { header: '% REVENUE', width: 23, align: 'right' },
+    { header: 'CONTRIBUTION MARGIN', width: 28.3, align: 'right' },
   ];
 
-  const custRows = customersList.slice(0, 14).map((cust, idx) => {
+  // Show up to 14 customer rows to fill page comfortably
+  const custRows: (string | { text: string; color?: [number, number, number]; bold?: boolean; align?: 'left' | 'right' | 'center' })[][] = customersList.slice(0, 14).map((cust, idx) => {
     const invCount = Array.isArray(cust.invoices) ? cust.invoices.length : 0;
     const cRev = Number(cust.revenue) || 0;
     const cShare = rev > 0 ? `${((cRev / rev) * 100).toFixed(1)}%` : '0.0%';
@@ -751,7 +786,6 @@ export async function exportProfitabilityPdf(options: ProfitabilityPdfOptions): 
   if (customersList.length === 0) {
     custRows.push(['-', 'No customer invoice records found for this period.', '-', fmtMoney(0), '0.0%', 'N/A']);
   } else {
-    // Total Row
     custRows.push([
       '',
       'TOTAL CUSTOMER SALES ACTIVITY',
@@ -762,94 +796,111 @@ export async function exportProfitabilityPdf(options: ProfitabilityPdfOptions): 
     ]);
   }
 
-  y = renderTable(margin, y, custCols, custRows, {
-    headerHeight: 7,
-    rowHeight: 6,
+  y = renderTable(left, y, custCols, custRows, {
+    headerHeight: 6.8,
+    rowHeight: 5.6,
     fontSize: 6.8,
-    headerFontSize: 6.8,
+    headerFontSize: 6.6,
     zebra: true,
     isTotalRowLast: customersList.length > 0,
   });
 
   y += 7;
 
-  // Margin Distribution Tier Schedule (Replacing toy widgets)
+  // Margin Distribution Tier Table (Management Accounts Style)
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8.5);
-  doc.setTextColor(15, 23, 42);
-  doc.text('COMMERCIAL MARGIN TIER BREAKDOWN', margin, y + 3);
+  doc.setTextColor(...teal);
+  doc.text('COMMERCIAL MARGIN TIER BREAKDOWN', left, y + 3.5);
 
   y += 5.5;
 
   const tierCols: ColumnDef[] = [
-    { header: 'MARGIN CLASSIFICATION TIER', width: 60, align: 'left' },
-    { header: 'QUALIFYING CLIENTS', width: 34, align: 'center' },
-    { header: 'PROPORTION (%)', width: 32, align: 'right' },
-    { header: 'STRATEGIC PORTFOLIO ASSESSMENT', width: 60, align: 'left' },
+    { header: 'MARGIN CLASSIFICATION TIER', width: 55, align: 'left' },
+    { header: 'QUALIFYING CLIENTS', width: 30, align: 'center' },
+    { header: 'PROPORTION (%)', width: 28, align: 'right' },
+    { header: 'STRATEGIC PORTFOLIO ASSESSMENT', width: 66.3, align: 'left' },
   ];
 
   const md = d.marginDistribution;
-  const tierRows = [
+  const tierRows: (string | { text: string; color?: [number, number, number]; bold?: boolean; align?: 'left' | 'right' | 'center' })[][] = [
     [
       'High Contribution Margin (> 50%)',
       String(md?.highMargin?.count ?? 0),
       md?.highMargin?.pct != null ? `${md.highMargin.pct.toFixed(1)}%` : 'N/A',
-      { text: 'Core profitability generator; protect relationship and contract terms.', color: [4, 120, 87] },
+      { text: 'Core profit engine; protect key contract retention terms.', color: emerald },
     ],
     [
       'Medium Contribution Margin (20% – 50%)',
       String(md?.mediumMargin?.count ?? 0),
       md?.mediumMargin?.pct != null ? `${md.mediumMargin.pct.toFixed(1)}%` : 'N/A',
-      { text: 'Stable commercial volume; review opportunities for service upselling.', color: [51, 65, 85] },
+      { text: 'Standard commercial volume; explore service upselling avenues.', color: navy },
     ],
     [
       'Low Contribution Margin (< 20%)',
       String(md?.lowMargin?.count ?? 0),
       md?.lowMargin?.pct != null ? `${md.lowMargin.pct.toFixed(1)}%` : 'N/A',
-      { text: 'Margin dilution risk; audit direct labor and third-party delivery costs.', color: [190, 18, 60] },
+      { text: 'Margin dilution risk; audit service delivery and input costs.', color: rose },
     ],
   ];
 
-  y = renderTable(margin, y, tierCols, tierRows, {
+  y = renderTable(left, y, tierCols, tierRows, {
     headerHeight: 6.5,
-    rowHeight: 6,
+    rowHeight: 5.6,
     fontSize: 6.8,
-    headerFontSize: 6.8,
+    headerFontSize: 6.6,
     zebra: true,
   });
 
+  y += 6;
+
+  // Narrative Concentration Insight Note (Fills bottom of page gracefully)
+  doc.setFillColor(...cardBg);
+  doc.setDrawColor(...border);
+  doc.roundedRect(left, y, tableWidth, 18, 1.6, 1.6, 'FD');
+  doc.setFillColor(...cyanAccent);
+  doc.roundedRect(left, y, 1.4, 18, 0.6, 0.6, 'F');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(6.8);
+  doc.setTextColor(...cyanAccent);
+  doc.text('EXECUTIVE COMMERCIAL OBSERVATION', left + 4.5, y + 5.5);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.5);
+  doc.setTextColor(51, 65, 85);
+  const custNarrative = totalCustCount > 0
+    ? `The commercial client ledger comprises ${totalCustCount} active accounts with total billed turnover of ${fmtMoney(totalCustRev)}. The top customer accounts for ${top1Share}% of revenue, indicating ${top1Share > '40' ? 'moderate customer concentration' : 'a diversified and balanced customer portfolio'}. Continue monitoring gross margins across low-tier accounts to protect overall EBITDA.`
+    : 'No active commercial client transactions were recorded in Xero during this reporting cycle.';
+  doc.text(custNarrative, left + 4.5, y + 10.5, { maxWidth: tableWidth - 10 });
+
   // =========================================================================
-  // PAGE 4: PRODUCT ECONOMICS, TRACKING & GOVERNANCE SIGN-OFF
+  // PAGE 4: CHAPTER 3 — PRODUCT ECONOMICS, TRACKING & GOVERNANCE SIGN-OFF
   // =========================================================================
   doc.addPage();
   drawPageFooter(4);
-  drawRunningHeader('Product Economics, Departmental Tracking & Governance');
+  drawPageHeaderBanner('Unit Economics & Governance', 'Catalog Economics & Governance');
 
-  y = 17;
+  y = 41;
 
-  // Section 1: Product / Service Profitability Table
+  // Section 1: Product / Service Profitability Schedule
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10.5);
-  doc.setTextColor(15, 23, 42);
-  doc.text('Product & Service Profitability Schedule', margin, y + 3);
+  doc.setFontSize(8.5);
+  doc.setTextColor(...teal);
+  doc.text('PRODUCT & SERVICE PROFITABILITY SCHEDULE', left, y + 3.5);
 
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(6.8);
-  doc.setTextColor(100, 116, 139);
-  doc.text('Trading revenues and gross margins across catalog inventory and professional billing items', margin, y + 7.5);
-
-  y += 10.5;
+  y += 5.5;
 
   const prodCols: ColumnDef[] = [
     { header: '#', width: 8, align: 'center' },
-    { header: 'PRODUCT / SERVICE ITEM', width: 72, align: 'left' },
-    { header: `REVENUE (${symbol})`, width: 34, align: 'right' },
-    { header: `GROSS PROFIT (${symbol})`, width: 36, align: 'right' },
-    { header: 'MARGIN (%)', width: 36, align: 'right' },
+    { header: 'CATALOG ITEM / SERVICE DESCRIPTION', width: 73, align: 'left' },
+    { header: `REVENUE (${symbol})`, width: 32, align: 'right' },
+    { header: `GROSS PROFIT (${symbol})`, width: 33, align: 'right' },
+    { header: 'MARGIN (%)', width: 33.3, align: 'right' },
   ];
 
-  const productsList = (d.productProfitability || []).slice(0, 7);
-  const prodRows = productsList.map((prod, pIdx) => [
+  const productsList = (d.productProfitability || []).slice(0, 6);
+  const prodRows: (string | { text: string; color?: [number, number, number]; bold?: boolean; align?: 'left' | 'right' | 'center' })[][] = productsList.map((prod, pIdx) => [
     String(pIdx + 1),
     prod.product,
     fmtMoney(prod.revenue),
@@ -861,39 +912,34 @@ export async function exportProfitabilityPdf(options: ProfitabilityPdfOptions): 
     prodRows.push(['-', 'No product/service catalog items recorded in this period.', fmtMoney(0), fmtMoney(0), 'N/A']);
   }
 
-  y = renderTable(margin, y, prodCols, prodRows, {
+  y = renderTable(left, y, prodCols, prodRows, {
     headerHeight: 6.5,
-    rowHeight: 5.8,
+    rowHeight: 5.5,
     fontSize: 6.8,
-    headerFontSize: 6.8,
+    headerFontSize: 6.6,
     zebra: true,
   });
 
-  y += 7;
+  y += 6;
 
   // Section 2: Department / Regional Tracking Table
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10.5);
-  doc.setTextColor(15, 23, 42);
-  doc.text('Departmental & Regional Tracking Performance', margin, y + 3);
+  doc.setFontSize(8.5);
+  doc.setTextColor(...teal);
+  doc.text('DEPARTMENTAL & REGIONAL TRACKING PERFORMANCE', left, y + 3.5);
 
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(6.8);
-  doc.setTextColor(100, 116, 139);
-  doc.text('Financial contribution segregated by Xero tracking categories, cost centers, or regions', margin, y + 7.5);
-
-  y += 10.5;
+  y += 5.5;
 
   const deptCols: ColumnDef[] = [
     { header: '#', width: 8, align: 'center' },
-    { header: 'DEPARTMENT / TRACKING CATEGORY', width: 72, align: 'left' },
-    { header: `REVENUE (${symbol})`, width: 34, align: 'right' },
-    { header: `GROSS PROFIT (${symbol})`, width: 36, align: 'right' },
-    { header: 'MARGIN (%)', width: 36, align: 'right' },
+    { header: 'DEPARTMENT / REGIONAL TRACKING CATEGORY', width: 73, align: 'left' },
+    { header: `REVENUE (${symbol})`, width: 32, align: 'right' },
+    { header: `GROSS PROFIT (${symbol})`, width: 33, align: 'right' },
+    { header: 'MARGIN (%)', width: 33.3, align: 'right' },
   ];
 
   const deptList = (d.departmentProfitability || []).slice(0, 5);
-  const deptRows = deptList.map((dept, dIdx) => [
+  const deptRows: (string | { text: string; color?: [number, number, number]; bold?: boolean; align?: 'left' | 'right' | 'center' })[][] = deptList.map((dept, dIdx) => [
     String(dIdx + 1),
     dept.department,
     fmtMoney(dept.revenue),
@@ -905,39 +951,34 @@ export async function exportProfitabilityPdf(options: ProfitabilityPdfOptions): 
     deptRows.push(['-', 'No tracking categories recorded in this period.', fmtMoney(0), fmtMoney(0), 'N/A']);
   }
 
-  y = renderTable(margin, y, deptCols, deptRows, {
+  y = renderTable(left, y, deptCols, deptRows, {
     headerHeight: 6.5,
-    rowHeight: 5.8,
+    rowHeight: 5.5,
     fontSize: 6.8,
-    headerFontSize: 6.8,
+    headerFontSize: 6.6,
     zebra: true,
   });
 
-  y += 7;
+  y += 6;
 
-  // Section 3: Operating Overheads & Budget Variance Schedule
+  // Section 3: Operating Expense Analysis & Ledger Breakdown
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10.5);
-  doc.setTextColor(15, 23, 42);
-  doc.text('Operating Expenses & Ledger Variance Analysis', margin, y + 3);
+  doc.setFontSize(8.5);
+  doc.setTextColor(...teal);
+  doc.text('OPERATING EXPENSE ANALYSIS & BUDGET VARIANCE', left, y + 3.5);
 
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(6.8);
-  doc.setTextColor(100, 116, 139);
-  doc.text('Variance analysis comparing active operating budget items with verified actuals', margin, y + 7.5);
+  y += 5.5;
 
-  y += 10.5;
-
-  const budgetCols: ColumnDef[] = [
-    { header: 'EXPENSE CATEGORY / ACCOUNT', width: 68, align: 'left' },
-    { header: `BUDGET (${symbol})`, width: 30, align: 'right' },
-    { header: `ACTUAL (${symbol})`, width: 30, align: 'right' },
-    { header: `VARIANCE (${symbol})`, width: 30, align: 'right' },
-    { header: 'STATUS', width: 28, align: 'center' },
+  const expCols: ColumnDef[] = [
+    { header: 'EXPENSE ACCOUNT CLASSIFICATION', width: 68, align: 'left' },
+    { header: `BUDGET (${symbol})`, width: 28, align: 'right' },
+    { header: `ACTUAL (${symbol})`, width: 28, align: 'right' },
+    { header: `VARIANCE (${symbol})`, width: 28, align: 'right' },
+    { header: 'STATUS', width: 27.3, align: 'center' },
   ];
 
   const budgetItems = (d.budgetVsActual || []).slice(0, 5);
-  const budgetRows: (string | { text: string; color?: number[]; bold?: boolean; align?: 'left' | 'right' | 'center' })[][] = budgetItems.map((item) => {
+  const expRows: (string | { text: string; color?: [number, number, number]; bold?: boolean; align?: 'left' | 'right' | 'center' })[][] = budgetItems.map((item) => {
     const diff = Number(item.actual) - Number(item.budget);
     const isFavorable = diff <= 0;
     return [
@@ -945,76 +986,75 @@ export async function exportProfitabilityPdf(options: ProfitabilityPdfOptions): 
       fmtMoney(item.budget),
       fmtMoney(item.actual),
       fmtMoney(diff),
-      { text: isFavorable ? 'On Budget' : 'Over Budget', color: isFavorable ? [4, 120, 87] : [190, 18, 60], bold: true },
+      { text: isFavorable ? 'On Budget' : 'Over Budget', color: isFavorable ? emerald : rose, bold: true },
     ];
   });
 
   if (budgetItems.length === 0) {
-    // Fall back to top expense analysis items if budgetItems is empty
     const expenseItems = (d.expenseAnalysis || []).slice(0, 5);
     if (expenseItems.length > 0) {
       expenseItems.forEach((exp) => {
-        budgetRows.push([
+        expRows.push([
           exp.account,
           fmtMoney(0),
           fmtMoney(exp.actual),
           fmtMoney(exp.actual),
-          { text: exp.accountType || 'Expense', color: [100, 116, 139] },
+          { text: exp.accountType || 'Expense', color: muted },
         ]);
       });
     } else {
-      budgetRows.push(['No operating expense records identified for this reporting cycle.', fmtMoney(0), fmtMoney(0), fmtMoney(0), 'N/A']);
+      expRows.push(['No operating expense records identified for this reporting cycle.', fmtMoney(0), fmtMoney(0), fmtMoney(0), 'N/A']);
     }
   }
 
-  y = renderTable(margin, y, budgetCols, budgetRows, {
+  y = renderTable(left, y, expCols, expRows, {
     headerHeight: 6.5,
-    rowHeight: 5.6,
+    rowHeight: 5.5,
     fontSize: 6.8,
-    headerFontSize: 6.8,
+    headerFontSize: 6.6,
     zebra: true,
   });
 
-  y += 7;
+  y += 6;
 
-  // Section 4: Formal Governance Sign-Off Certificate (Formal Document Block)
-  doc.setFillColor(248, 250, 252);
-  doc.rect(margin, y, contentWidth, 23, 'F');
-  doc.setDrawColor(226, 232, 240);
-  doc.setLineWidth(0.25);
-  doc.rect(margin, y, contentWidth, 23, 'S');
+  // Section 4: Formal Governance Sign-Off Certificate (Fills bottom of Page 4)
+  doc.setFillColor(...cardBg);
+  doc.setDrawColor(...border);
+  doc.roundedRect(left, y, tableWidth, 25, 1.8, 1.8, 'FD');
+  doc.setFillColor(...teal);
+  doc.roundedRect(left, y, 1.5, 25, 0.6, 0.6, 'F');
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(7.5);
-  doc.setTextColor(15, 23, 42);
-  doc.text('EXECUTIVE CFO ATTESTATION & GOVERNANCE SIGN-OFF', margin + 4, y + 5);
+  doc.setTextColor(...navy);
+  doc.text('EXECUTIVE CFO ATTESTATION & GOVERNANCE SIGN-OFF', left + 4.5, y + 5.5);
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(6.2);
-  doc.setTextColor(100, 116, 139);
+  doc.setFontSize(6.3);
+  doc.setTextColor(...muted);
   doc.text(
-    'This profitability report has been prepared from verified Xero general ledger journals, sales invoices, and bills.',
-    margin + 4,
-    y + 9.5,
+    'This profitability statement has been compiled directly from verified Xero general ledger journals, sales invoices, and bills.',
+    left + 4.5,
+    y + 10,
   );
   doc.text(
-    'Sales taxes (GST/VAT) are strictly excluded from gross revenue. All line items are reconciled under standard accrual accounting.',
-    margin + 4,
-    y + 13.5,
+    'Sales taxes (GST/VAT) have been excluded from revenue in strict compliance with accrual accounting principles.',
+    left + 4.5,
+    y + 14.5,
   );
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(6.8);
-  doc.setTextColor(0, 112, 243);
-  doc.text(`Status: Live Ledger Reconciled · Currency: ${currency}`, margin + 4, y + 19);
+  doc.setFontSize(7);
+  doc.setTextColor(...teal);
+  doc.text(`Status: Live Ledger Reconciled  |  Reporting Currency: ${currency}`, left + 4.5, y + 20.5);
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(6.5);
-  doc.setTextColor(100, 116, 139);
+  doc.setTextColor(...muted);
   doc.text(
-    `Certified Date: ${new Date().toLocaleDateString('en-GB')}  |  Chief Financial Officer Review`,
-    margin + contentWidth - 4,
-    y + 19,
+    `Certified: ${new Date().toLocaleDateString('en-GB')}  |  Chief Financial Officer Review`,
+    right - 4,
+    y + 20.5,
     { align: 'right' },
   );
 
